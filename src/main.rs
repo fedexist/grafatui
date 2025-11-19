@@ -62,24 +62,25 @@ async fn main() -> Result<()> {
     let refresh_every = app::parse_duration(&args.refresh_every).context("--refresh-every")?;
 
     let mut vars: HashMap<String, String> = HashMap::new();
-    for kv in &args.vars {
-        if let Some((k, v)) = kv.split_once('=') {
-            vars.insert(k.to_string(), v.to_string());
-        }
-    }
 
     let prom = prom::PromClient::new(args.prometheus.clone());
 
     // Build panels from Grafana import or simple queries.
-    let (title, panels) = if let Some(path) = args.grafana_json.as_ref() {
+    let (title, panels, skipped_panels) = if let Some(path) = args.grafana_json.as_ref() {
         match grafana::load_grafana_dashboard(path) {
             Ok(d) => {
+                // Seed vars from dashboard defaults
+                for (k, v) in d.vars {
+                    vars.insert(k, v);
+                }
+
                 let ps = d
                     .queries
                     .into_iter()
                     .map(|q| app::PanelState {
                         title: q.title,
                         exprs: q.exprs,
+                        legends: q.legends,
                         series: vec![],
                         last_error: None,
                         last_url: None,
@@ -92,18 +93,33 @@ async fn main() -> Result<()> {
                         }),
                     })
                     .collect();
-                (format!("{} (imported)", d.title), ps)
+                (format!("{} (imported)", d.title), ps, d.skipped_panels)
             }
             Err(e) => {
                 eprintln!("Failed to import Grafana dashboard: {e}");
-                ("grafatui".to_string(), app::default_queries(args.query))
+                ("grafatui".to_string(), app::default_queries(args.query), 0)
             }
         }
     } else {
-        ("grafatui".to_string(), app::default_queries(args.query))
+        ("grafatui".to_string(), app::default_queries(args.query), 0)
     };
 
-    let mut state = app::AppState::new(prom, range, step, refresh_every, title, panels);
+    // CLI vars override dashboard defaults
+    for kv in &args.vars {
+        if let Some((k, v)) = kv.split_once('=') {
+            vars.insert(k.to_string(), v.to_string());
+        }
+    }
+
+    let mut state = app::AppState::new(
+        prom,
+        range,
+        step,
+        refresh_every,
+        title,
+        panels,
+        skipped_panels,
+    );
     state.vars = vars; // <— pass variables into the app
     state.refresh().await?;
 

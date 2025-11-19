@@ -44,12 +44,13 @@ pub fn draw_ui(frame: &mut Frame, app: &AppState) {
     // Footer / Status bar
     let errors = app.panels.iter().filter(|p| p.last_error.is_some()).count();
     let summary = format!(
-        "Prom: {} | range={} step={:?} refresh={} | panels={} errors={} | keys: ↑/↓ scroll, r refresh, +/- range, q quit, ? debug:{}",
+        "Prom: {} | range={} step={:?} refresh={} | panels={} (skipped {}) errors={} | keys: ↑/↓ scroll, r refresh, +/- range, q quit, ? debug:{}",
         app.prometheus.base,
         format_duration(app.range),
         app.step,
         format_duration(app.refresh_every),
         app.panels.len(),
+        app.skipped_panels,
         errors,
         if app.debug_bar { "on" } else { "off" }
     );
