@@ -105,10 +105,12 @@ fn render_panel(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
         .series
         .iter()
         .map(|s| {
+            let color = get_color_for_series(&s.legend);
             Dataset::default()
-                .name(s.legend.clone())
-                .marker(ratatui::symbols::Marker::Braille)
+                .name(s.legend.as_str())
+                .marker(symbols::Marker::Braille)
                 .graph_type(GraphType::Line)
+                .style(Style::default().fg(color))
                 .data(&s.points)
         })
         .collect();
@@ -305,4 +307,31 @@ fn calculate_y_bounds(series: &[crate::app::SeriesView]) -> (f64, f64) {
         ymax = ymin + 1.0;
     }
     (ymin, ymax)
+}
+
+fn get_color_for_series(name: &str) -> Color {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let palette = [
+        Color::Red,
+        Color::Green,
+        Color::Yellow,
+        Color::Blue,
+        Color::Magenta,
+        Color::Cyan,
+        Color::LightRed,
+        Color::LightGreen,
+        Color::LightYellow,
+        Color::LightBlue,
+        Color::LightMagenta,
+        Color::LightCyan,
+        Color::White, // Fallback, though maybe avoid if background is dark?
+    ];
+
+    let mut hasher = DefaultHasher::new();
+    name.hash(&mut hasher);
+    let hash = hasher.finish();
+
+    palette[(hash as usize) % palette.len()]
 }
