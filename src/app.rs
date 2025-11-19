@@ -128,10 +128,17 @@ impl AppState {
             match prometheus.query_range(&expr_expanded, range, step).await {
                 Ok(res) => {
                     for s in res {
+                        let latest_val = s.values.last().and_then(|(_, v)| v.parse::<f64>().ok());
+                        let val_str = if let Some(v) = latest_val {
+                            format!(" ({:.2})", v)
+                        } else {
+                            String::new()
+                        };
+
                         let legend = if let Some(fmt) = legend_fmt {
-                            format_legend(fmt, &s.metric)
+                            format!("{}{}", format_legend(fmt, &s.metric), val_str)
                         } else if s.metric.is_empty() {
-                            expr_expanded.clone()
+                            format!("{}{}", expr_expanded, val_str)
                         } else {
                             let mut labels: Vec<_> = s
                                 .metric
@@ -139,7 +146,7 @@ impl AppState {
                                 .map(|(k, v)| format!("{}=\"{}\"", k, v))
                                 .collect();
                             labels.sort();
-                            format!("{} {{{}}}", expr_expanded, labels.join(", "))
+                            format!("{} {{{}}}{}", expr_expanded, labels.join(", "), val_str)
                         };
                         let mut pts = Vec::with_capacity(s.values.len());
                         for (ts, val) in s.values {
@@ -313,6 +320,18 @@ pub async fn run_app<B: ratatui::backend::Backend>(
                     }
                     KeyCode::Down => {
                         app.vertical_scroll = app.vertical_scroll.saturating_add(1);
+                    }
+                    KeyCode::PageUp => {
+                        app.vertical_scroll = app.vertical_scroll.saturating_sub(10);
+                    }
+                    KeyCode::PageDown => {
+                        app.vertical_scroll = app.vertical_scroll.saturating_add(10);
+                    }
+                    KeyCode::Home => {
+                        app.vertical_scroll = 0;
+                    }
+                    KeyCode::End => {
+                        app.vertical_scroll = usize::MAX; // Will be clamped by rendering logic usually, or we should track max height
                     }
                     KeyCode::Char('+') => {
                         app.range = app.range.saturating_mul(2);
