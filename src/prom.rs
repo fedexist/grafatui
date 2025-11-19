@@ -12,10 +12,32 @@ pub struct PromClient {
 
 impl PromClient {
     pub fn new(base: String) -> Self {
-        Self {
-            base,
-            http: Client::new(),
-        }
+        let http = Client::builder()
+            .timeout(Duration::from_secs(10))
+            .connect_timeout(Duration::from_secs(5))
+            .build()
+            .unwrap_or_else(|_| Client::new());
+
+        Self { base, http }
+    }
+
+    pub fn build_query_range_url(
+        &self,
+        expr: &str,
+        start: i64,
+        end: i64,
+        step: Duration,
+    ) -> String {
+        let step_s = step.as_secs().max(1);
+        let step_param = format!("{}s", step_s);
+        format!(
+            "{}/api/v1/query_range?query={}&start={}&end={}&step={}",
+            self.base.trim_end_matches('/'),
+            urlencoding::encode(expr),
+            start,
+            end,
+            step_param
+        )
     }
 
     pub async fn query_range(
@@ -26,33 +48,57 @@ impl PromClient {
     ) -> Result<Vec<Series>> {
         let end = Utc::now().timestamp();
         let start = end - (range.as_secs() as i64);
-        let step_s = step.as_secs().max(1);
-        let step_param = format!("{}s", step_s);
-        let url = format!(
-            "{}/api/v1/query_range?query={}&start={}&end={}&step={}",
-            self.base.trim_end_matches('/'),
-            urlencoding::encode(expr),
-            start,
-            end,
-            step_param
-        );
+        let url = self.build_query_range_url(expr, start, end, step);
 
-        // Better error visibility: read text to surface server messages (e.g., invalid step)
-        let resp = self.http.get(&url).send().await?;
-        let status = resp.status();
-        let text = resp.text().await?;
-        if !status.is_success() {
-            return Err(anyhow!("prometheus {}: {}", status, text));
+        let max_retries = 3;
+        let mut last_err = anyhow!("unknown error");
+
+        for attempt in 0..=max_retries {
+            if attempt > 0 {
+                tokio::time::sleep(Duration::from_millis(100 * (1 << attempt))).await;
+            }
+
+            match self.http.get(&url).send().await {
+                Ok(resp) => {
+                    let status = resp.status();
+                    match resp.text().await {
+                        Ok(text) => {
+                            if !status.is_success() {
+                                last_err = anyhow!("prometheus {}: {}", status, text);
+                                continue;
+                            }
+                            match serde_json::from_str::<QueryRangeResponse>(&text) {
+                                Ok(body) => {
+                                    if body.status != "success" {
+                                        last_err = anyhow!(
+                                            "prometheus error status: {} — body: {}",
+                                            body.status,
+                                            text
+                                        );
+                                        continue;
+                                    }
+                                    return Ok(body.data.result);
+                                }
+                                Err(e) => {
+                                    last_err = anyhow!("parsing json: {} (body: {})", e, text);
+                                    continue;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            last_err = anyhow!("reading text: {}", e);
+                            continue;
+                        }
+                    }
+                }
+                Err(e) => {
+                    last_err = anyhow!("request failed: {}", e);
+                    continue;
+                }
+            }
         }
-        let body: QueryRangeResponse = serde_json::from_str(&text)?;
-        if body.status != "success" {
-            return Err(anyhow!(
-                "prometheus error status: {} — body: {}",
-                body.status,
-                text
-            ));
-        }
-        Ok(body.data.result)
+
+        Err(last_err)
     }
 }
 
@@ -64,7 +110,8 @@ pub struct QueryRangeResponse {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct QueryRangeData {
-    pub resultType: String,
+    #[serde(rename = "resultType")]
+    pub result_type: String,
     pub result: Vec<Series>,
 }
 
@@ -72,4 +119,55 @@ pub struct QueryRangeData {
 pub struct Series {
     pub metric: std::collections::HashMap<String, String>,
     pub values: Vec<(f64, String)>, // (ts, value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_query_range_url() {
+        let client = PromClient::new("http://localhost:9090".to_string());
+        let expr = "up{job=\"node\"}";
+        let start = 1600000000;
+        let end = 1600003600;
+        let step = Duration::from_secs(60);
+
+        let url = client.build_query_range_url(expr, start, end, step);
+        assert_eq!(
+            url,
+            "http://localhost:9090/api/v1/query_range?query=up%7Bjob%3D%22node%22%7D&start=1600000000&end=1600003600&step=60s"
+        );
+    }
+
+    #[test]
+    fn test_deserialize_query_range_response() {
+        let json = r#"
+        {
+            "status": "success",
+            "data": {
+                "resultType": "matrix",
+                "result": [
+                    {
+                        "metric": {
+                            "__name__": "up",
+                            "job": "prometheus"
+                        },
+                        "values": [
+                            [1435781451.781, "1"],
+                            [1435781466.781, "1"]
+                        ]
+                    }
+                ]
+            }
+        }
+        "#;
+
+        let resp: QueryRangeResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.status, "success");
+        assert_eq!(resp.data.result_type, "matrix");
+        assert_eq!(resp.data.result.len(), 1);
+        assert_eq!(resp.data.result[0].metric.get("job").unwrap(), "prometheus");
+        assert_eq!(resp.data.result[0].values.len(), 2);
+    }
 }
