@@ -12,6 +12,7 @@ use tokio::time::sleep;
 pub struct PanelState {
     pub title: String,
     pub exprs: Vec<String>,
+    pub legends: Vec<Option<String>>, // Parallel to exprs
     pub series: Vec<SeriesView>,
     pub last_error: Option<String>,
     pub last_url: Option<String>,
@@ -45,6 +46,7 @@ pub struct AppState {
     pub title: String,
     pub debug_bar: bool,
     pub vars: HashMap<String, String>,
+    pub skipped_panels: usize,
 }
 
 impl AppState {
@@ -55,6 +57,7 @@ impl AppState {
         refresh_every: Duration,
         title: String,
         panels: Vec<PanelState>,
+        skipped_panels: usize,
     ) -> Self {
         Self {
             prometheus,
@@ -67,6 +70,7 @@ impl AppState {
             title,
             debug_bar: false,
             vars: HashMap::new(),
+            skipped_panels,
         }
     }
 
@@ -110,8 +114,9 @@ impl AppState {
         let mut last_url = None;
         let mut error = None;
 
-        for expr in &p.exprs {
+        for (i, expr) in p.exprs.iter().enumerate() {
             let expr_expanded = expand_expr(expr, step, vars);
+            let legend_fmt = p.legends.get(i).and_then(|x| x.as_ref());
 
             // Calculate start/end for URL display purposes
             let end_ts = chrono::Utc::now().timestamp();
@@ -123,7 +128,9 @@ impl AppState {
             match prometheus.query_range(&expr_expanded, range, step).await {
                 Ok(res) => {
                     for s in res {
-                        let legend = if s.metric.is_empty() {
+                        let legend = if let Some(fmt) = legend_fmt {
+                            format_legend(fmt, &s.metric)
+                        } else if s.metric.is_empty() {
                             expr_expanded.clone()
                         } else {
                             let mut labels: Vec<_> = s
@@ -184,6 +191,16 @@ fn expand_expr(expr: &str, step: Duration, vars: &HashMap<String, String>) -> St
     s
 }
 
+fn format_legend(fmt: &str, metric: &HashMap<String, String>) -> String {
+    let mut out = fmt.to_string();
+    // Replace {{label}} with value
+    // This is a simple replacement, Grafana supports more complex syntax but this covers 90%
+    for (k, v) in metric {
+        out = out.replace(&format!("{{{{{}}}}}", k), v);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -231,6 +248,19 @@ mod tests {
             "rate(http_requests_total{job=\"node-exporter\", instance=\"localhost:9100\"}[60s])"
         );
     }
+
+    #[test]
+    fn test_format_legend() {
+        let mut metric = HashMap::new();
+        metric.insert("job".to_string(), "node".to_string());
+        metric.insert("instance".to_string(), "localhost".to_string());
+
+        let fmt = "Job: {{job}} - {{instance}}";
+        assert_eq!(format_legend(fmt, &metric), "Job: node - localhost");
+
+        let fmt2 = "Static Text";
+        assert_eq!(format_legend(fmt2, &metric), "Static Text");
+    }
 }
 
 pub fn default_queries(mut provided: Vec<String>) -> Vec<PanelState> {
@@ -246,6 +276,7 @@ pub fn default_queries(mut provided: Vec<String>) -> Vec<PanelState> {
         .map(|q| PanelState {
             title: q.clone(),
             exprs: vec![q],
+            legends: vec![None],
             series: vec![],
             last_error: None,
             last_url: None,
