@@ -58,47 +58,44 @@ impl PromClient {
                 tokio::time::sleep(Duration::from_millis(100 * (1 << attempt))).await;
             }
 
-            match self.http.get(&url).send().await {
-                Ok(resp) => {
-                    let status = resp.status();
-                    match resp.text().await {
-                        Ok(text) => {
-                            if !status.is_success() {
-                                last_err = anyhow!("prometheus {}: {}", status, text);
-                                continue;
-                            }
-                            match serde_json::from_str::<QueryRangeResponse>(&text) {
-                                Ok(body) => {
-                                    if body.status != "success" {
-                                        last_err = anyhow!(
-                                            "prometheus error status: {} — body: {}",
-                                            body.status,
-                                            text
-                                        );
-                                        continue;
-                                    }
-                                    return Ok(body.data.result);
-                                }
-                                Err(e) => {
-                                    last_err = anyhow!("parsing json: {} (body: {})", e, text);
-                                    continue;
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            last_err = anyhow!("reading text: {}", e);
-                            continue;
-                        }
-                    }
-                }
-                Err(e) => {
-                    last_err = anyhow!("request failed: {}", e);
-                    continue;
-                }
+            match self.perform_request(&url).await {
+                Ok(series) => return Ok(series),
+                Err(e) => last_err = e,
             }
         }
 
         Err(last_err)
+    }
+
+    async fn perform_request(&self, url: &str) -> Result<Vec<Series>> {
+        let resp = self
+            .http
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| anyhow!("request failed: {}", e))?;
+        let status = resp.status();
+        let text = resp
+            .text()
+            .await
+            .map_err(|e| anyhow!("reading text: {}", e))?;
+
+        if !status.is_success() {
+            return Err(anyhow!("prometheus {}: {}", status, text));
+        }
+
+        let body: QueryRangeResponse = serde_json::from_str(&text)
+            .map_err(|e| anyhow!("parsing json: {} (body: {})", e, text))?;
+
+        if body.status != "success" {
+            return Err(anyhow!(
+                "prometheus error status: {} — body: {}",
+                body.status,
+                text
+            ));
+        }
+
+        Ok(body.data.result)
     }
 }
 

@@ -98,22 +98,7 @@ fn render_panel(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
     let end = Utc::now().timestamp() as f64;
     let start = end - app.range.as_secs_f64();
 
-    // Y bounds quick scan (fallback to 0..1)
-    let mut ymin = f64::INFINITY;
-    let mut ymax = f64::NEG_INFINITY;
-    for s in &p.series {
-        for &(_, y) in &s.points {
-            ymin = ymin.min(y);
-            ymax = ymax.max(y);
-        }
-    }
-    if !ymin.is_finite() || !ymax.is_finite() {
-        ymin = 0.0;
-        ymax = 1.0;
-    }
-    if (ymax - ymin).abs() < 1e-9 {
-        ymax = ymin + 1.0;
-    }
+    let (ymin, ymax) = calculate_y_bounds(&p.series);
 
     let datasets: Vec<Dataset> = p
         .series
@@ -295,10 +280,28 @@ fn render_grafana_grid(frame: &mut Frame, area: Rect, app: &AppState) {
         }
     }
 
-    // If nothing rendered (tiny terminal), just draw a hint
     if !rendered_any {
         let hint = Paragraph::new("Not enough space for Grafana grid; enlarge terminal.")
             .block(Block::default().borders(Borders::ALL).title("Layout"));
         frame.render_widget(hint, area);
     }
+}
+
+fn calculate_y_bounds(series: &[crate::app::SeriesView]) -> (f64, f64) {
+    let mut ymin = f64::INFINITY;
+    let mut ymax = f64::NEG_INFINITY;
+    for s in series {
+        for &(_, y) in &s.points {
+            ymin = ymin.min(y);
+            ymax = ymax.max(y);
+        }
+    }
+    if !ymin.is_finite() || !ymax.is_finite() {
+        ymin = 0.0;
+        ymax = 1.0;
+    }
+    if (ymax - ymin).abs() < 1e-9 {
+        ymax = ymin + 1.0;
+    }
+    (ymin, ymax)
 }
