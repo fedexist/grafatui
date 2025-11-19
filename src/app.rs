@@ -78,60 +78,7 @@ impl AppState {
 
         // Create a stream of futures for fetching panel data
         let mut futures = futures::stream::iter(self.panels.iter_mut())
-            .map(|p| async move {
-                let mut panel_results = Vec::new();
-                let mut last_url = None;
-                let mut error = None;
-
-                for expr in &p.exprs {
-                    let expr_expanded = expand_expr(expr, step, vars);
-
-                    // Calculate start/end for URL display purposes
-                    let end_ts = chrono::Utc::now().timestamp();
-                    let start_ts = end_ts - (range.as_secs() as i64);
-
-                    let url =
-                        prometheus.build_query_range_url(&expr_expanded, start_ts, end_ts, step);
-                    last_url = Some(url);
-
-                    match prometheus.query_range(&expr_expanded, range, step).await {
-                        Ok(res) => {
-                            for s in res {
-                                let legend = if s.metric.is_empty() {
-                                    expr_expanded.clone()
-                                } else {
-                                    let mut labels: Vec<_> = s
-                                        .metric
-                                        .iter()
-                                        .map(|(k, v)| format!("{}=\"{}\"", k, v))
-                                        .collect();
-                                    labels.sort();
-                                    format!("{} {{{}}}", expr_expanded, labels.join(", "))
-                                };
-                                let mut pts = Vec::with_capacity(s.values.len());
-                                for (ts, val) in s.values {
-                                    if let Ok(y) = val.parse::<f64>() {
-                                        if y.is_finite() {
-                                            pts.push((ts, y));
-                                        }
-                                    }
-                                }
-                                panel_results.push(SeriesView {
-                                    legend,
-                                    points: pts,
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            error =
-                                Some(format!("query_range failed for `{}`: {}", expr_expanded, e));
-                            // If one query in the panel fails, we record the error but maybe continue?
-                            // For now, let's keep the error.
-                        }
-                    }
-                }
-                (p, panel_results, last_url, error)
-            })
+            .map(|p| Self::fetch_single_panel_data(prometheus, p, range, step, vars))
             .buffer_unordered(4); // Max 4 concurrent panel refreshes
 
         while let Some((p, results, url, err)) = futures.next().await {
@@ -145,6 +92,68 @@ impl AppState {
 
         self.last_refresh = Instant::now();
         Ok(())
+    }
+
+    async fn fetch_single_panel_data<'a>(
+        prometheus: &'a prom::PromClient,
+        p: &'a mut PanelState,
+        range: Duration,
+        step: Duration,
+        vars: &'a HashMap<String, String>,
+    ) -> (
+        &'a mut PanelState,
+        Vec<SeriesView>,
+        Option<String>,
+        Option<String>,
+    ) {
+        let mut panel_results = Vec::new();
+        let mut last_url = None;
+        let mut error = None;
+
+        for expr in &p.exprs {
+            let expr_expanded = expand_expr(expr, step, vars);
+
+            // Calculate start/end for URL display purposes
+            let end_ts = chrono::Utc::now().timestamp();
+            let start_ts = end_ts - (range.as_secs() as i64);
+
+            let url = prometheus.build_query_range_url(&expr_expanded, start_ts, end_ts, step);
+            last_url = Some(url);
+
+            match prometheus.query_range(&expr_expanded, range, step).await {
+                Ok(res) => {
+                    for s in res {
+                        let legend = if s.metric.is_empty() {
+                            expr_expanded.clone()
+                        } else {
+                            let mut labels: Vec<_> = s
+                                .metric
+                                .iter()
+                                .map(|(k, v)| format!("{}=\"{}\"", k, v))
+                                .collect();
+                            labels.sort();
+                            format!("{} {{{}}}", expr_expanded, labels.join(", "))
+                        };
+                        let mut pts = Vec::with_capacity(s.values.len());
+                        for (ts, val) in s.values {
+                            if let Ok(y) = val.parse::<f64>() {
+                                if y.is_finite() {
+                                    pts.push((ts, y));
+                                }
+                            }
+                        }
+                        panel_results.push(SeriesView {
+                            legend,
+                            points: pts,
+                        });
+                    }
+                }
+                Err(e) => {
+                    error = Some(format!("query_range failed for `{}`: {}", expr_expanded, e));
+                }
+            }
+        }
+        (p, panel_results, last_url, error)
     }
 }
 
