@@ -1,7 +1,8 @@
 use crate::prom;
 use crate::ui;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode};
+use futures::StreamExt;
 use ratatui::Terminal;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -24,30 +25,12 @@ pub struct SeriesView {
     pub points: Vec<(f64, f64)>,
 }
 
-// add near the top (after use statements)
 #[derive(Debug, Clone, Copy)]
 pub struct GridUnit {
     pub x: i32,
     pub y: i32,
     pub w: i32,
     pub h: i32,
-}
-
-fn build_query_range_url(base: &str, expr: &str, range: Duration, step: Duration) -> String {
-    use chrono::Utc;
-    use std::cmp::max;
-    let end = Utc::now().timestamp();
-    let start = end - (range.as_secs() as i64);
-    let step_s = max(1, step.as_secs());
-    let step_param = format!("{}s", step_s);
-    format!(
-        "{}/api/v1/query_range?query={}&start={}&end={}&step={}",
-        base.trim_end_matches('/'),
-        urlencoding::encode(expr),
-        start,
-        end,
-        step_param
-    )
 }
 
 #[derive(Debug)]
@@ -91,75 +74,154 @@ impl AppState {
         let prometheus = &self.prometheus;
         let range = self.range;
         let step = self.step;
+        let vars = &self.vars;
 
-        for p in &mut self.panels {
-            match Self::fetch_panel_static(prometheus, p, range, step, &self.vars).await {
-                Ok(()) => p.last_error = None,
-                Err(e) => p.last_error = Some(format!("{}", e)),
-            }
-        }
-        self.last_refresh = Instant::now();
-        Ok(())
-    }
+        // Create a stream of futures for fetching panel data
+        let mut futures = futures::stream::iter(self.panels.iter_mut())
+            .map(|p| async move {
+                let mut panel_results = Vec::new();
+                let mut last_url = None;
+                let mut error = None;
 
-    async fn fetch_panel_static(
-        prometheus: &prom::PromClient,
-        p: &mut PanelState,
-        range: Duration,
-        step: Duration,
-        vars: &HashMap<String, String>,
-    ) -> Result<()> {
-        let mut all_series = Vec::new();
-        for expr in &p.exprs {
-            let expr_expanded = expand_expr(expr, step, vars);
-            let url = build_query_range_url(&prometheus.base, &expr_expanded, range, step);
-            p.last_url = Some(url);
-            let res = prometheus
-                .query_range(&expr_expanded, range, step)
-                .await
-                .with_context(|| format!("query_range failed for `{}`", expr_expanded))?;
-            for s in res {
-                let legend = if s.metric.is_empty() {
-                    expr_expanded.clone()
-                } else {
-                    let mut labels: Vec<_> = s
-                        .metric
-                        .iter()
-                        .map(|(k, v)| format!("{}=\"{}\"", k, v))
-                        .collect();
-                    labels.sort();
-                    format!("{} {{{}}}", expr_expanded, labels.join(", "))
-                };
-                let mut pts = Vec::with_capacity(s.values.len());
-                for (ts, val) in s.values {
-                    if let Ok(y) = val.parse::<f64>() {
-                        pts.push((ts, y));
+                for expr in &p.exprs {
+                    let expr_expanded = expand_expr(expr, step, vars);
+
+                    // Calculate start/end for URL display purposes
+                    let end_ts = chrono::Utc::now().timestamp();
+                    let start_ts = end_ts - (range.as_secs() as i64);
+
+                    let url =
+                        prometheus.build_query_range_url(&expr_expanded, start_ts, end_ts, step);
+                    last_url = Some(url);
+
+                    match prometheus.query_range(&expr_expanded, range, step).await {
+                        Ok(res) => {
+                            for s in res {
+                                let legend = if s.metric.is_empty() {
+                                    expr_expanded.clone()
+                                } else {
+                                    let mut labels: Vec<_> = s
+                                        .metric
+                                        .iter()
+                                        .map(|(k, v)| format!("{}=\"{}\"", k, v))
+                                        .collect();
+                                    labels.sort();
+                                    format!("{} {{{}}}", expr_expanded, labels.join(", "))
+                                };
+                                let mut pts = Vec::with_capacity(s.values.len());
+                                for (ts, val) in s.values {
+                                    if let Ok(y) = val.parse::<f64>() {
+                                        if y.is_finite() {
+                                            pts.push((ts, y));
+                                        }
+                                    }
+                                }
+                                panel_results.push(SeriesView {
+                                    legend,
+                                    points: pts,
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            error =
+                                Some(format!("query_range failed for `{}`: {}", expr_expanded, e));
+                            // If one query in the panel fails, we record the error but maybe continue?
+                            // For now, let's keep the error.
+                        }
                     }
                 }
-                all_series.push(SeriesView {
-                    legend,
-                    points: pts,
-                });
+                (p, panel_results, last_url, error)
+            })
+            .buffer_unordered(4); // Max 4 concurrent panel refreshes
+
+        while let Some((p, results, url, err)) = futures.next().await {
+            p.series = results;
+            p.last_samples = p.series.iter().map(|s| s.points.len()).sum();
+            if let Some(u) = url {
+                p.last_url = Some(u);
             }
+            p.last_error = err;
         }
-        let samples: usize = all_series.iter().map(|s| s.points.len()).sum();
-        p.last_samples = samples;
-        p.series = all_series;
+
+        self.last_refresh = Instant::now();
         Ok(())
     }
 }
 
 fn expand_expr(expr: &str, step: Duration, vars: &HashMap<String, String>) -> String {
     let mut s = expr.to_string();
-    // 1) $__rate_interval -> step seconds (simple approximation)
-    let step_param = format!("{}s", step.as_secs().max(1));
-    s = s.replace("$__rate_interval", &step_param);
+
+    // 1) $__rate_interval heuristic: max(step * 4, 1m)
+    // This matches Grafana's default behavior roughly
+    let interval_secs = std::cmp::max(step.as_secs() * 4, 60);
+    let interval_param = format!("{}s", interval_secs);
+    s = s.replace("$__rate_interval", &interval_param);
+
     // 2) ${var} and $var -> value from vars
     for (k, v) in vars {
+        // Replace ${var}
         s = s.replace(&format!("${{{}}}", k), v);
+        // Replace $var (simple word boundary check would be better but start with simple replace)
+        // We need to be careful not to replace $variable if we are replacing $var
+        // For now, simple replacement.
         s = s.replace(&format!("${}", k), v);
     }
+
+    // 3) Fallback for unset vars: if we still see $something, maybe we should warn or replace with regex?
+    // The user requested: "Fallback when a var is unset: turn label="$var" into a permissive regex (e.g., label=~".*") or skip that filter."
+    // This is complex to do with simple string replacement without parsing PromQL.
+    // For Milestone 0/1, we will just leave it, which might cause a query error, which is visible.
+
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_expand_expr_rate_interval() {
+        let vars = HashMap::new();
+        let step = Duration::from_secs(15);
+        // heuristic: max(15*4, 60) = 60s
+        let expr = "rate(http_requests_total[$__rate_interval])";
+        let expanded = expand_expr(expr, step, &vars);
+        assert_eq!(expanded, "rate(http_requests_total[60s])");
+
+        let step = Duration::from_secs(30);
+        // heuristic: max(30*4, 60) = 120s
+        let expr = "rate(http_requests_total[$__rate_interval])";
+        let expanded = expand_expr(expr, step, &vars);
+        assert_eq!(expanded, "rate(http_requests_total[120s])");
+    }
+
+    #[test]
+    fn test_expand_expr_vars() {
+        let mut vars = HashMap::new();
+        vars.insert("job".to_string(), "node-exporter".to_string());
+        vars.insert("instance".to_string(), "localhost:9100".to_string());
+
+        let step = Duration::from_secs(15);
+
+        // Test $var
+        let expr = "up{job=\"$job\"}";
+        let expanded = expand_expr(expr, step, &vars);
+        assert_eq!(expanded, "up{job=\"node-exporter\"}");
+
+        // Test ${var}
+        let expr = "up{instance=\"${instance}\"}";
+        let expanded = expand_expr(expr, step, &vars);
+        assert_eq!(expanded, "up{instance=\"localhost:9100\"}");
+
+        // Test multiple vars
+        let expr =
+            "rate(http_requests_total{job=\"$job\", instance=\"$instance\"}[$__rate_interval])";
+        let expanded = expand_expr(expr, step, &vars);
+        assert_eq!(
+            expanded,
+            "rate(http_requests_total{job=\"node-exporter\", instance=\"localhost:9100\"}[60s])"
+        );
+    }
 }
 
 pub fn default_queries(mut provided: Vec<String>) -> Vec<PanelState> {

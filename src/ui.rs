@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 pub fn draw_ui(frame: &mut Frame, app: &AppState) {
-    let size = frame.size();
+    let size = frame.area();
 
     // Layout: title bar, charts area, footer
     let chunks = Layout::default()
@@ -168,19 +168,36 @@ fn ts_label(ts: i64) -> String {
 }
 
 fn render_two_column_flow(frame: &mut Frame, area: Rect, app: &AppState) {
+    let panels: Vec<&PanelState> = app.panels.iter().collect();
+    render_panel_slice_two_column(frame, area, &panels, app);
+}
+
+fn render_panel_slice_two_column(
+    frame: &mut Frame,
+    area: Rect,
+    panels: &[&PanelState],
+    app: &AppState,
+) {
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(area);
 
     let panel_height = 12u16;
+    // If we have many panels, we might need to scroll.
+    // The app.vertical_scroll applies to the whole view.
+    // If we are in "extras" mode (mixed grid + list), scrolling might be tricky if we don't separate it.
+    // For now, let's apply scroll only if we are in the main two-column mode (all panels).
+    // But since we reused this for extras, we might want to just render them all or handle scrolling there too.
+    // Let's keep it simple: use the same scroll offset for now, but clamped to the slice length.
+
     let rows_fit = (area.height / panel_height).saturating_mul(2).max(1) as usize;
     let start = app
         .vertical_scroll
-        .min(app.panels.len().saturating_sub(rows_fit));
-    let end = (start + rows_fit).min(app.panels.len());
+        .min(panels.len().saturating_sub(rows_fit));
+    let end = (start + rows_fit).min(panels.len());
 
-    let visible = &app.panels[start..end];
+    let visible = &panels[start..end];
     let mut left = Vec::new();
     let mut right = Vec::new();
     for (i, p) in visible.iter().enumerate() {
@@ -201,10 +218,10 @@ fn render_two_column_flow(frame: &mut Frame, area: Rect, app: &AppState) {
         .split(cols[1]);
 
     for (p, rect) in left.iter().zip(left_chunks.iter()) {
-        render_panel(frame, *rect, p, app);
+        render_panel(frame, *rect, *p, app);
     }
     for (p, rect) in right.iter().zip(right_chunks.iter()) {
-        render_panel(frame, *rect, p, app);
+        render_panel(frame, *rect, *p, app);
     }
 }
 
@@ -242,22 +259,40 @@ fn render_grafana_grid(frame: &mut Frame, area: Rect, app: &AppState) {
     }
 
     // Any panel without grid gets stacked at the bottom (fallback)
-    let mut extras: Vec<&PanelState> = app.panels.iter().filter(|p| p.grid.is_none()).collect();
+    let extras: Vec<&PanelState> = app.panels.iter().filter(|p| p.grid.is_none()).collect();
     if !extras.is_empty() {
         // Place extras in a vertical stack under the grid.
-        let start_y = area.y + area.height.saturating_sub((extras.len() as u16) * 10);
-        let mut y = start_y;
-        for p in extras.drain(..) {
-            let rect = Rect {
+        // We need to calculate where the grid ended.
+        // A simple heuristic is to find the max Y+H of any grid panel.
+        let max_y_h = app
+            .panels
+            .iter()
+            .filter_map(|p| {
+                let g = p.grid?;
+                Some(g.y + g.h)
+            })
+            .max()
+            .unwrap_or(0);
+
+        let start_y_px = area
+            .y
+            .saturating_add((max_y_h as u16).saturating_mul(cell_h));
+
+        if start_y_px < area.bottom() {
+            let extras_area = Rect {
                 x: area.x,
-                y,
+                y: start_y_px,
                 width: area.width,
-                height: 10,
+                height: area.bottom().saturating_sub(start_y_px),
             };
-            render_panel(frame, rect, p, app);
-            y = y.saturating_add(10);
+
+            // Reuse the two-column logic for these extras
+            // We need to adapt render_two_column_flow to take a slice of panels,
+            // but it currently takes the whole app.
+            // Let's refactor render_two_column_flow to take a slice of panels.
+            render_panel_slice_two_column(frame, extras_area, &extras, app);
+            rendered_any = true;
         }
-        rendered_any = true;
     }
 
     // If nothing rendered (tiny terminal), just draw a hint
