@@ -105,9 +105,14 @@ fn render_panel(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
         .series
         .iter()
         .map(|s| {
-            let color = get_color_for_series(&s.legend);
+            let color = get_color_for_series(&s.name);
+            let display_name = if let Some(v) = s.value {
+                format!("{} ({:.2})", s.name, v)
+            } else {
+                s.name.clone()
+            };
             Dataset::default()
-                .name(s.legend.as_str())
+                .name(display_name)
                 .marker(symbols::Marker::Braille)
                 .graph_type(GraphType::Line)
                 .style(Style::default().fg(color))

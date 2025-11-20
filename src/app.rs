@@ -22,7 +22,8 @@ pub struct PanelState {
 
 #[derive(Debug, Clone)]
 pub struct SeriesView {
-    pub legend: String,
+    pub name: String,
+    pub value: Option<f64>,
     pub points: Vec<(f64, f64)>,
 }
 
@@ -129,16 +130,10 @@ impl AppState {
                 Ok(res) => {
                     for s in res {
                         let latest_val = s.values.last().and_then(|(_, v)| v.parse::<f64>().ok());
-                        let val_str = if let Some(v) = latest_val {
-                            format!(" ({:.2})", v)
-                        } else {
-                            String::new()
-                        };
-
-                        let legend = if let Some(fmt) = legend_fmt {
-                            format!("{}{}", format_legend(fmt, &s.metric), val_str)
+                        let legend_base = if let Some(fmt) = legend_fmt {
+                            format_legend(fmt, &s.metric)
                         } else if s.metric.is_empty() {
-                            format!("{}{}", expr_expanded, val_str)
+                            expr_expanded.clone()
                         } else {
                             let mut labels: Vec<_> = s
                                 .metric
@@ -146,8 +141,9 @@ impl AppState {
                                 .map(|(k, v)| format!("{}=\"{}\"", k, v))
                                 .collect();
                             labels.sort();
-                            format!("{} {{{}}}{}", expr_expanded, labels.join(", "), val_str)
+                            format!("{} {{{}}}", expr_expanded, labels.join(", "))
                         };
+
                         let mut pts = Vec::with_capacity(s.values.len());
                         for (ts, val) in s.values {
                             if let Ok(y) = val.parse::<f64>() {
@@ -157,7 +153,8 @@ impl AppState {
                             }
                         }
                         panel_results.push(SeriesView {
-                            legend,
+                            name: legend_base,
+                            value: latest_val,
                             points: pts,
                         });
                     }
