@@ -179,6 +179,7 @@ pub struct QueryRangeResponse {
 #[derive(Debug, Deserialize, Clone)]
 pub struct QueryRangeData {
     #[serde(rename = "resultType")]
+    #[allow(dead_code)]
     pub result_type: String,
     pub result: Vec<Series>,
 }

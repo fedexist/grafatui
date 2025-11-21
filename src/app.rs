@@ -1,4 +1,5 @@
 use crate::prom;
+use crate::theme::Theme;
 use crate::ui;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode};
@@ -89,6 +90,8 @@ pub struct AppState {
     pub skipped_panels: usize,
     /// Index of the currently selected panel.
     pub selected_panel: usize,
+    /// UI Theme.
+    pub theme: Theme,
 }
 
 impl AppState {
@@ -100,6 +103,7 @@ impl AppState {
         title: String,
         panels: Vec<PanelState>,
         skipped_panels: usize,
+        theme: Theme,
     ) -> Self {
         Self {
             prometheus,
@@ -114,6 +118,7 @@ impl AppState {
             vars: HashMap::new(),
             skipped_panels,
             selected_panel: 0,
+            theme,
         }
     }
 

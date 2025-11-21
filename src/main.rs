@@ -1,18 +1,23 @@
 mod app;
+mod config;
 mod grafana;
 mod prom;
+mod theme;
 mod ui;
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use config::Config;
 use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode},
 };
 use ratatui::Terminal;
-use tokio::time::Duration;
+use ratatui::backend::CrosstermBackend;
+use theme::Theme;
 
 /// Command-line arguments for Grafatui.
 #[derive(Debug, Parser, Clone)]
@@ -22,17 +27,17 @@ use tokio::time::Duration;
     about = "Grafana-like Prometheus charts in your terminal"
 )]
 struct Args {
-    /// Prometheus base URL (e.g., "http://localhost:9090")
-    #[arg(long, default_value = "http://localhost:9090")]
-    prometheus: String,
+    /// Prometheus base URL (default: http://localhost:9090)
+    #[arg(long)]
+    prometheus: Option<String>,
 
-    /// Time range window (e.g., 5m, 1h, 24h)
-    #[arg(long, default_value = "5m")]
-    range: String,
+    /// Time range window (e.g., 5m, 1h, 24h) (default: 5m)
+    #[arg(long)]
+    range: Option<String>,
 
-    /// Query step resolution (e.g., 5s, 30s, 1m)
-    #[arg(long, default_value = "5s")]
-    step: String,
+    /// Query step resolution (e.g., 5s, 30s, 1m) (default: 5s)
+    #[arg(long)]
+    step: Option<String>,
 
     /// Optional Grafana dashboard JSON path; panels with PromQL targets will be imported
     #[arg(long)]
@@ -42,9 +47,9 @@ struct Args {
     #[arg(long, default_value = "250")]
     tick_rate: u64,
 
-    /// Data refresh rate in milliseconds (Prometheus fetch interval)
-    #[arg(long, default_value = "1000")]
-    refresh_rate: u64,
+    /// Data refresh rate in milliseconds (Prometheus fetch interval) (default: 1000)
+    #[arg(long)]
+    refresh_rate: Option<u64>,
 
     /// Additional PromQL queries to append as panels
     #[arg(long)]
@@ -53,6 +58,10 @@ struct Args {
     /// Template variables to override (format: key=value)
     #[arg(long, value_parser = parse_key_val::<String, String>)]
     var: Vec<(String, String)>,
+
+    /// Theme name (e.g. "dracula", "monokai") (default: default)
+    #[arg(long)]
+    theme: Option<String>,
 }
 
 /// Helper to parse key=value pairs for CLI arguments.
@@ -75,13 +84,29 @@ where
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let range = app::parse_duration(&args.range).context("--range")?;
-    let step = app::parse_duration(&args.step).context("--step")?;
-    let refresh_every = Duration::from_millis(args.refresh_rate);
+    // Load config
+    let config = Config::load().unwrap_or_default();
+
+    let prometheus_url = args
+        .prometheus
+        .or(config.prometheus_url)
+        .unwrap_or_else(|| "http://localhost:9090".to_string());
+
+    let range_str = args
+        .range
+        .or(config.time_range)
+        .unwrap_or_else(|| "5m".to_string());
+    let range = app::parse_duration(&range_str).context("--range")?;
+
+    let step_str = args.step.unwrap_or_else(|| "5s".to_string());
+    let step = app::parse_duration(&step_str).context("--step")?;
+
+    let refresh_rate = args.refresh_rate.or(config.refresh_rate).unwrap_or(1000);
+    let refresh_every = Duration::from_millis(refresh_rate);
 
     let mut vars: HashMap<String, String> = HashMap::new();
 
-    let prom = prom::PromClient::new(args.prometheus.clone());
+    let prom = prom::PromClient::new(prometheus_url);
 
     // Build panels from Grafana import or simple queries.
     let (title, panels, skipped_panels) = if let Some(path) = args.grafana_json.as_ref() {
@@ -128,6 +153,16 @@ async fn main() -> Result<()> {
         vars.insert(k.clone(), v.clone());
     }
 
+    // Load config
+    let config = Config::load().unwrap_or_default();
+
+    // Determine theme
+    let theme_name = args
+        .theme
+        .or(config.theme)
+        .unwrap_or_else(|| "default".to_string());
+    let theme = Theme::from_str(&theme_name);
+
     let mut state = app::AppState::new(
         prom,
         range,
@@ -136,6 +171,7 @@ async fn main() -> Result<()> {
         title,
         panels,
         skipped_panels,
+        theme,
     );
     state.vars = vars; // <— pass variables into the app
     state.refresh().await?;
@@ -148,7 +184,7 @@ async fn main() -> Result<()> {
         EnterAlternateScreen,
         crossterm::event::EnableMouseCapture
     )?;
-    let backend = ratatui::backend::CrosstermBackend::new(stdout);
+    let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
     let res = app::run_app(

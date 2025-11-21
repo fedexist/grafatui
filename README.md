@@ -42,6 +42,28 @@ grafatui [OPTIONS]
 - `--var <KEY=VALUE>`: Override or set dashboard variables (can be used multiple times).
 - `--tick-rate <MS>`: UI refresh rate in milliseconds (default: `250`).
 - `--refresh-rate <MS>`: Data fetch interval in milliseconds (default: `1000`).
+- `--theme <NAME>`: UI theme (default: `default`). Supported: `default`, `dracula`, `monokai`.
+
+## Configuration
+
+Grafatui supports a configuration file (`config.toml` or `grafatui.toml`) located in your system's standard configuration directory (e.g., `~/.config/grafatui/`) or the current directory.
+
+**Example `config.toml`:**
+```toml
+prometheus_url = "http://localhost:9090"
+refresh_rate = 1000
+time_range = "1h"
+theme = "dracula"
+```
+
+## Themes
+
+You can customize the look and feel using the `--theme` argument or the `theme` configuration option.
+
+**Available Themes:**
+- `default`: Standard terminal colors.
+- `dracula`: Dracula color scheme.
+- `monokai`: Monokai color scheme.
 
 ### Examples
 
@@ -68,9 +90,13 @@ grafatui --grafana-json ./dash.json --var job=node --var instance=server-01
 | `r` | Force refresh |
 | `+` | Zoom out (double range) |
 | `-` | Zoom in (halve range) |
-| `↑` / `↓` | Scroll vertically |
-| `PgUp` / `PgDn` | Scroll fast |
+| `↑` / `k` | Select previous panel |
+| `↓` / `j` | Select next panel |
+| `PgUp` / `PgDn` | Scroll view vertically |
 | `Home` / `End` | Jump to top / bottom |
+| `y` | Toggle Y-axis mode (Auto / Zero-based) |
+| `1`..`9` | Toggle visibility of series N |
+| `0` | Show all series |
 | `?` | Toggle debug bar |
 
 ## License

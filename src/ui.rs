@@ -1,5 +1,4 @@
 use crate::app::{AppState, PanelState};
-use chrono::Utc;
 use humantime::format_duration;
 use ratatui::{
     prelude::*,
@@ -85,71 +84,83 @@ pub fn draw_ui(frame: &mut Frame, app: &AppState) {
 }
 
 fn render_panel(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState, is_selected: bool) {
+    let theme = &app.theme;
     let border_style = if is_selected {
-        Style::default().fg(Color::Yellow)
+        Style::default().fg(theme.border_selected)
     } else {
-        Style::default()
+        Style::default().fg(theme.border)
     };
 
     if let Some(err) = &p.last_error {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(border_style)
-            .title(format!("{} — ERROR", p.title));
+            .title(Span::styled(
+                format!("{} — ERROR", p.title),
+                Style::default().fg(theme.title),
+            ));
         let para = Paragraph::new(err.clone())
             .block(block)
-            .wrap(Wrap { trim: true });
+            .wrap(Wrap { trim: true })
+            .style(Style::default().fg(theme.text));
         frame.render_widget(para, area);
         return;
     }
 
-    // Determine x bounds from range window (unix seconds)
-    let end = Utc::now().timestamp() as f64;
-    let start = end - app.range.as_secs_f64();
-    let x_min = start;
-    let x_max = end;
-
-    let y_bounds = calculate_y_bounds(p);
-
-    let datasets: Vec<Dataset> = p
-        .series
-        .iter()
-        .map(|s| {
-            let color = get_color_for_series(&s.name);
-            let data = if s.visible { s.points.as_slice() } else { &[] };
+    let mut datasets = Vec::new();
+    for (i, s) in p.series.iter().enumerate() {
+        let color = theme.palette[i % theme.palette.len()];
+        let data = if s.visible { s.points.as_slice() } else { &[] };
+        let mut name = s.name.clone();
+        if let Some(val) = s.value {
+            name.push_str(&format!(" ({})", format_si(val)));
+        }
+        datasets.push(
             Dataset::default()
-                .name(s.name.as_str())
+                .name(name)
                 .marker(ratatui::symbols::Marker::Braille)
                 .graph_type(GraphType::Line)
                 .style(Style::default().fg(color))
-                .data(data)
-        })
-        .collect();
+                .data(data),
+        );
+    }
+
+    // Determine x bounds from range window (unix seconds)
+    let now = chrono::Utc::now().timestamp() as f64;
+    let start = now - app.range.as_secs_f64();
+
+    let x_labels = vec![
+        Span::styled(format_time(start), Style::default().fg(theme.text)),
+        Span::styled(format_time(now), Style::default().fg(theme.text)),
+    ];
+
+    let y_bounds = calculate_y_bounds(p);
+    let y_labels = vec![
+        Span::styled(format_si(y_bounds[0]), Style::default().fg(theme.text)),
+        Span::styled(format_si(y_bounds[1]), Style::default().fg(theme.text)),
+    ];
 
     let chart = Chart::new(datasets)
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(border_style)
-                .title(p.title.clone()),
+                .title(Span::styled(
+                    p.title.clone(),
+                    Style::default().fg(theme.title),
+                )),
         )
         .x_axis(
             Axis::default()
-                .style(Style::default().fg(Color::Gray))
-                .bounds([x_min, x_max])
-                .labels(vec![
-                    Span::from(ts_label(x_min as i64)),
-                    Span::from(ts_label(x_max as i64)),
-                ]),
+                .bounds([start, now])
+                .labels(x_labels)
+                .style(Style::default().fg(theme.text)),
         )
         .y_axis(
             Axis::default()
                 .style(Style::default().fg(Color::Gray))
                 .bounds(y_bounds)
-                .labels(vec![
-                    Span::from(format_si(y_bounds[0])),
-                    Span::from(format_si(y_bounds[1])),
-                ]),
+                .labels(y_labels),
         );
 
     frame.render_widget(chart, area);
@@ -165,14 +176,6 @@ fn render_panel(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState, i
     // Let's try passing empty data for hidden series.
 
     // REVERTING previous change to filter datasets. Instead, we map hidden series to empty data.
-}
-
-fn ts_label(ts: i64) -> String {
-    use chrono::DateTime;
-    DateTime::from_timestamp(ts, 0)
-        .unwrap_or_default()
-        .format("%H:%M:%S")
-        .to_string()
 }
 
 fn render_two_column_flow(frame: &mut Frame, area: Rect, app: &AppState) {
@@ -409,29 +412,11 @@ fn format_si(val: f64) -> String {
     }
 }
 
-fn get_color_for_series(name: &str) -> Color {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let palette = [
-        Color::Red,
-        Color::Green,
-        Color::Yellow,
-        Color::Blue,
-        Color::Magenta,
-        Color::Cyan,
-        Color::LightRed,
-        Color::LightGreen,
-        Color::LightYellow,
-        Color::LightBlue,
-        Color::LightMagenta,
-        Color::LightCyan,
-        Color::White, // Fallback, though maybe avoid if background is dark?
-    ];
-
-    let mut hasher = DefaultHasher::new();
-    name.hash(&mut hasher);
-    let hash = hasher.finish();
-
-    palette[(hash as usize) % palette.len()]
+fn format_time(ts: f64) -> String {
+    use chrono::TimeZone;
+    if let Some(dt) = chrono::Utc.timestamp_opt(ts as i64, 0).single() {
+        dt.format("%H:%M:%S").to_string()
+    } else {
+        format!("{}", ts)
+    }
 }
