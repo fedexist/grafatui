@@ -108,8 +108,17 @@ fn render_panel(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState, i
     }
 
     let mut datasets = Vec::new();
+    let use_hash_colors = p.series.len() > theme.palette.len();
+
     for (i, s) in p.series.iter().enumerate() {
-        let color = theme.palette[i % theme.palette.len()];
+        let color = if use_hash_colors {
+            // Hash-based color assignment for many series
+            get_hash_color(&s.name)
+        } else {
+            // Sequential palette assignment for few series
+            theme.palette[i % theme.palette.len()]
+        };
+
         let data = if s.visible { s.points.as_slice() } else { &[] };
         let mut name = s.name.clone();
         if let Some(val) = s.value {
@@ -419,4 +428,57 @@ fn format_time(ts: f64) -> String {
     } else {
         format!("{}", ts)
     }
+}
+
+/// Generate a color from a string using hash-based approach.
+/// Uses HSL color space to ensure visually distinct, vibrant colors.
+fn get_hash_color(name: &str) -> Color {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    name.hash(&mut hasher);
+    let hash = hasher.finish();
+
+    // Use HSL color space for better color distribution
+    // Hue: use the hash to get different hues (0-360 degrees)
+    let hue = (hash % 360) as f32;
+
+    // Saturation: keep high for vibrant colors (60-90%)
+    let saturation = 60.0 + ((hash >> 8) % 30) as f32;
+
+    // Lightness: keep in a range that's visible on both light and dark backgrounds (45-65%)
+    let lightness = 45.0 + ((hash >> 16) % 20) as f32;
+
+    hsl_to_rgb(hue, saturation, lightness)
+}
+
+/// Convert HSL to RGB color for ratatui.
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> Color {
+    let s = s / 100.0;
+    let l = l / 100.0;
+
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+    let m = l - c / 2.0;
+
+    let (r, g, b) = if h < 60.0 {
+        (c, x, 0.0)
+    } else if h < 120.0 {
+        (x, c, 0.0)
+    } else if h < 180.0 {
+        (0.0, c, x)
+    } else if h < 240.0 {
+        (0.0, x, c)
+    } else if h < 300.0 {
+        (x, 0.0, c)
+    } else {
+        (c, 0.0, x)
+    };
+
+    Color::Rgb(
+        ((r + m) * 255.0) as u8,
+        ((g + m) * 255.0) as u8,
+        ((b + m) * 255.0) as u8,
+    )
 }
