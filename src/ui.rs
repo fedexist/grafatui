@@ -20,16 +20,17 @@ pub fn draw_ui(frame: &mut Frame, app: &AppState) {
         .split(size);
 
     // Title
-    let title = format!(
-        "{} — range={} step={:?}  panels={}  (r to refresh, +/- range, q quit)",
+    let title_text = format!(
+        "{} — range={} step={}  panels={}  {}(r to refresh, +/- range, [] pan, 0 live, q quit)",
         app.title,
         format_duration(app.range),
-        app.step,
-        app.panels.len()
+        format_duration(app.step),
+        app.panels.len(),
+        if app.is_live() { "" } else { "⏸ PAUSED " }
     );
     let title_block = Block::default()
         .borders(Borders::ALL)
-        .title(Line::from(title).alignment(Alignment::Center));
+        .title(Line::from(title_text).alignment(Alignment::Center));
     frame.render_widget(title_block, chunks[0]);
 
     // Charts area: use Grafana grid if any panel has it, else fallback to 2-column flow

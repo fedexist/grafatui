@@ -95,6 +95,9 @@ grafatui --grafana-json ./dash.json --var job=node --var instance=server-01
 | `r` | Force refresh |
 | `+` | Zoom out (double range) |
 | `-` | Zoom in (halve range) |
+| `[` or `Shift+←` | Pan left (backward in time) |
+| `]` or `Shift+→` | Pan right (forward in time) |
+| `0` | Reset to live mode |
 | `↑` / `k` | Select previous panel |
 | `↓` / `j` | Select next panel |
 | `PgUp` / `PgDn` | Scroll view vertically |

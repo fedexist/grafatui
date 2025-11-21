@@ -2,7 +2,7 @@ use crate::prom;
 use crate::theme::Theme;
 use crate::ui;
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode};
+use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use futures::StreamExt;
 use ratatui::Terminal;
 use std::collections::HashMap;
@@ -92,6 +92,8 @@ pub struct AppState {
     pub selected_panel: usize,
     /// UI Theme.
     pub theme: Theme,
+    /// Time offset from "now" for panning backward in time (0 = live mode).
+    pub time_offset: Duration,
 }
 
 impl AppState {
@@ -119,7 +121,53 @@ impl AppState {
             skipped_panels,
             selected_panel: 0,
             theme,
+            time_offset: Duration::from_secs(0),
         }
+    }
+
+    /// Zoom in: halve the time range.
+    pub fn zoom_in(&mut self) {
+        self.range = self.range / 2;
+        if self.range < Duration::from_secs(10) {
+            self.range = Duration::from_secs(10);
+        }
+    }
+
+    /// Zoom out: double the time range.
+    pub fn zoom_out(&mut self) {
+        self.range = self.range * 2;
+        // Cap at 7 days
+        if self.range > Duration::from_secs(7 * 24 * 3600) {
+            self.range = Duration::from_secs(7 * 24 * 3600);
+        }
+    }
+
+    /// Pan left: shift the time window backward.
+    pub fn pan_left(&mut self) {
+        // Shift by 25% of the current range
+        let shift = self.range / 4;
+        self.time_offset = self.time_offset.saturating_add(shift);
+    }
+
+    /// Pan right: shift the time window forward (toward "now").
+    pub fn pan_right(&mut self) {
+        // Shift by 25% of the current range
+        let shift = self.range / 4;
+        if self.time_offset > shift {
+            self.time_offset = self.time_offset.saturating_sub(shift);
+        } else {
+            self.time_offset = Duration::from_secs(0); // Back to live mode
+        }
+    }
+
+    /// Reset to live mode (time_offset = 0).
+    pub fn reset_to_live(&mut self) {
+        self.time_offset = Duration::from_secs(0);
+    }
+
+    /// Check if currently in live mode.
+    pub fn is_live(&self) -> bool {
+        self.time_offset.as_secs() == 0
     }
 
     pub async fn refresh(&mut self) -> Result<()> {
@@ -128,7 +176,8 @@ impl AppState {
         let step = self.step;
         let vars = &self.vars;
 
-        let end_ts = chrono::Utc::now().timestamp();
+        // Calculate end timestamp: "now" minus time_offset
+        let end_ts = chrono::Utc::now().timestamp() - self.time_offset.as_secs() as i64;
 
         // Create a stream of futures for fetching panel data
         let mut futures = futures::stream::iter(self.panels.iter_mut())
@@ -453,14 +502,39 @@ pub async fn run_app<B: ratatui::backend::Backend>(
                         app.vertical_scroll = usize::MAX; // Will be clamped by rendering logic usually, or we should track max height
                     }
                     KeyCode::Char('+') => {
-                        app.range = app.range.saturating_mul(2);
+                        app.zoom_out();
                         app.refresh().await?;
                     }
                     KeyCode::Char('-') => {
-                        app.range = app.range / 2;
-                        if app.range < Duration::from_secs(10) {
-                            app.range = Duration::from_secs(10);
+                        app.zoom_in();
+                        app.refresh().await?;
+                    }
+                    KeyCode::Char('[') => {
+                        if key.modifiers.contains(KeyModifiers::SHIFT) {
+                            app.pan_left();
+                            app.refresh().await?;
                         }
+                    }
+                    KeyCode::Left => {
+                        if key.modifiers.contains(KeyModifiers::SHIFT) {
+                            app.pan_left();
+                            app.refresh().await?;
+                        }
+                    }
+                    KeyCode::Char(']') => {
+                        if key.modifiers.contains(KeyModifiers::SHIFT) {
+                            app.pan_right();
+                            app.refresh().await?;
+                        }
+                    }
+                    KeyCode::Right => {
+                        if key.modifiers.contains(KeyModifiers::SHIFT) {
+                            app.pan_right();
+                            app.refresh().await?;
+                        }
+                    }
+                    KeyCode::Char('0') => {
+                        app.reset_to_live();
                         app.refresh().await?;
                     }
                     KeyCode::Char('?') => {
