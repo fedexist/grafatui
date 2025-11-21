@@ -6,6 +6,7 @@ use ratatui::{
     widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Paragraph, Wrap},
 };
 
+/// Renders the entire application UI into the given frame.
 pub fn draw_ui(frame: &mut Frame, app: &AppState) {
     let size = frame.area();
 

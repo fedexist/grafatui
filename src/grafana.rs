@@ -2,14 +2,20 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
 
+/// Result of importing a Grafana dashboard.
 #[derive(Debug, Clone, Default)]
 pub struct DashboardImport {
+    /// Dashboard title.
     pub title: String,
+    /// List of panels extracted.
     pub queries: Vec<QueryPanel>,
+    /// Variables extracted from `templating.list`.
     pub vars: HashMap<String, String>,
+    /// Number of panels that were skipped (unsupported types).
     pub skipped_panels: usize,
 }
 
+/// A single panel extracted from Grafana.
 #[derive(Debug, Clone)]
 pub struct QueryPanel {
     pub title: String,
@@ -18,6 +24,7 @@ pub struct QueryPanel {
     pub grid: Option<GridPos>,
 }
 
+/// Grid position extracted from Grafana.
 #[derive(Debug, Clone, Copy)]
 pub struct GridPos {
     pub x: i32,
