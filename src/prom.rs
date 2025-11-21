@@ -4,10 +4,13 @@ use reqwest::Client;
 use serde::Deserialize;
 use std::time::Duration;
 
+/// A simple Prometheus HTTP client.
 #[derive(Debug, Clone)]
 pub struct PromClient {
+    /// Base URL of the Prometheus server.
     pub base: String,
-    http: Client,
+    /// HTTP client.
+    client: reqwest::Client,
 }
 
 impl PromClient {
@@ -18,7 +21,7 @@ impl PromClient {
             .build()
             .unwrap_or_else(|_| Client::new());
 
-        Self { base, http }
+        Self { base, client: http }
     }
 
     pub fn build_query_range_url(
@@ -69,7 +72,7 @@ impl PromClient {
 
     async fn perform_request(&self, url: &str) -> Result<Vec<Series>> {
         let resp = self
-            .http
+            .client
             .get(url)
             .send()
             .await

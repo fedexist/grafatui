@@ -14,6 +14,7 @@ use crossterm::{
 use ratatui::Terminal;
 use tokio::time::Duration;
 
+/// Command-line arguments for Grafatui.
 #[derive(Debug, Parser, Clone)]
 #[command(
     name = "grafatui",
@@ -21,7 +22,7 @@ use tokio::time::Duration;
     about = "Grafana-like Prometheus charts in your terminal"
 )]
 struct Args {
-    /// Prometheus base URL
+    /// Prometheus base URL (e.g., "http://localhost:9090")
     #[arg(long, default_value = "http://localhost:9090")]
     prometheus: String,
 
@@ -29,7 +30,7 @@ struct Args {
     #[arg(long, default_value = "5m")]
     range: String,
 
-    /// Query step (e.g., 5s, 30s, 1m)
+    /// Query step resolution (e.g., 5s, 30s, 1m)
     #[arg(long, default_value = "5s")]
     step: String,
 
@@ -37,29 +38,46 @@ struct Args {
     #[arg(long)]
     grafana_json: Option<std::path::PathBuf>,
 
-    /// UI tick in milliseconds (screen refresh cadence)
-    #[arg(long, default_value_t = 200u64)]
-    tick_ms: u64,
+    /// UI tick rate in milliseconds (screen refresh cadence)
+    #[arg(long, default_value = "250")]
+    tick_rate: u64,
 
-    /// Data refresh cadence (how often to re-pull Prometheus data)
-    #[arg(long, default_value = "5s")]
-    refresh_every: String,
+    /// Data refresh rate in milliseconds (Prometheus fetch interval)
+    #[arg(long, default_value = "1000")]
+    refresh_rate: u64,
 
-    /// Additional PromQLs when not using Grafana import (repeatable)
+    /// Additional PromQL queries to append as panels
     #[arg(long)]
     query: Vec<String>,
 
-    /// Template variables: repeatable KEY=VALUE (e.g., --var model_name=/path/to/model)
-    #[arg(long = "var")]
-    vars: Vec<String>,
+    /// Template variables to override (format: key=value)
+    #[arg(long, value_parser = parse_key_val::<String, String>)]
+    var: Vec<(String, String)>,
 }
 
+/// Helper to parse key=value pairs for CLI arguments.
+fn parse_key_val<T, U>(
+    s: &str,
+) -> Result<(T, U), Box<dyn std::error::Error + Send + Sync + 'static>>
+where
+    T: std::str::FromStr,
+    T::Err: std::error::Error + Send + Sync + 'static,
+    U: std::str::FromStr,
+    U::Err: std::error::Error + Send + Sync + 'static,
+{
+    let pos = s
+        .find('=')
+        .ok_or_else(|| format!("invalid KEY=value: no `=` found in `{}`", s))?;
+    Ok((s[..pos].parse()?, s[pos + 1..].parse()?))
+}
+
+/// Main entry point for the Grafatui application.
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
     let range = app::parse_duration(&args.range).context("--range")?;
     let step = app::parse_duration(&args.step).context("--step")?;
-    let refresh_every = app::parse_duration(&args.refresh_every).context("--refresh-every")?;
+    let refresh_every = Duration::from_millis(args.refresh_rate);
 
     let mut vars: HashMap<String, String> = HashMap::new();
 
@@ -105,10 +123,8 @@ async fn main() -> Result<()> {
     };
 
     // CLI vars override dashboard defaults
-    for kv in &args.vars {
-        if let Some((k, v)) = kv.split_once('=') {
-            vars.insert(k.to_string(), v.to_string());
-        }
+    for (k, v) in &args.var {
+        vars.insert(k.clone(), v.clone());
     }
 
     let mut state = app::AppState::new(
@@ -137,7 +153,7 @@ async fn main() -> Result<()> {
     let res = app::run_app(
         &mut terminal,
         &mut state,
-        Duration::from_millis(args.tick_ms),
+        Duration::from_millis(args.tick_rate),
     )
     .await;
 

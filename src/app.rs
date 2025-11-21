@@ -8,25 +8,39 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
 
+/// Represents the state of a single dashboard panel.
 #[derive(Debug, Clone)]
 pub struct PanelState {
+    /// Panel title.
     pub title: String,
+    /// PromQL expressions to query.
     pub exprs: Vec<String>,
-    pub legends: Vec<Option<String>>, // Parallel to exprs
+    /// Optional legend formats (e.g. "{{instance}}"). Parallel to exprs.
+    pub legends: Vec<Option<String>>,
+    /// Current time-series data for this panel.
     pub series: Vec<SeriesView>,
+    /// Last error message, if any.
     pub last_error: Option<String>,
+    /// Last query URL used (for debugging).
     pub last_url: Option<String>,
+    /// Total number of samples in the current view.
     pub last_samples: usize,
+    /// Grid layout position (if imported from Grafana).
     pub grid: Option<GridUnit>,
 }
 
+/// Represents a single time-series line in a chart.
 #[derive(Debug, Clone)]
 pub struct SeriesView {
+    /// Stable name of the series (used for coloring).
     pub name: String,
+    /// Latest value of the series (used for display).
     pub value: Option<f64>,
+    /// Data points (timestamp, value).
     pub points: Vec<(f64, f64)>,
 }
 
+/// Grid positioning unit (Grafana style).
 #[derive(Debug, Clone, Copy)]
 pub struct GridUnit {
     pub x: i32,
@@ -35,18 +49,30 @@ pub struct GridUnit {
     pub h: i32,
 }
 
+/// Global application state.
 #[derive(Debug)]
 pub struct AppState {
+    /// Prometheus client for making requests.
     pub prometheus: prom::PromClient,
+    /// Current time range window.
     pub range: Duration,
+    /// Query step resolution.
     pub step: Duration,
+    /// How often to refresh data.
     pub refresh_every: Duration,
+    /// List of panels.
     pub panels: Vec<PanelState>,
+    /// Timestamp of the last successful refresh.
     pub last_refresh: Instant,
+    /// Vertical scroll offset.
     pub vertical_scroll: usize,
+    /// Dashboard title.
     pub title: String,
+    /// Whether to show the debug bar.
     pub debug_bar: bool,
+    /// Template variables (key -> value).
     pub vars: HashMap<String, String>,
+    /// Count of panels skipped during import.
     pub skipped_panels: usize,
 }
 
