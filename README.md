@@ -64,6 +64,11 @@ You can customize the look and feel using the `--theme` argument or the `theme` 
 - `default`: Standard terminal colors.
 - `dracula`: Dracula color scheme.
 - `monokai`: Monokai color scheme.
+- `solarized-dark`: Solarized Dark.
+- `solarized-light`: Solarized Light.
+- `gruvbox`: Gruvbox Dark.
+- `tokyo-night`: Tokyo Night.
+- `catppuccin`: Catppuccin Mocha.
 
 ### Examples
 
