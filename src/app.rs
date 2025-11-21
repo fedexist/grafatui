@@ -123,9 +123,11 @@ impl AppState {
         let step = self.step;
         let vars = &self.vars;
 
+        let end_ts = chrono::Utc::now().timestamp();
+
         // Create a stream of futures for fetching panel data
         let mut futures = futures::stream::iter(self.panels.iter_mut())
-            .map(|p| Self::fetch_single_panel_data(prometheus, p, range, step, vars))
+            .map(|p| Self::fetch_single_panel_data(prometheus, p, range, step, vars, end_ts))
             .buffer_unordered(4); // Max 4 concurrent panel refreshes
 
         while let Some((p, results, url, err)) = futures.next().await {
@@ -147,6 +149,7 @@ impl AppState {
         range: Duration,
         step: Duration,
         vars: &'a HashMap<String, String>,
+        end_ts: i64,
     ) -> (
         &'a mut PanelState,
         Vec<SeriesView>,
@@ -162,13 +165,15 @@ impl AppState {
             let legend_fmt = p.legends.get(i).and_then(|x| x.as_ref());
 
             // Calculate start/end for URL display purposes
-            let end_ts = chrono::Utc::now().timestamp();
             let start_ts = end_ts - (range.as_secs() as i64);
 
             let url = prometheus.build_query_range_url(&expr_expanded, start_ts, end_ts, step);
             last_url = Some(url);
 
-            match prometheus.query_range(&expr_expanded, range, step).await {
+            match prometheus
+                .query_range(&expr_expanded, start_ts, end_ts, step)
+                .await
+            {
                 Ok(res) => {
                     for s in res {
                         let latest_val = s.values.last().and_then(|(_, v)| v.parse::<f64>().ok());
@@ -200,6 +205,10 @@ impl AppState {
                             points: pts,
                             visible: true,
                         });
+                        // Downsample for display
+                        if let Some(last) = panel_results.last_mut() {
+                            last.points = downsample(last.points.clone(), 200);
+                        }
                     }
                 }
                 Err(e) => {
@@ -246,6 +255,30 @@ fn format_legend(fmt: &str, metric: &HashMap<String, String>) -> String {
         out = out.replace(&format!("{{{{{}}}}}", k), v);
     }
     out
+}
+
+/// Downsamples data points to a maximum number of points using max-pooling.
+/// This preserves peaks which is important for metrics.
+fn downsample(points: Vec<(f64, f64)>, max_points: usize) -> Vec<(f64, f64)> {
+    if points.len() <= max_points {
+        return points;
+    }
+
+    let chunk_size = (points.len() as f64 / max_points as f64).ceil() as usize;
+    if chunk_size <= 1 {
+        return points;
+    }
+
+    points
+        .chunks(chunk_size)
+        .filter_map(|chunk| {
+            // Max pooling: take the point with the maximum value in the chunk
+            chunk
+                .iter()
+                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .cloned()
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -307,6 +340,16 @@ mod tests {
 
         let fmt2 = "Static Text";
         assert_eq!(format_legend(fmt2, &metric), "Static Text");
+    }
+
+    #[test]
+    fn test_downsample() {
+        let points: Vec<(f64, f64)> = (0..1000).map(|i| (i as f64, i as f64)).collect();
+        let downsampled = downsample(points, 100);
+        assert_eq!(downsampled.len(), 100);
+        // Max pooling should preserve the max value in each chunk
+        // Last point should be 999.0
+        assert_eq!(downsampled.last().unwrap().1, 999.0);
     }
 }
 
