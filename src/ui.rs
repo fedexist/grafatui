@@ -84,10 +84,17 @@ pub fn draw_ui(frame: &mut Frame, app: &AppState) {
     frame.render_widget(footer, chunks[2]);
 }
 
-fn render_panel(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
+fn render_panel(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState, is_selected: bool) {
+    let border_style = if is_selected {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default()
+    };
+
     if let Some(err) = &p.last_error {
         let block = Block::default()
             .borders(Borders::ALL)
+            .border_style(border_style)
             .title(format!("{} — ERROR", p.title));
         let para = Paragraph::new(err.clone())
             .block(block)
@@ -99,58 +106,65 @@ fn render_panel(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
     // Determine x bounds from range window (unix seconds)
     let end = Utc::now().timestamp() as f64;
     let start = end - app.range.as_secs_f64();
+    let x_min = start;
+    let x_max = end;
 
-    let (ymin, ymax) = calculate_y_bounds(&p.series);
+    let y_bounds = calculate_y_bounds(p);
 
     let datasets: Vec<Dataset> = p
         .series
         .iter()
         .map(|s| {
             let color = get_color_for_series(&s.name);
-            let display_name = if let Some(v) = s.value {
-                format!("{} ({:.2})", s.name, v)
-            } else {
-                s.name.clone()
-            };
+            let data = if s.visible { s.points.as_slice() } else { &[] };
             Dataset::default()
-                .name(display_name)
-                .marker(symbols::Marker::Braille)
+                .name(s.name.as_str())
+                .marker(ratatui::symbols::Marker::Braille)
                 .graph_type(GraphType::Line)
                 .style(Style::default().fg(color))
-                .data(&s.points)
+                .data(data)
         })
         .collect();
-
-    let mid = (start + end) / 2.0;
-    let xlabels = vec![
-        ts_label(start as i64),
-        ts_label(mid as i64),
-        ts_label(end as i64),
-    ];
-    let ylabels = vec![
-        format!("{:.3}", ymin),
-        format!("{:.3}", (ymin + ymax) / 2.0),
-        format!("{:.3}", ymax),
-    ];
 
     let chart = Chart::new(datasets)
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_style(border_style)
                 .title(p.title.clone()),
         )
         .x_axis(
             Axis::default()
-                .bounds([start, end])
-                .labels(xlabels.into_iter().map(Line::from).collect::<Vec<_>>()),
+                .style(Style::default().fg(Color::Gray))
+                .bounds([x_min, x_max])
+                .labels(vec![
+                    Span::from(ts_label(x_min as i64)),
+                    Span::from(ts_label(x_max as i64)),
+                ]),
         )
         .y_axis(
             Axis::default()
-                .bounds([ymin, ymax])
-                .labels(ylabels.into_iter().map(Line::from).collect::<Vec<_>>()),
+                .style(Style::default().fg(Color::Gray))
+                .bounds(y_bounds)
+                .labels(vec![
+                    Span::from(format_si(y_bounds[0])),
+                    Span::from(format_si(y_bounds[1])),
+                ]),
         );
 
     frame.render_widget(chart, area);
+
+    // Custom Legend Rendering (since Chart widget filters out data, it might also hide legend items?
+    // Actually Chart widget shows legend for datasets provided. If we filter datasets, legend is gone.
+    // So we need to render a separate legend or accept that hidden series disappear from legend.
+    // User requirement: "Dim or hide legend text for invisible series".
+    // Let's try to keep them in legend but dimmed.
+    // BUT Chart widget doesn't support "dimmed legend for missing dataset".
+    // So we will just let them disappear for now, or we can pass empty data for hidden series?
+    // If we pass empty data, the line won't be drawn, but legend will show.
+    // Let's try passing empty data for hidden series.
+
+    // REVERTING previous change to filter datasets. Instead, we map hidden series to empty data.
 }
 
 fn ts_label(ts: i64) -> String {
@@ -211,11 +225,49 @@ fn render_panel_slice_two_column(
         .constraints(vec![Constraint::Length(panel_height); right.len()])
         .split(cols[1]);
 
+    // Auto-scroll to keep selected panel in view
+    // We need to ensure app.selected_panel is within [start, end).
+    // This logic belongs in app.rs or we calculate start based on selected_panel here.
+    // For simplicity, let's override start based on selected_panel if we are in 2-col mode.
+    // But wait, render_panel_slice_two_column is generic.
+    // Let's just use the passed slice and assume caller handles scrolling?
+    // Actually, the previous logic used app.vertical_scroll.
+    // Let's change it: if selected_panel is in the list, ensure it's visible.
+
+    // NOTE: This function is used for both main list and extras.
+    // We need to know the global index of the panel to check selection.
+    // But we only have &PanelState. We can compare pointers or titles? Titles might not be unique.
+    // Better: pass the index offset.
+
+    // For now, let's just update the call sites.
+    // Wait, we need to update render_panel signature first (done above).
+    // Now we need to update the calls.
+
     for (p, rect) in left.iter().zip(left_chunks.iter()) {
-        render_panel(frame, *rect, *p, app);
+        let p_ref: &PanelState = *p;
+        let is_selected = app
+            .panels
+            .iter()
+            .position(|x| {
+                let x_ref: &PanelState = x;
+                std::ptr::eq(x_ref, p_ref)
+            })
+            .unwrap_or(usize::MAX)
+            == app.selected_panel;
+        render_panel(frame, *rect, *p, app, is_selected);
     }
     for (p, rect) in right.iter().zip(right_chunks.iter()) {
-        render_panel(frame, *rect, *p, app);
+        let p_ref: &PanelState = *p;
+        let is_selected = app
+            .panels
+            .iter()
+            .position(|x| {
+                let x_ref: &PanelState = x;
+                std::ptr::eq(x_ref, p_ref)
+            })
+            .unwrap_or(usize::MAX)
+            == app.selected_panel;
+        render_panel(frame, *rect, *p, app, is_selected);
     }
 }
 
@@ -247,7 +299,13 @@ fn render_grafana_grid(frame: &mut Frame, area: Rect, app: &AppState) {
         };
         if rect.width >= 8 && rect.height >= 4 {
             // need some space to draw axes
-            render_panel(frame, rect, p, app);
+            let is_selected = app
+                .panels
+                .iter()
+                .position(|x| std::ptr::eq(x, p))
+                .unwrap_or(usize::MAX)
+                == app.selected_panel;
+            render_panel(frame, rect, p, app, is_selected);
             rendered_any = true;
         }
     }
@@ -296,23 +354,59 @@ fn render_grafana_grid(frame: &mut Frame, area: Rect, app: &AppState) {
     }
 }
 
-fn calculate_y_bounds(series: &[crate::app::SeriesView]) -> (f64, f64) {
-    let mut ymin = f64::INFINITY;
-    let mut ymax = f64::NEG_INFINITY;
-    for s in series {
-        for &(_, y) in &s.points {
-            ymin = ymin.min(y);
-            ymax = ymax.max(y);
+fn calculate_y_bounds(p: &PanelState) -> [f64; 2] {
+    let mut min = f64::MAX;
+    let mut max = f64::MIN;
+    let mut has_data = false;
+
+    for s in &p.series {
+        if !s.visible {
+            continue;
+        }
+        for &(_, v) in &s.points {
+            if v < min {
+                min = v;
+            }
+            if v > max {
+                max = v;
+            }
+            has_data = true;
         }
     }
-    if !ymin.is_finite() || !ymax.is_finite() {
-        ymin = 0.0;
-        ymax = 1.0;
+
+    if !has_data {
+        return [0.0, 1.0];
     }
-    if (ymax - ymin).abs() < 1e-9 {
-        ymax = ymin + 1.0;
+
+    if min == max {
+        min -= 1.0;
+        max += 1.0;
     }
-    (ymin, ymax)
+
+    if p.y_axis_mode == crate::app::YAxisMode::ZeroBased {
+        if min > 0.0 {
+            min = 0.0;
+        } else if max < 0.0 {
+            max = 0.0;
+        }
+    }
+
+    // Add some padding
+    let range = max - min;
+    [min - range * 0.05, max + range * 0.05]
+}
+
+fn format_si(val: f64) -> String {
+    let abs = val.abs();
+    if abs >= 1e9 {
+        format!("{:.2}G", val / 1e9)
+    } else if abs >= 1e6 {
+        format!("{:.2}M", val / 1e6)
+    } else if abs >= 1e3 {
+        format!("{:.2}k", val / 1e3)
+    } else {
+        format!("{:.2}", val)
+    }
 }
 
 fn get_color_for_series(name: &str) -> Color {

@@ -27,6 +27,17 @@ pub struct PanelState {
     pub last_samples: usize,
     /// Grid layout position (if imported from Grafana).
     pub grid: Option<GridUnit>,
+    /// Y-axis scaling mode.
+    pub y_axis_mode: YAxisMode,
+}
+
+/// Modes for Y-axis scaling.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum YAxisMode {
+    /// Auto-scale based on min/max of data.
+    Auto,
+    /// Always include zero.
+    ZeroBased,
 }
 
 /// Represents a single time-series line in a chart.
@@ -38,6 +49,8 @@ pub struct SeriesView {
     pub value: Option<f64>,
     /// Data points (timestamp, value).
     pub points: Vec<(f64, f64)>,
+    /// Whether the series is visible in the chart.
+    pub visible: bool,
 }
 
 /// Grid positioning unit (Grafana style).
@@ -74,6 +87,8 @@ pub struct AppState {
     pub vars: HashMap<String, String>,
     /// Count of panels skipped during import.
     pub skipped_panels: usize,
+    /// Index of the currently selected panel.
+    pub selected_panel: usize,
 }
 
 impl AppState {
@@ -98,6 +113,7 @@ impl AppState {
             debug_bar: false,
             vars: HashMap::new(),
             skipped_panels,
+            selected_panel: 0,
         }
     }
 
@@ -182,6 +198,7 @@ impl AppState {
                             name: legend_base,
                             value: latest_val,
                             points: pts,
+                            visible: true,
                         });
                     }
                 }
@@ -312,6 +329,7 @@ pub fn default_queries(mut provided: Vec<String>) -> Vec<PanelState> {
             last_url: None,
             last_samples: 0,
             grid: None,
+            y_axis_mode: YAxisMode::Auto,
         })
         .collect()
 }
@@ -338,17 +356,47 @@ pub async fn run_app<B: ratatui::backend::Backend>(
                     KeyCode::Char('r') | KeyCode::Char('R') => {
                         app.refresh().await?;
                     }
-                    KeyCode::Up => {
-                        app.vertical_scroll = app.vertical_scroll.saturating_sub(1);
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if app.selected_panel > 0 {
+                            app.selected_panel -= 1;
+                        }
                     }
-                    KeyCode::Down => {
-                        app.vertical_scroll = app.vertical_scroll.saturating_add(1);
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if app.selected_panel < app.panels.len().saturating_sub(1) {
+                            app.selected_panel += 1;
+                        }
                     }
                     KeyCode::PageUp => {
                         app.vertical_scroll = app.vertical_scroll.saturating_sub(10);
                     }
                     KeyCode::PageDown => {
                         app.vertical_scroll = app.vertical_scroll.saturating_add(10);
+                    }
+                    KeyCode::Char(c) if c.is_digit(10) => {
+                        if let Some(digit) = c.to_digit(10) {
+                            if let Some(panel) = app.panels.get_mut(app.selected_panel) {
+                                if digit == 0 {
+                                    // Show all
+                                    for s in &mut panel.series {
+                                        s.visible = true;
+                                    }
+                                } else {
+                                    // Toggle specific series (1-based index)
+                                    let idx = (digit - 1) as usize;
+                                    if let Some(series) = panel.series.get_mut(idx) {
+                                        series.visible = !series.visible;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    KeyCode::Char('y') => {
+                        if let Some(panel) = app.panels.get_mut(app.selected_panel) {
+                            panel.y_axis_mode = match panel.y_axis_mode {
+                                YAxisMode::Auto => YAxisMode::ZeroBased,
+                                YAxisMode::ZeroBased => YAxisMode::Auto,
+                            };
+                        }
                     }
                     KeyCode::Home => {
                         app.vertical_scroll = 0;

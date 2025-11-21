@@ -109,6 +109,7 @@ async fn main() -> Result<()> {
                             w: g.w,
                             h: g.h,
                         }),
+                        y_axis_mode: app::YAxisMode::Auto,
                     })
                     .collect();
                 (format!("{} (imported)", d.title), ps, d.skipped_panels)
