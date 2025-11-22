@@ -1,4 +1,4 @@
-name: Release
+name: Publish Assets
 
 on:
   push:
@@ -9,8 +9,8 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Release
+  publish-assets:
+    name: Publish Assets
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -19,9 +19,8 @@ jobs:
       - name: Build release binary
         run: cargo build --release --verbose
 
-      - name: Create Release
-        id: create_release
+      - name: Upload Release Asset
         uses: softprops/action-gh-release@v1
         with:
           files: target/release/grafatui
-          generate_release_notes: true
+          generate_release_notes: false

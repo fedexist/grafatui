@@ -107,6 +107,66 @@ grafatui --grafana-json ./dash.json --var job=node --var instance=server-01
 | `0` | Show all series |
 | `?` | Toggle debug bar |
 
+## Contributing
+
+This project uses [Conventional Commits](https://www.conventionalcommits.org/) for automated versioning and changelog generation.
+
+### Commit Message Format
+
+Use the following format for your commits:
+
+```
+<type>(<scope>): <description>
+
+[optional body]
+
+[optional footer]
+```
+
+**Types:**
+- `feat`: New feature (triggers MINOR version bump)
+- `fix`: Bug fix (triggers PATCH version bump)
+- `docs`: Documentation changes
+- `style`: Code style changes (formatting, etc.)
+- `refactor`: Code refactoring
+- `perf`: Performance improvements
+- `test`: Adding or updating tests
+- `chore`: Maintenance tasks
+- `BREAKING CHANGE`: In footer, triggers MAJOR version bump
+
+**Examples:**
+```bash
+feat(zoom): add pan left/right with bracket keys
+fix(ui): correct color assignment for many series
+docs(readme): update keyboard shortcuts table
+refactor(app)!: change AppState API
+
+BREAKING CHANGE: AppState constructor now requires theme parameter
+```
+
+### Using Commitizen (Optional)
+
+To help write conventional commits, you can install `git-commitizen`:
+
+```bash
+cargo install git-commitizen
+```
+
+Then use `git cz` instead of `git commit` for an interactive prompt.
+
+### Release Process
+
+Releases are automated via GitHub Actions using [release-plz](https://release-plz.ieni.dev/):
+
+1. Push commits to `main` branch using Conventional Commits format
+2. `release-plz` analyzes commits and determines version bump
+3. A PR is automatically created with:
+   - Updated `Cargo.toml` version
+   - Updated `CHANGELOG.md`
+   - New Git tag
+4. Review and merge the PR
+5. GitHub release is created automatically
+
 ## License
 
 MIT
