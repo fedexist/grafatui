@@ -1,10 +1,6 @@
 # Configuration for release-plz
 # https://release-plz.ieni.dev/docs/config
 
-[changelog]
-# Use git-cliff for changelog generation
-git_cliff_args = ["--config", "cliff.toml"]
-
 [workspace]
 # Only run on main branch
 allow_branch = "main"
@@ -12,6 +8,64 @@ allow_branch = "main"
 publish = false
 # Enable changelog updates
 changelog_update = true
+
+[changelog]
+# changelog header
+header = """
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+"""
+
+# template for the changelog body
+# https://keats.github.io/tera/docs/#introduction
+body = """
+{% if version %}\
+    ## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+    ## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+    ### {{ group | striptags | trim | upper_first }}
+    {% for commit in commits %}
+        - {% if commit.scope %}**{{ commit.scope }}:** {% endif %}\
+            {% if commit.breaking %}[**breaking**] {% endif %}\
+            {{ commit.message | upper_first }} ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/fedexist/grafatui/commit/{{ commit.id }}))\
+    {% endfor %}
+{% endfor %}\n
+"""
+
+# remove the leading and trailing whitespace from the template
+trim = true
+
+# regex for matching git tags
+tag_pattern = "v[0-9].*"
+
+# sort the commits inside sections by oldest/newest order
+sort_commits = "oldest"
+
+# regex for parsing and grouping commits
+commit_parsers = [
+  { message = "^feat", group = "<!-- 0 -->⛰️  Features" },
+  { message = "^fix", group = "<!-- 1 -->🐛 Bug Fixes" },
+  { message = "^doc", group = "<!-- 2 -->📚 Documentation" },
+  { message = "^perf", group = "<!-- 3 -->⚡ Performance" },
+  { message = "^refactor", group = "<!-- 4 -->🚜 Refactor" },
+  { message = "^style", group = "<!-- 5 -->🎨 Styling" },
+  { message = "^test", group = "<!-- 6 -->🧪 Testing" },
+  { message = "^chore\\(release\\): prepare for", skip = true },
+  { message = "^chore\\(deps.*\\)", skip = true },
+  { message = "^chore\\(pr\\)", skip = true },
+  { message = "^chore\\(pull\\)", skip = true },
+  { message = "^chore|^ci", group = "<!-- 7 -->⚙️ Miscellaneous Tasks" },
+  { body = ".*security", group = "<!-- 8 -->🛡️ Security" },
+  { message = "^revert", group = "<!-- 9 -->◀️ Revert" },
+]
+
+protect_breaking_commits = false
 
 # Package-specific settings
 [[package]]
