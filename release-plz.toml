@@ -1,0 +1,20 @@
+# Configuration for release-plz
+# https://release-plz.ieni.dev/docs/config
+
+[changelog]
+# Use git-cliff for changelog generation
+git_cliff_args = ["--config", "cliff.toml"]
+
+[workspace]
+# Only run on main branch
+allow_branch = "main"
+# Don't publish to crates.io automatically (require manual trigger)
+publish = false
+# Enable changelog updates
+changelog_update = true
+
+# Package-specific settings
+[[package]]
+name = "grafatui"
+# Changelog path
+changelog_path = "CHANGELOG.md"
