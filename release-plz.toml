@@ -2,8 +2,12 @@
 # https://release-plz.ieni.dev/docs/config
 
 [workspace]
-# Only run on main branch
-allow_branch = "main"
+# Repository URL for linking commits/issues
+repo_url = "https://github.com/fedexist/grafatui"
+# Create GitHub releases automatically
+git_release_enable = true
+# Prefix for release PR branches
+pr_branch_prefix = "release-plz-"
 # Don't publish to crates.io automatically (require manual trigger)
 publish = false
 # Enable changelog updates
