@@ -6,7 +6,7 @@
 
 - **Prometheus Integration**: Connects directly to your Prometheus instance.
 - **Grafana Import**: Import existing Grafana dashboards (JSON) to view your familiar panels in the terminal.
-    - Supports `graph`, `timeseries`, and `stat` panels.
+    - Supports `graph`, `timeseries`, `gauge`, `bargauge`, `table`, `stat`, and `heatmap` panels.
     - Parses variables (`templating.list`) and `legendFormat`.
     - Approximates grid layouts (`gridPos`).
 - **Interactive TUI**:
@@ -27,7 +27,19 @@ cd grafatui
 cargo install --path .
 ```
 
+## Quick Demo
+
+Try grafatui in under a minute with the pre-configured demo environment:
+
+```bash
+cd examples/demo && docker-compose up -d && sleep 5 && cd ../.. && cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus http://localhost:10001
+```
+
+This starts Prometheus + node-exporter and launches grafatui with a dashboard showcasing all 6 visualization types.
+See [`examples/demo/README.md`](examples/demo/README.md) for details.
+
 ## Usage
+
 
 ```bash
 grafatui [OPTIONS]
@@ -87,6 +99,15 @@ grafatui --prometheus http://prod-prom:9090 --grafana-json ./dashboards/node-exp
 grafatui --grafana-json ./dash.json --var job=node --var instance=server-01
 ```
 
+**Try the included examples:**
+```bash
+# Test all visualization types at once
+grafatui --grafana-json examples/dashboards/all_visualizations.json --prometheus http://localhost:9090
+```
+
+> **Note:** See the `examples/` directory for more sample dashboards demonstrating all supported panel types.
+
+
 ### Keyboard Controls
 
 | Key | Action |
@@ -113,9 +134,11 @@ grafatui --grafana-json ./dash.json --var job=node --var instance=server-01
 
 ### Mouse Controls
 
-- **Click**: Select panel / Move cursor (in Inspect mode)
-- **Drag**: Move cursor (in Inspect mode)
+- **Click**: Select panel (in Normal mode) / Move cursor (in Fullscreen Inspect mode)
+- **Drag**: Move cursor (in Fullscreen Inspect mode only)
 - **Scroll**: Zoom in / out (vertical scroll)
+
+> **Note**: In Normal mode, clicking only selects panels. Press `v` to enable cursor/inspection mode. In Fullscreen mode, clicking activates cursor automatically.
 
 ## Contributing
 

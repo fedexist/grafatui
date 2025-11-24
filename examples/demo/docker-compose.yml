@@ -1,12 +1,10 @@
-version: "3.8"
-
 services:
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
     restart: unless-stopped
     ports:
-      - "9091:9090"
+      - "8585:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prom_data:/prometheus
@@ -15,7 +13,7 @@ services:
       - --storage.tsdb.path=/prometheus
       - --web.enable-lifecycle
       - --storage.tsdb.retention.time=2d
-    networks: [mon]
+    networks: [ mon ]
 
   node-exporter:
     image: prom/node-exporter:latest
@@ -34,8 +32,7 @@ services:
       - --path.rootfs=/host
       - --path.procfs=/host/proc
       - --path.sysfs=/host/sys
-    networks: [mon]
-
+    networks: [ mon ]
   # cadvisor:  # <- optional (uncomment to enable)
   #   image: gcr.io/cadvisor/cadvisor:latest
   #   container_name: cadvisor
