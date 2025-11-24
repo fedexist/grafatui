@@ -135,6 +135,7 @@ async fn main() -> Result<()> {
                             h: g.h,
                         }),
                         y_axis_mode: app::YAxisMode::Auto,
+                        panel_type: q.panel_type,
                     })
                     .collect();
                 (format!("{} (imported)", d.title), ps, d.skipped_panels)
