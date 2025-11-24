@@ -9,6 +9,9 @@ use ratatui::{
 use std::collections::HashMap;
 
 /// Renders the entire application UI into the given frame.
+///
+/// This function handles the layout of the title bar, charts area, and footer.
+/// It delegates the rendering of individual panels to `render_panel`.
 pub fn draw_ui(frame: &mut Frame, app: &AppState) {
     let size = frame.area();
 
@@ -356,6 +359,18 @@ fn calculate_two_column_layout_subset(
     results
 }
 
+/// Determines which panel is located at the given coordinates.
+///
+/// # Arguments
+///
+/// * `app` - The application state.
+/// * `area` - The total area available for charts.
+/// * `x` - The x-coordinate of the mouse event.
+/// * `y` - The y-coordinate of the mouse event.
+///
+/// # Returns
+///
+/// An `Option` containing a tuple of `(panel_index, panel_rect)` if a panel was hit.
 pub fn hit_test(app: &AppState, area: Rect, x: u16, y: u16) -> Option<(usize, Rect)> {
     // Replicate main layout
     let chunks = Layout::default()
@@ -396,6 +411,14 @@ pub fn hit_test(app: &AppState, area: Rect, x: u16, y: u16) -> Option<(usize, Re
     None
 }
 
+/// Renders a single panel.
+///
+/// This function handles:
+/// - Drawing the panel border and title.
+/// - Rendering the chart with data series.
+/// - Drawing the legend (if space permits).
+/// - Handling inspection mode (cursor line and values).
+/// - Displaying error messages if the panel has an error.
 fn render_panel(
     frame: &mut Frame,
     area: Rect,
@@ -705,4 +728,87 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> Color {
         ((g + m) * 255.0) as u8,
         ((b + m) * 255.0) as u8,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::{SeriesView, YAxisMode};
+
+    fn create_test_panel() -> PanelState {
+        PanelState {
+            title: "test".to_string(),
+            exprs: vec![],
+            legends: vec![],
+            series: vec![],
+            last_error: None,
+            last_url: None,
+            last_samples: 0,
+            grid: None,
+            y_axis_mode: YAxisMode::Auto,
+        }
+    }
+
+    #[test]
+    fn test_calculate_y_bounds_basic() {
+        let mut p = create_test_panel();
+        p.series.push(SeriesView {
+            name: "test".to_string(),
+            value: None,
+            points: vec![(0.0, 10.0), (1.0, 20.0)],
+            visible: true,
+        });
+
+        let bounds = calculate_y_bounds(&p);
+        assert!(bounds[0] < 10.0);
+        assert!(bounds[1] > 20.0);
+    }
+
+    #[test]
+    fn test_calculate_y_bounds_nan() {
+        let mut p = create_test_panel();
+        p.series.push(SeriesView {
+            name: "test".to_string(),
+            value: None,
+            points: vec![(0.0, 10.0), (1.0, f64::NAN), (2.0, 20.0)],
+            visible: true,
+        });
+
+        let bounds = calculate_y_bounds(&p);
+        assert!(bounds[0] < 10.0); // Should ignore NAN
+        assert!(bounds[1] > 20.0);
+    }
+
+    #[test]
+    fn test_calculate_y_bounds_infinity() {
+        let mut p = create_test_panel();
+        p.series.push(SeriesView {
+            name: "test".to_string(),
+            value: None,
+            points: vec![(0.0, 10.0), (1.0, f64::INFINITY), (2.0, 20.0)],
+            visible: true,
+        });
+
+        let bounds = calculate_y_bounds(&p);
+        assert!(bounds[0] < 10.0); // Should ignore INFINITY
+        assert!(bounds[1] > 20.0);
+    }
+
+    #[test]
+    fn test_calculate_y_bounds_zero_based() {
+        let mut p = create_test_panel();
+        p.y_axis_mode = YAxisMode::ZeroBased;
+        p.series.push(SeriesView {
+            name: "test".to_string(),
+            value: None,
+            points: vec![(0.0, 10.0), (1.0, 20.0)],
+            visible: true,
+        });
+
+        let bounds = calculate_y_bounds(&p);
+        // Range is 0.0 to 20.0. Padding is 5% of 20.0 = 1.0.
+        // So min should be 0.0 - 1.0 = -1.0.
+        assert_eq!(bounds[0], -1.0);
+        assert!(bounds[1] > 20.0);
+    }
 }

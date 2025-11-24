@@ -115,6 +115,18 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Creates a new application state.
+    ///
+    /// # Arguments
+    ///
+    /// * `prometheus` - The Prometheus client.
+    /// * `range` - The initial time range window.
+    /// * `step` - The query resolution step.
+    /// * `refresh_every` - The data refresh interval.
+    /// * `title` - The dashboard title.
+    /// * `panels` - The list of panels to display.
+    /// * `skipped_panels` - The count of panels that were skipped during import.
+    /// * `theme` - The UI theme to use.
     pub fn new(
         prometheus: prom::PromClient,
         range: Duration,
