@@ -42,6 +42,7 @@ pub enum PanelType {
     BarGauge,
     Table,
     Stat,
+    Heatmap,
     Unknown,
 }
 

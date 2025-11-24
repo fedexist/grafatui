@@ -6,7 +6,7 @@
 
 - **Prometheus Integration**: Connects directly to your Prometheus instance.
 - **Grafana Import**: Import existing Grafana dashboards (JSON) to view your familiar panels in the terminal.
-    - Supports `graph`, `timeseries`, `gauge`, `bargauge`, `table`, and `stat` panels.
+    - Supports `graph`, `timeseries`, `gauge`, `bargauge`, `table`, `stat`, and `heatmap` panels.
     - Parses variables (`templating.list`) and `legendFormat`.
     - Approximates grid layouts (`gridPos`).
 - **Interactive TUI**:
