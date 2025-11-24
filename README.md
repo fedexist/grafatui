@@ -134,9 +134,11 @@ grafatui --grafana-json examples/dashboards/all_visualizations.json --prometheus
 
 ### Mouse Controls
 
-- **Click**: Select panel / Move cursor (in Inspect mode)
-- **Drag**: Move cursor (in Inspect mode)
+- **Click**: Select panel (in Normal mode) / Move cursor (in Fullscreen Inspect mode)
+- **Drag**: Move cursor (in Fullscreen Inspect mode only)
 - **Scroll**: Zoom in / out (vertical scroll)
+
+> **Note**: In Normal mode, clicking only selects panels. Press `v` to enable cursor/inspection mode. In Fullscreen mode, clicking activates cursor automatically.
 
 ## Contributing
 

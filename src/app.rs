@@ -799,29 +799,31 @@ pub async fn run_app<B: ratatui::backend::Backend>(
 
                             match app.mode {
                                 AppMode::Normal | AppMode::Inspect => {
-                                    app.mode = AppMode::Inspect;
+                                    // In normal mode, mouse clicks only select the panel
+                                    // Cursor mode must be activated with 'v' key
+                                    // Don't transition to Inspect mode
                                 }
                                 AppMode::Fullscreen | AppMode::FullscreenInspect => {
+                                    // In fullscreen, mouse clicks enable cursor
                                     app.mode = AppMode::FullscreenInspect;
+
+                                    // Calculate cursor_x based on click position within panel_rect
+                                    let chart_width = panel_rect.width.saturating_sub(2) as f64;
+                                    if chart_width > 0.0 {
+                                        let relative_x =
+                                            (mouse.column.saturating_sub(panel_rect.x + 1)) as f64;
+                                        let fraction = (relative_x / chart_width).clamp(0.0, 1.0);
+
+                                        let end_ts = (chrono::Utc::now().timestamp()
+                                            - app.time_offset.as_secs() as i64)
+                                            as f64;
+                                        let start_ts = end_ts - app.range.as_secs_f64();
+
+                                        app.cursor_x =
+                                            Some(start_ts + fraction * app.range.as_secs_f64());
+                                    }
                                 }
                                 _ => {}
-                            }
-
-                            // Calculate cursor_x based on click position within panel_rect
-                            // Chart area is inside the block borders, so we need to account for that.
-                            // Assuming borders are 1 char wide.
-                            let chart_width = panel_rect.width.saturating_sub(2) as f64;
-                            if chart_width > 0.0 {
-                                let relative_x =
-                                    (mouse.column.saturating_sub(panel_rect.x + 1)) as f64;
-                                let fraction = (relative_x / chart_width).clamp(0.0, 1.0);
-
-                                let end_ts = (chrono::Utc::now().timestamp()
-                                    - app.time_offset.as_secs() as i64)
-                                    as f64;
-                                let start_ts = end_ts - app.range.as_secs_f64();
-
-                                app.cursor_x = Some(start_ts + fraction * app.range.as_secs_f64());
                             }
                         }
                     }

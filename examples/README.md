@@ -8,7 +8,7 @@ Want to try grafatui instantly? Use the pre-configured demo environment:
 
 ```bash
 cd demo
-docker-compose up -d && sleep 5 && cd ../.. && cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus http://localhost:10001
+docker-compose up -d && sleep 5 && cd ../.. && cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus http://localhost:8585
 ```
 
 See [`demo/README.md`](demo/README.md) for details.

@@ -41,14 +41,14 @@ cd examples/demo
 docker-compose up -d
 
 # Verify Prometheus is running
-curl http://localhost:10001/-/healthy
+curl http://localhost:8585/-/healthy
 
 # Run grafatui (from repo root)
 cd ../..
-cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus http://localhost:10001
+cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus http://localhost:8585
 
 # Optional: customize time range and step
-cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus http://localhost:10001 --range 5m --step 2s
+cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus http://localhost:8585 --range 5m --step 2s
 ```
 
 ## Cleanup
