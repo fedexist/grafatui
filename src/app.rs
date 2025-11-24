@@ -63,6 +63,16 @@ pub struct GridUnit {
     pub h: i32,
 }
 
+/// Application mode.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AppMode {
+    Normal,
+    Search,
+    Fullscreen,
+    Inspect,
+    FullscreenInspect,
+}
+
 /// Global application state.
 #[derive(Debug)]
 pub struct AppState {
@@ -94,6 +104,14 @@ pub struct AppState {
     pub theme: Theme,
     /// Time offset from "now" for panning backward in time (0 = live mode).
     pub time_offset: Duration,
+    /// Current application mode.
+    pub mode: AppMode,
+    /// Search query string.
+    pub search_query: String,
+    /// Filtered panel indices based on search query.
+    pub search_results: Vec<usize>,
+    /// Cursor X position (timestamp) for inspection.
+    pub cursor_x: Option<f64>,
 }
 
 impl AppState {
@@ -122,6 +140,10 @@ impl AppState {
             selected_panel: 0,
             theme,
             time_offset: Duration::from_secs(0),
+            mode: AppMode::Normal,
+            search_query: String::new(),
+            search_results: Vec::new(),
+            cursor_x: None,
         }
     }
 
@@ -168,6 +190,29 @@ impl AppState {
     /// Check if currently in live mode.
     pub fn is_live(&self) -> bool {
         self.time_offset.as_secs() == 0
+    }
+
+    /// Move cursor left/right by one step.
+    pub fn move_cursor(&mut self, direction: i32) {
+        if let Some(current_x) = self.cursor_x {
+            let step_secs = self.step.as_secs_f64();
+            let new_x = current_x + (direction as f64 * step_secs);
+
+            // Clamp to current view range
+            let end_ts =
+                (chrono::Utc::now().timestamp() - self.time_offset.as_secs() as i64) as f64;
+            let start_ts = end_ts - self.range.as_secs_f64();
+
+            if new_x >= start_ts && new_x <= end_ts {
+                self.cursor_x = Some(new_x);
+            }
+        } else {
+            // Initialize cursor at center of view if not set
+            let end_ts =
+                (chrono::Utc::now().timestamp() - self.time_offset.as_secs() as i64) as f64;
+            let start_ts = end_ts - self.range.as_secs_f64();
+            self.cursor_x = Some((start_ts + end_ts) / 2.0);
+        }
     }
 
     pub async fn refresh(&mut self) -> Result<()> {
@@ -447,101 +492,287 @@ pub async fn run_app<B: ratatui::backend::Backend>(
         let should_refresh = app.last_refresh.elapsed() >= app.refresh_every;
 
         if event::poll(timeout)? {
-            if let Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Char('q') => return Ok(()),
-                    KeyCode::Char('r') | KeyCode::Char('R') => {
-                        app.refresh().await?;
-                    }
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        if app.selected_panel > 0 {
-                            app.selected_panel -= 1;
-                        }
-                    }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        if app.selected_panel < app.panels.len().saturating_sub(1) {
-                            app.selected_panel += 1;
-                        }
-                    }
-                    KeyCode::PageUp => {
-                        app.vertical_scroll = app.vertical_scroll.saturating_sub(10);
-                    }
-                    KeyCode::PageDown => {
-                        app.vertical_scroll = app.vertical_scroll.saturating_add(10);
-                    }
-                    KeyCode::Char(c) if c.is_digit(10) => {
-                        if let Some(digit) = c.to_digit(10) {
-                            if let Some(panel) = app.panels.get_mut(app.selected_panel) {
-                                if digit == 0 {
-                                    // Show all
-                                    for s in &mut panel.series {
-                                        s.visible = true;
-                                    }
+            match event::read()? {
+                Event::Key(key) => {
+                    if app.mode == AppMode::Search {
+                        match key.code {
+                            KeyCode::Esc => {
+                                app.mode = AppMode::Normal;
+                                app.search_query.clear();
+                                app.search_results.clear();
+                            }
+                            KeyCode::Enter => {
+                                if let Some(&idx) = app.search_results.first() {
+                                    app.selected_panel = idx;
+                                    app.mode = AppMode::Fullscreen; // Go to Fullscreen on selection
+                                    app.search_query.clear();
+                                    app.search_results.clear();
+                                }
+                            }
+                            KeyCode::Backspace => {
+                                app.search_query.pop();
+                                // Update results
+                                if app.search_query.is_empty() {
+                                    app.search_results.clear();
                                 } else {
-                                    // Toggle specific series (1-based index)
-                                    let idx = (digit - 1) as usize;
-                                    if let Some(series) = panel.series.get_mut(idx) {
-                                        series.visible = !series.visible;
+                                    app.search_results = app
+                                        .panels
+                                        .iter()
+                                        .enumerate()
+                                        .filter(|(_, p)| {
+                                            p.title
+                                                .to_lowercase()
+                                                .contains(&app.search_query.to_lowercase())
+                                        })
+                                        .map(|(i, _)| i)
+                                        .collect();
+                                }
+                            }
+                            KeyCode::Char(c) => {
+                                app.search_query.push(c);
+                                // Update results
+                                app.search_results = app
+                                    .panels
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(_, p)| {
+                                        p.title
+                                            .to_lowercase()
+                                            .contains(&app.search_query.to_lowercase())
+                                    })
+                                    .map(|(i, _)| i)
+                                    .collect();
+                            }
+                            _ => {}
+                        }
+                    } else if app.mode == AppMode::Inspect {
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Char('v') => {
+                                app.mode = AppMode::Normal;
+                                app.cursor_x = None;
+                            }
+                            KeyCode::Left => {
+                                app.move_cursor(-1);
+                            }
+                            KeyCode::Right => {
+                                app.move_cursor(1);
+                            }
+                            KeyCode::Char('q') => return Ok(()),
+                            _ => {}
+                        }
+                    } else if app.mode == AppMode::Fullscreen {
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Char('f') | KeyCode::Enter => {
+                                app.mode = AppMode::Normal;
+                            }
+                            KeyCode::Char('v') => {
+                                app.mode = AppMode::FullscreenInspect;
+                                // Initialize cursor
+                                let end_ts = (chrono::Utc::now().timestamp()
+                                    - app.time_offset.as_secs() as i64)
+                                    as f64;
+                                let start_ts = end_ts - app.range.as_secs_f64();
+                                app.cursor_x = Some((start_ts + end_ts) / 2.0);
+                            }
+                            KeyCode::Char('q') => return Ok(()),
+                            KeyCode::Char('r') | KeyCode::Char('R') => {
+                                app.refresh().await?;
+                            }
+                            // Allow some navigation/interaction in fullscreen too?
+                            // For now, just basic ones.
+                            KeyCode::Char('+') => {
+                                app.zoom_out();
+                                app.refresh().await?;
+                            }
+                            KeyCode::Char('-') => {
+                                app.zoom_in();
+                                app.refresh().await?;
+                            }
+                            KeyCode::Char('[') => {
+                                if key.modifiers.contains(KeyModifiers::SHIFT) {
+                                    app.pan_left();
+                                    app.refresh().await?;
+                                }
+                            }
+                            KeyCode::Left => {
+                                if key.modifiers.contains(KeyModifiers::SHIFT) {
+                                    app.pan_left();
+                                    app.refresh().await?;
+                                }
+                            }
+                            KeyCode::Char(']') => {
+                                if key.modifiers.contains(KeyModifiers::SHIFT) {
+                                    app.pan_right();
+                                    app.refresh().await?;
+                                }
+                            }
+                            KeyCode::Right => {
+                                if key.modifiers.contains(KeyModifiers::SHIFT) {
+                                    app.pan_right();
+                                    app.refresh().await?;
+                                }
+                            }
+                            KeyCode::Char('0') => {
+                                app.reset_to_live();
+                                app.refresh().await?;
+                            }
+                            KeyCode::Char('y') => {
+                                if let Some(panel) = app.panels.get_mut(app.selected_panel) {
+                                    panel.y_axis_mode = match panel.y_axis_mode {
+                                        YAxisMode::Auto => YAxisMode::ZeroBased,
+                                        YAxisMode::ZeroBased => YAxisMode::Auto,
+                                    };
+                                }
+                            }
+                            _ => {}
+                        }
+                    } else if app.mode == AppMode::FullscreenInspect {
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Char('v') => {
+                                app.mode = AppMode::Fullscreen;
+                                app.cursor_x = None;
+                            }
+                            KeyCode::Left => {
+                                app.move_cursor(-1);
+                            }
+                            KeyCode::Right => {
+                                app.move_cursor(1);
+                            }
+                            KeyCode::Char('q') => return Ok(()),
+                            _ => {}
+                        }
+                    } else {
+                        // Normal Mode
+                        match key.code {
+                            KeyCode::Char('f') => {
+                                app.mode = AppMode::Fullscreen;
+                            }
+                            KeyCode::Char('v') => {
+                                app.mode = AppMode::Inspect;
+                                // Initialize cursor
+                                let end_ts = (chrono::Utc::now().timestamp()
+                                    - app.time_offset.as_secs() as i64)
+                                    as f64;
+                                let start_ts = end_ts - app.range.as_secs_f64();
+                                app.cursor_x = Some((start_ts + end_ts) / 2.0);
+                            }
+                            KeyCode::Char('q') => return Ok(()),
+                            KeyCode::Char('r') | KeyCode::Char('R') => {
+                                app.refresh().await?;
+                            }
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                if app.selected_panel > 0 {
+                                    app.selected_panel -= 1;
+                                }
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                if app.selected_panel < app.panels.len().saturating_sub(1) {
+                                    app.selected_panel += 1;
+                                }
+                            }
+                            KeyCode::PageUp => {
+                                app.vertical_scroll = app.vertical_scroll.saturating_sub(10);
+                            }
+                            KeyCode::PageDown => {
+                                app.vertical_scroll = app.vertical_scroll.saturating_add(10);
+                            }
+                            KeyCode::Char(c) if c.is_digit(10) => {
+                                if let Some(digit) = c.to_digit(10) {
+                                    if let Some(panel) = app.panels.get_mut(app.selected_panel) {
+                                        if digit == 0 {
+                                            // Show all
+                                            for s in &mut panel.series {
+                                                s.visible = true;
+                                            }
+                                        } else {
+                                            // Toggle specific series (1-based index)
+                                            let idx = (digit - 1) as usize;
+                                            if let Some(series) = panel.series.get_mut(idx) {
+                                                series.visible = !series.visible;
+                                            }
+                                        }
                                     }
                                 }
                             }
+                            KeyCode::Char('y') => {
+                                if let Some(panel) = app.panels.get_mut(app.selected_panel) {
+                                    panel.y_axis_mode = match panel.y_axis_mode {
+                                        YAxisMode::Auto => YAxisMode::ZeroBased,
+                                        YAxisMode::ZeroBased => YAxisMode::Auto,
+                                    };
+                                }
+                            }
+                            KeyCode::Home => {
+                                app.vertical_scroll = 0;
+                            }
+                            KeyCode::End => {
+                                app.vertical_scroll = usize::MAX; // Will be clamped by rendering logic usually, or we should track max height
+                            }
+                            KeyCode::Char('+') => {
+                                app.zoom_out();
+                                app.refresh().await?;
+                            }
+                            KeyCode::Char('-') => {
+                                app.zoom_in();
+                                app.refresh().await?;
+                            }
+                            KeyCode::Char('[') => {
+                                if key.modifiers.contains(KeyModifiers::SHIFT) {
+                                    app.pan_left();
+                                    app.refresh().await?;
+                                }
+                            }
+                            KeyCode::Left => {
+                                if key.modifiers.contains(KeyModifiers::SHIFT) {
+                                    app.pan_left();
+                                    app.refresh().await?;
+                                }
+                            }
+                            KeyCode::Char(']') => {
+                                if key.modifiers.contains(KeyModifiers::SHIFT) {
+                                    app.pan_right();
+                                    app.refresh().await?;
+                                }
+                            }
+                            KeyCode::Right => {
+                                if key.modifiers.contains(KeyModifiers::SHIFT) {
+                                    app.pan_right();
+                                    app.refresh().await?;
+                                }
+                            }
+                            KeyCode::Char('0') => {
+                                app.reset_to_live();
+                                app.refresh().await?;
+                            }
+                            KeyCode::Char('?') => {
+                                app.debug_bar = !app.debug_bar;
+                            }
+                            KeyCode::Char('/') => {
+                                app.mode = AppMode::Search;
+                                app.search_query.clear();
+                                app.search_results.clear();
+                            }
+                            _ => {}
                         }
                     }
-                    KeyCode::Char('y') => {
-                        if let Some(panel) = app.panels.get_mut(app.selected_panel) {
-                            panel.y_axis_mode = match panel.y_axis_mode {
-                                YAxisMode::Auto => YAxisMode::ZeroBased,
-                                YAxisMode::ZeroBased => YAxisMode::Auto,
-                            };
+                }
+                Event::Mouse(mouse) => match mouse.kind {
+                    crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                        let size = terminal.size()?;
+                        let rect = ratatui::layout::Rect::new(0, 0, size.width, size.height);
+                        if let Some(idx) = ui::hit_test(app, rect, mouse.column, mouse.row) {
+                            app.selected_panel = idx;
                         }
                     }
-                    KeyCode::Home => {
-                        app.vertical_scroll = 0;
+                    crossterm::event::MouseEventKind::ScrollDown => {
+                        app.vertical_scroll = app.vertical_scroll.saturating_add(1);
                     }
-                    KeyCode::End => {
-                        app.vertical_scroll = usize::MAX; // Will be clamped by rendering logic usually, or we should track max height
-                    }
-                    KeyCode::Char('+') => {
-                        app.zoom_out();
-                        app.refresh().await?;
-                    }
-                    KeyCode::Char('-') => {
-                        app.zoom_in();
-                        app.refresh().await?;
-                    }
-                    KeyCode::Char('[') => {
-                        if key.modifiers.contains(KeyModifiers::SHIFT) {
-                            app.pan_left();
-                            app.refresh().await?;
-                        }
-                    }
-                    KeyCode::Left => {
-                        if key.modifiers.contains(KeyModifiers::SHIFT) {
-                            app.pan_left();
-                            app.refresh().await?;
-                        }
-                    }
-                    KeyCode::Char(']') => {
-                        if key.modifiers.contains(KeyModifiers::SHIFT) {
-                            app.pan_right();
-                            app.refresh().await?;
-                        }
-                    }
-                    KeyCode::Right => {
-                        if key.modifiers.contains(KeyModifiers::SHIFT) {
-                            app.pan_right();
-                            app.refresh().await?;
-                        }
-                    }
-                    KeyCode::Char('0') => {
-                        app.reset_to_live();
-                        app.refresh().await?;
-                    }
-                    KeyCode::Char('?') => {
-                        app.debug_bar = !app.debug_bar;
+                    crossterm::event::MouseEventKind::ScrollUp => {
+                        app.vertical_scroll = app.vertical_scroll.saturating_sub(1);
                     }
                     _ => {}
-                }
+                },
+                _ => {}
             }
         }
 
