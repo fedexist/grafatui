@@ -1,0 +1,144 @@
+{
+    "title": "Prometheus Self-Monitoring - All Visualizations",
+    "templating": {
+        "list": [
+            {
+                "name": "job",
+                "current": {
+                    "text": "prometheus",
+                    "value": "prometheus"
+                }
+            }
+        ]
+    },
+    "panels": [
+        {
+            "type": "graph",
+            "title": "HTTP Request Rate by Status Code",
+            "gridPos": {
+                "x": 0,
+                "y": 0,
+                "w": 12,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "expr": "sum by (code) (rate(prometheus_http_requests_total{job=\"$job\"}[1m]))",
+                    "legendFormat": "{{code}}"
+                }
+            ]
+        },
+        {
+            "type": "gauge",
+            "title": "Memory Usage (MB)",
+            "gridPos": {
+                "x": 12,
+                "y": 0,
+                "w": 6,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "expr": "process_resident_memory_bytes{job=\"$job\"} / 1024 / 1024",
+                    "legendFormat": "Memory MB"
+                }
+            ]
+        },
+        {
+            "type": "stat",
+            "title": "Uptime",
+            "gridPos": {
+                "x": 18,
+                "y": 0,
+                "w": 6,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "expr": "time() - process_start_time_seconds{job=\"$job\"}",
+                    "legendFormat": "Uptime (seconds)"
+                }
+            ]
+        },
+        {
+            "type": "graph",
+            "title": "Network Receive Rate (node-exporter)",
+            "gridPos": {
+                "x": 0,
+                "y": 8,
+                "w": 12,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "expr": "sum by (device) (irate(node_network_receive_bytes_total{job=\"node\"}[30s]))",
+                    "legendFormat": "{{device}}"
+                }
+            ]
+        },
+        {
+            "type": "bargauge",
+            "title": "Active Targets by Job",
+            "gridPos": {
+                "x": 12,
+                "y": 8,
+                "w": 6,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "expr": "count by (job) (up == 1)",
+                    "legendFormat": "{{job}}"
+                }
+            ]
+        },
+        {
+            "type": "table",
+            "title": "Target Status",
+            "gridPos": {
+                "x": 18,
+                "y": 8,
+                "w": 6,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "expr": "up",
+                    "legendFormat": "{{job}} - {{instance}}"
+                }
+            ]
+        },
+        {
+            "type": "heatmap",
+            "title": "HTTP Request Duration Distribution",
+            "gridPos": {
+                "x": 0,
+                "y": 16,
+                "w": 12,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "expr": "rate(prometheus_http_request_duration_seconds_sum{job=\"$job\"}[1m]) / rate(prometheus_http_request_duration_seconds_count{job=\"$job\"}[1m])",
+                    "legendFormat": "{{handler}}"
+                }
+            ]
+        },
+        {
+            "type": "graph",
+            "title": "TSDB Chunks Created",
+            "gridPos": {
+                "x": 12,
+                "y": 16,
+                "w": 12,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "expr": "rate(prometheus_tsdb_head_chunks_created_total{job=\"$job\"}[1m])",
+                    "legendFormat": "Chunks/sec"
+                }
+            ]
+        }
+    ]
+}

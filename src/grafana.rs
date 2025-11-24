@@ -153,6 +153,7 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
             "gauge" => crate::app::PanelType::Gauge,
             "bargauge" => crate::app::PanelType::BarGauge,
             "table" => crate::app::PanelType::Table,
+            "heatmap" => crate::app::PanelType::Heatmap,
             _ => crate::app::PanelType::Unknown,
         };
 
