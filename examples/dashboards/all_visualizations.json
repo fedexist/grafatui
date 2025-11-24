@@ -1,0 +1,112 @@
+{
+    "title": "Grafatui Test Dashboard - All Visualizations",
+    "templating": {
+        "list": [
+            {
+                "name": "instance",
+                "current": {
+                    "text": "localhost:9090",
+                    "value": "localhost:9090"
+                }
+            }
+        ]
+    },
+    "panels": [
+        {
+            "type": "graph",
+            "title": "1. Graph - CPU Usage",
+            "gridPos": {
+                "x": 0,
+                "y": 0,
+                "w": 8,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "expr": "rate(process_cpu_seconds_total{instance=\"$instance\"}[1m])",
+                    "legendFormat": "CPU {{job}}"
+                }
+            ]
+        },
+        {
+            "type": "gauge",
+            "title": "2. Gauge - Memory %",
+            "gridPos": {
+                "x": 8,
+                "y": 0,
+                "w": 8,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "expr": "process_resident_memory_bytes{instance=\"$instance\"} / 1024 / 1024",
+                    "legendFormat": "Memory MB"
+                }
+            ]
+        },
+        {
+            "type": "stat",
+            "title": "3. Stat - Uptime",
+            "gridPos": {
+                "x": 16,
+                "y": 0,
+                "w": 8,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "expr": "time() - process_start_time_seconds{instance=\"$instance\"}",
+                    "legendFormat": "Uptime (s)"
+                }
+            ]
+        },
+        {
+            "type": "bargauge",
+            "title": "4. Bar Gauge - Request Rate",
+            "gridPos": {
+                "x": 0,
+                "y": 8,
+                "w": 8,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "expr": "rate(prometheus_http_requests_total{instance=\"$instance\"}[1m])",
+                    "legendFormat": "{{handler}}"
+                }
+            ]
+        },
+        {
+            "type": "table",
+            "title": "5. Table - Series List",
+            "gridPos": {
+                "x": 8,
+                "y": 8,
+                "w": 8,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "expr": "up{instance=\"$instance\"}",
+                    "legendFormat": "{{job}}"
+                }
+            ]
+        },
+        {
+            "type": "heatmap",
+            "title": "6. Heatmap - Request Duration",
+            "gridPos": {
+                "x": 16,
+                "y": 8,
+                "w": 8,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "expr": "rate(prometheus_http_request_duration_seconds_sum{instance=\"$instance\"}[1m])",
+                    "legendFormat": "{{handler}}"
+                }
+            ]
+        }
+    ]
+}

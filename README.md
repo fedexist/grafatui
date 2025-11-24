@@ -87,6 +87,15 @@ grafatui --prometheus http://prod-prom:9090 --grafana-json ./dashboards/node-exp
 grafatui --grafana-json ./dash.json --var job=node --var instance=server-01
 ```
 
+**Try the included examples:**
+```bash
+# Test all visualization types at once
+grafatui --grafana-json examples/dashboards/all_visualizations.json --prometheus http://localhost:9090
+```
+
+> **Note:** See the `examples/` directory for more sample dashboards demonstrating all supported panel types.
+
+
 ### Keyboard Controls
 
 | Key | Action |
