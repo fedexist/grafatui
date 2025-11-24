@@ -1,8 +1,26 @@
 # Grafatui Examples
 
-This directory contains example Grafana dashboards for testing and demonstration purposes.
+This directory contains example Grafana dashboards and a demo environment for testing grafatui.
+
+## Quick Demo
+
+Want to try grafatui instantly? Use the pre-configured demo environment:
+
+```bash
+cd demo
+docker-compose up -d && sleep 5 && cd ../.. && cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus http://localhost:10001
+```
+
+See [`demo/README.md`](demo/README.md) for details.
 
 ## Dashboards
+
+
+### `prometheus_demo.json`
+**Recommended for first-time users!** A comprehensive dashboard designed for the included demo environment.
+Shows all 6 visualization types with real metrics from Prometheus monitoring itself:
+- Graph, Gauge, Stat, Bar Gauge, Table, Heatmap
+- Works immediately with `demo/docker-compose.yml`
 
 ### `all_visualizations.json`
 Demonstrates all supported panel types in a single dashboard:

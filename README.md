@@ -27,7 +27,19 @@ cd grafatui
 cargo install --path .
 ```
 
+## Quick Demo
+
+Try grafatui in under a minute with the pre-configured demo environment:
+
+```bash
+cd examples/demo && docker-compose up -d && sleep 5 && cd ../.. && cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus http://localhost:10001
+```
+
+This starts Prometheus + node-exporter and launches grafatui with a dashboard showcasing all 6 visualization types.
+See [`examples/demo/README.md`](examples/demo/README.md) for details.
+
 ## Usage
+
 
 ```bash
 grafatui [OPTIONS]
