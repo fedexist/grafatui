@@ -757,11 +757,45 @@ pub async fn run_app<B: ratatui::backend::Backend>(
                     }
                 }
                 Event::Mouse(mouse) => match mouse.kind {
-                    crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                    crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left)
+                    | crossterm::event::MouseEventKind::Drag(crossterm::event::MouseButton::Left) =>
+                    {
                         let size = terminal.size()?;
                         let rect = ratatui::layout::Rect::new(0, 0, size.width, size.height);
-                        if let Some(idx) = ui::hit_test(app, rect, mouse.column, mouse.row) {
+                        if let Some((idx, panel_rect)) =
+                            ui::hit_test(app, rect, mouse.column, mouse.row)
+                        {
                             app.selected_panel = idx;
+
+                            // If in Fullscreen or FullscreenInspect, we are already focused on this panel (effectively)
+                            // If in Normal/Inspect, we switch to Inspect mode if not already
+
+                            match app.mode {
+                                AppMode::Normal | AppMode::Inspect => {
+                                    app.mode = AppMode::Inspect;
+                                }
+                                AppMode::Fullscreen | AppMode::FullscreenInspect => {
+                                    app.mode = AppMode::FullscreenInspect;
+                                }
+                                _ => {}
+                            }
+
+                            // Calculate cursor_x based on click position within panel_rect
+                            // Chart area is inside the block borders, so we need to account for that.
+                            // Assuming borders are 1 char wide.
+                            let chart_width = panel_rect.width.saturating_sub(2) as f64;
+                            if chart_width > 0.0 {
+                                let relative_x =
+                                    (mouse.column.saturating_sub(panel_rect.x + 1)) as f64;
+                                let fraction = (relative_x / chart_width).clamp(0.0, 1.0);
+
+                                let end_ts = (chrono::Utc::now().timestamp()
+                                    - app.time_offset.as_secs() as i64)
+                                    as f64;
+                                let start_ts = end_ts - app.range.as_secs_f64();
+
+                                app.cursor_x = Some(start_ts + fraction * app.range.as_secs_f64());
+                            }
                         }
                     }
                     crossterm::event::MouseEventKind::ScrollDown => {

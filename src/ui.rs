@@ -356,7 +356,7 @@ fn calculate_two_column_layout_subset(
     results
 }
 
-pub fn hit_test(app: &AppState, area: Rect, x: u16, y: u16) -> Option<usize> {
+pub fn hit_test(app: &AppState, area: Rect, x: u16, y: u16) -> Option<(usize, Rect)> {
     // Replicate main layout
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -368,20 +368,29 @@ pub fn hit_test(app: &AppState, area: Rect, x: u16, y: u16) -> Option<usize> {
         .split(area);
 
     let charts_area = chunks[1];
-    if !charts_area.contains(ratatui::layout::Position { x, y }) {
+    let inner_area = charts_area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+
+    if !inner_area.contains(ratatui::layout::Position { x, y }) {
         return None;
+    }
+
+    if app.mode == AppMode::Fullscreen || app.mode == AppMode::FullscreenInspect {
+        return Some((app.selected_panel, inner_area));
     }
 
     let has_grid = app.panels.iter().any(|p| p.grid.is_some());
     let panel_rects = if has_grid {
-        calculate_grid_layout(charts_area, app)
+        calculate_grid_layout(inner_area, app)
     } else {
-        calculate_two_column_layout(charts_area, app)
+        calculate_two_column_layout(inner_area, app)
     };
 
     for (rect, idx) in panel_rects {
         if rect.contains(ratatui::layout::Position { x, y }) {
-            return Some(idx);
+            return Some((idx, rect));
         }
     }
     None
@@ -418,7 +427,6 @@ fn render_panel(
         return;
     }
 
-    let mut datasets = Vec::new();
     let use_hash_colors = p.series.len() > theme.palette.len();
 
     // If inspecting, find values at cursor
@@ -449,6 +457,41 @@ fn render_panel(
         HashMap::new()
     };
 
+    // Render the outer block (Panel container)
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(border_style)
+        .title(Span::styled(
+            p.title.clone(),
+            Style::default().fg(theme.title),
+        ));
+    frame.render_widget(block.clone(), area);
+
+    let inner_area = block.inner(area);
+
+    // Split inner area into chart and legend
+    // If we have series, reserve space for legend
+    let legend_height = if !p.series.is_empty() && inner_area.height > 5 {
+        2
+    } else {
+        0
+    };
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(legend_height)])
+        .split(inner_area);
+
+    let chart_area = chunks[0];
+    let legend_area = chunks[1];
+
+    // Prepare datasets (without names for the chart itself to avoid built-in legend)
+    let mut chart_datasets = Vec::new();
+    let mut legend_items = Vec::new();
+
+    // Declare cursor_dataset here to extend its lifetime
+    let mut cursor_dataset = vec![];
+
     for (i, s) in p.series.iter().enumerate() {
         let color = if use_hash_colors {
             get_hash_color(&s.name)
@@ -457,23 +500,28 @@ fn render_panel(
         };
 
         let data = if s.visible { s.points.as_slice() } else { &[] };
-        let mut name = s.name.clone();
 
+        // For legend display
+        let mut name = s.name.clone();
         if let Some(val) = cursor_values.get(&s.name) {
             name.push_str(&format!(" ({})", format_si(*val)));
         } else if let Some(val) = s.value {
             name.push_str(&format!(" ({})", format_si(val)));
         }
-
-        // eprintln!("Dataset {}: name='{}', visible={}, points={}", i, name, s.visible, s.points.len());
-
         if name.is_empty() {
             name = format!("Series {}", i);
         }
 
-        datasets.push(
+        legend_items.push(Span::styled(format!("■ "), Style::default().fg(color)));
+        legend_items.push(Span::styled(
+            format!("{}  ", name),
+            Style::default().fg(theme.text),
+        ));
+
+        // For chart (no name to avoid legend)
+        chart_datasets.push(
             Dataset::default()
-                .name(name)
+                .name("")
                 .marker(ratatui::symbols::Marker::Braille)
                 .graph_type(GraphType::Line)
                 .style(Style::default().fg(color))
@@ -481,18 +529,17 @@ fn render_panel(
         );
     }
 
-    // Add cursor line if inspecting
-    let mut cursor_dataset = vec![];
+    // Calculate y_bounds once
     let y_bounds = calculate_y_bounds(p);
 
+    // Add cursor line if inspecting
     if let Some(cx) = cursor_x {
-        // Draw a vertical line using 2 points
         cursor_dataset.push((cx, y_bounds[0]));
         cursor_dataset.push((cx, y_bounds[1]));
 
-        datasets.push(
+        chart_datasets.push(
             Dataset::default()
-                .name("Cursor")
+                .name("")
                 .marker(ratatui::symbols::Marker::Braille)
                 .graph_type(GraphType::Line)
                 .style(Style::default().fg(Color::White))
@@ -515,16 +562,8 @@ fn render_panel(
         Span::styled(format_si(y_bounds[1]), Style::default().fg(theme.text)),
     ];
 
-    let chart = Chart::new(datasets)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(border_style)
-                .title(Span::styled(
-                    p.title.clone(),
-                    Style::default().fg(theme.title),
-                )),
-        )
+    let chart = Chart::new(chart_datasets)
+        // No block, as we rendered it outside
         .x_axis(
             Axis::default()
                 .bounds([start, now])
@@ -536,11 +575,16 @@ fn render_panel(
                 .style(Style::default().fg(Color::Gray))
                 .bounds(y_bounds)
                 .labels(y_labels),
-        )
-        .hidden_legend_constraints((Constraint::Min(0), Constraint::Min(0)))
-        .legend_position(Some(ratatui::widgets::LegendPosition::TopRight));
+        );
+    // No legend position needed as we disabled names
 
-    frame.render_widget(chart, area);
+    frame.render_widget(chart, chart_area);
+
+    // Render custom legend
+    if legend_height > 0 {
+        let legend = Paragraph::new(Line::from(legend_items)).wrap(Wrap { trim: true });
+        frame.render_widget(legend, legend_area);
+    }
 }
 
 fn calculate_y_bounds(p: &PanelState) -> [f64; 2] {
