@@ -1,0 +1,27 @@
+{
+  "title": "Test Dashboard",
+  "panels": [
+    {
+      "type": "gauge",
+      "title": "Test Gauge",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "up",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Test Graph",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "process_cpu_seconds_total",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    }
+  ]
+}

@@ -22,6 +22,7 @@ pub struct QueryPanel {
     pub exprs: Vec<String>,
     pub legends: Vec<Option<String>>, // Parallel to exprs
     pub grid: Option<GridPos>,
+    pub panel_type: crate::app::PanelType,
 }
 
 /// Grid position extracted from Grafana.
@@ -145,7 +146,17 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
             collect_panels(out, children)?;
         }
         let kind = p.panel_type.unwrap_or_default();
-        if kind == "graph" || kind == "timeseries" || kind == "stat" {
+
+        let panel_type = match kind.as_str() {
+            "graph" | "timeseries" => crate::app::PanelType::Graph,
+            "stat" => crate::app::PanelType::Stat,
+            "gauge" => crate::app::PanelType::Gauge,
+            "bargauge" => crate::app::PanelType::BarGauge,
+            "table" => crate::app::PanelType::Table,
+            _ => crate::app::PanelType::Unknown,
+        };
+
+        if panel_type != crate::app::PanelType::Unknown {
             let mut exprs = Vec::new();
             let mut legends = Vec::new();
 
@@ -168,6 +179,7 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
                     exprs,
                     legends,
                     grid: gp,
+                    panel_type,
                 });
             }
         } else if !kind.is_empty() && kind != "row" {

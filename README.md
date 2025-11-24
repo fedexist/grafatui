@@ -105,7 +105,17 @@ grafatui --grafana-json ./dash.json --var job=node --var instance=server-01
 | `y` | Toggle Y-axis mode (Auto / Zero-based) |
 | `1`..`9` | Toggle visibility of series N |
 | `0` | Show all series |
+| `f` / `Enter` | Toggle Fullscreen mode |
+| `v` | Toggle Value Inspection mode |
+| `/` | Search panels |
+| `Left` / `Right` | Move cursor (in Inspect mode) |
 | `?` | Toggle debug bar |
+
+### Mouse Controls
+
+- **Click**: Select panel / Move cursor (in Inspect mode)
+- **Drag**: Move cursor (in Inspect mode)
+- **Scroll**: Zoom in / out (vertical scroll)
 
 ## Contributing
 
