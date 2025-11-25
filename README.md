@@ -22,7 +22,7 @@
 Ensure you have Rust installed (1.70+ recommended).
 
 ```bash
-git clone https://github.com/yourusername/grafatui.git
+git clone https://github.com/fedexist/grafatui.git
 cd grafatui
 cargo install --path .
 ```
