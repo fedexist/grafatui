@@ -5,10 +5,10 @@ Get started with grafatui in less than a minute using this pre-configured Promet
 ## Quick Start (One-Liner)
 
 ```bash
-docker-compose up -d && sleep 5 && cargo run -- --grafana-json ../dashboards/prometheus_demo.json --prometheus http://localhost:10001
+docker-compose up -d && sleep 5 && cargo run -- --grafana-json ../dashboards/prometheus_demo.json --prometheus http://localhost:19090
 ```
 
-> **Note**: The docker-compose is configured to use port **10001** to avoid conflicts with development tools and other services that commonly use 9090-9092.
+> **Note**: The docker-compose is configured to use port **19090** to avoid conflicts with development tools and other services.
 
 This will:
 1. Start Prometheus (port **10001**) and node-exporter (port 9100)
@@ -18,8 +18,9 @@ This will:
 ## What's Included
 
 **Services:**
-- **Prometheus**: Scrapes itself and node-exporter every 5 seconds (port **10001**)
+- **Prometheus**: Scrapes itself and node-exporter every 5 seconds (port **19090**)
 - **node-exporter**: Exposes system metrics (CPU, memory, network, etc.) (port 9100)
+- **vLLM Mock Instances**: Two dummy vLLM services producing random inference metrics (ports 8001, 8002)
 
 **Dashboard (`prometheus_demo.json`):**
 All 6 visualization types, optimized for their use cases:
@@ -41,14 +42,19 @@ cd examples/demo
 docker-compose up -d
 
 # Verify Prometheus is running
-curl http://localhost:8585/-/healthy
+curl http://localhost:19090/-/healthy
 
 # Run grafatui (from repo root)
 cd ../..
-cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus http://localhost:8585
+cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus http://localhost:19090
+
+# Run vLLM Dashboard (using config file)
+# This uses grafatui.toml to set Prometheus URL and dashboard automatically
+cd examples/demo
+cargo run -- --config grafatui.toml
 
 # Optional: customize time range and step
-cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus http://localhost:8585 --range 5m --step 2s
+cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus http://localhost:19090 --range 5m --step 2s
 ```
 
 ## Cleanup

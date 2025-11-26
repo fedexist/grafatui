@@ -32,7 +32,7 @@ cargo install --path .
 Try grafatui in under a minute with the pre-configured demo environment:
 
 ```bash
-cd examples/demo && docker-compose up -d && sleep 5 && cd ../.. && cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus http://localhost:10001
+cd examples/demo && docker-compose up -d && sleep 5 && cd ../.. && cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus http://localhost:19090
 ```
 
 This starts Prometheus + node-exporter and launches grafatui with a dashboard showcasing all 6 visualization types.
@@ -58,7 +58,7 @@ grafatui [OPTIONS]
 
 ## Configuration
 
-Grafatui supports a configuration file (`config.toml` or `grafatui.toml`) located in your system's standard configuration directory (e.g., `~/.config/grafatui/`) or the current directory.
+Grafatui supports a configuration file (`config.toml` or `grafatui.toml`) located in your system's standard configuration directory (e.g., `~/.config/grafatui/`), the current directory or the path specified by the `--config` option.
 
 **Example `config.toml`:**
 ```toml

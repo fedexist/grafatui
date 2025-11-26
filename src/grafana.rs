@@ -50,6 +50,8 @@ struct RawTemplating {
 struct RawVar {
     name: String,
     current: Option<RawVarCurrent>,
+    #[serde(rename = "allValue")]
+    all_value: Option<String>,
     // We could parse 'query' or 'type' if needed, but for now we just want defaults
 }
 
@@ -62,9 +64,10 @@ struct RawVarCurrent {
 #[derive(Debug, Deserialize)]
 struct RawPanel {
     #[serde(rename = "type")]
-    panel_type: Option<String>,
+    panel_type: String,
     title: Option<String>,
     targets: Option<Vec<RawTarget>>,
+    #[serde(rename = "gridPos")]
     grid_pos: Option<RawGridPos>,
     panels: Option<Vec<RawPanel>>, // nested rows
 }
@@ -74,6 +77,7 @@ struct RawTarget {
     expr: Option<String>,
     #[serde(rename = "legendFormat")]
     legend_format: Option<String>,
+    hide: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -106,7 +110,7 @@ pub fn load_grafana_dashboard(path: &std::path::Path) -> Result<DashboardImport>
                     .or(v.current.as_ref().and_then(|c| c.text.as_ref()));
 
                 if let Some(val) = val {
-                    let s = match val {
+                    let mut s = match val {
                         serde_json::Value::String(s) => s.clone(),
                         serde_json::Value::Array(arr) => {
                             // If array, maybe join with pipe for regex? or just take first?
@@ -119,7 +123,14 @@ pub fn load_grafana_dashboard(path: &std::path::Path) -> Result<DashboardImport>
                         serde_json::Value::Number(n) => n.to_string(),
                         _ => String::new(),
                     };
-                    if !s.is_empty() && s != "All" {
+
+                    // Handle $__all
+                    if s == "$__all" {
+                        // Use allValue if present, otherwise permissive regex
+                        s = v.all_value.clone().unwrap_or_else(|| ".*".to_string());
+                    }
+
+                    if !s.is_empty() {
                         vars.insert(v.name, s);
                     }
                 }
@@ -145,7 +156,7 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
         if let Some(children) = p.panels {
             collect_panels(out, children)?;
         }
-        let kind = p.panel_type.unwrap_or_default();
+        let kind = p.panel_type;
 
         let panel_type = match kind.as_str() {
             "graph" | "timeseries" => crate::app::PanelType::Graph,
