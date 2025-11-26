@@ -1,0 +1,73 @@
+name: Publish to crates.io
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g., 0.2.0)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Dry run (test without actually publishing)'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate inputs
+        run: |
+          echo "📦 Publishing version: ${{ inputs.version }}"
+          echo "🧪 Dry run: ${{ inputs.dry_run }}"
+      
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: v${{ inputs.version }}
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify version matches
+        run: |
+          CARGO_VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          if [ "$CARGO_VERSION" != "${{ inputs.version }}" ]; then
+            echo "❌ Error: Cargo.toml version ($CARGO_VERSION) doesn't match input version (${{ inputs.version }})"
+            exit 1
+          fi
+          echo "✅ Version matches: $CARGO_VERSION"
+
+      - name: Build and test
+        run: |
+          cargo build --release
+          cargo test --all
+
+      - name: Dry run publish
+        if: inputs.dry_run == true
+        run: |
+          echo "🧪 Running dry-run publish..."
+          cargo publish --dry-run
+          echo "✅ Dry run successful! Ready for real publish."
+
+      - name: Publish to crates.io
+        if: inputs.dry_run == false
+        run: |
+          echo "🚀 Publishing to crates.io..."
+          cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          echo "✅ Published successfully!"
+
+      - name: Create publish summary
+        if: always()
+        run: |
+          echo "## Publish Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dry run:** ${{ inputs.dry_run }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY

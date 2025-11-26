@@ -62,6 +62,10 @@ struct Args {
     /// Theme name (e.g. "dracula", "monokai") (default: default)
     #[arg(long)]
     theme: Option<String>,
+
+    /// Path to configuration file
+    #[arg(long)]
+    config: Option<std::path::PathBuf>,
 }
 
 /// Helper to parse key=value pairs for CLI arguments.
@@ -85,7 +89,7 @@ where
 async fn main() -> Result<()> {
     let args = Args::parse();
     // Load config
-    let config = Config::load().unwrap_or_default();
+    let config = Config::load(args.config.clone()).unwrap_or_default();
 
     let prometheus_url = args
         .prometheus
@@ -109,53 +113,51 @@ async fn main() -> Result<()> {
     let prom = prom::PromClient::new(prometheus_url);
 
     // Build panels from Grafana import or simple queries.
-    let (title, panels, skipped_panels) = if let Some(path) = args.grafana_json.as_ref() {
-        match grafana::load_grafana_dashboard(path) {
-            Ok(d) => {
-                // Seed vars from dashboard defaults
-                for (k, v) in d.vars {
-                    vars.insert(k, v);
-                }
+    let (title, panels, skipped_panels) =
+        if let Some(path) = args.grafana_json.or(config.grafana_json) {
+            match grafana::load_grafana_dashboard(&path) {
+                Ok(d) => {
+                    // Seed vars from dashboard defaults
+                    for (k, v) in d.vars {
+                        vars.insert(k, v);
+                    }
 
-                let ps = d
-                    .queries
-                    .into_iter()
-                    .map(|q| app::PanelState {
-                        title: q.title,
-                        exprs: q.exprs,
-                        legends: q.legends,
-                        series: vec![],
-                        last_error: None,
-                        last_url: None,
-                        last_samples: 0,
-                        grid: q.grid.map(|g| app::GridUnit {
-                            x: g.x,
-                            y: g.y,
-                            w: g.w,
-                            h: g.h,
-                        }),
-                        y_axis_mode: app::YAxisMode::Auto,
-                        panel_type: q.panel_type,
-                    })
-                    .collect();
-                (format!("{} (imported)", d.title), ps, d.skipped_panels)
+                    let ps = d
+                        .queries
+                        .into_iter()
+                        .map(|q| app::PanelState {
+                            title: q.title,
+                            exprs: q.exprs,
+                            legends: q.legends,
+                            series: vec![],
+                            last_error: None,
+                            last_url: None,
+                            last_samples: 0,
+                            grid: q.grid.map(|g| app::GridUnit {
+                                x: g.x,
+                                y: g.y,
+                                w: g.w,
+                                h: g.h,
+                            }),
+                            y_axis_mode: app::YAxisMode::Auto,
+                            panel_type: q.panel_type,
+                        })
+                        .collect();
+                    (format!("{} (imported)", d.title), ps, d.skipped_panels)
+                }
+                Err(e) => {
+                    eprintln!("Failed to import Grafana dashboard: {e}");
+                    ("grafatui".to_string(), app::default_queries(args.query), 0)
+                }
             }
-            Err(e) => {
-                eprintln!("Failed to import Grafana dashboard: {e}");
-                ("grafatui".to_string(), app::default_queries(args.query), 0)
-            }
-        }
-    } else {
-        ("grafatui".to_string(), app::default_queries(args.query), 0)
-    };
+        } else {
+            ("grafatui".to_string(), app::default_queries(args.query), 0)
+        };
 
     // CLI vars override dashboard defaults
     for (k, v) in &args.var {
         vars.insert(k.clone(), v.clone());
     }
-
-    // Load config
-    let config = Config::load().unwrap_or_default();
 
     // Determine theme
     let theme_name = args

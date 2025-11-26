@@ -22,7 +22,7 @@
 Ensure you have Rust installed (1.70+ recommended).
 
 ```bash
-git clone https://github.com/yourusername/grafatui.git
+git clone https://github.com/fedexist/grafatui.git
 cd grafatui
 cargo install --path .
 ```
@@ -32,7 +32,7 @@ cargo install --path .
 Try grafatui in under a minute with the pre-configured demo environment:
 
 ```bash
-cd examples/demo && docker-compose up -d && sleep 5 && cd ../.. && cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus http://localhost:10001
+cd examples/demo && docker-compose up -d && sleep 5 && cd ../.. && cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus http://localhost:19090
 ```
 
 This starts Prometheus + node-exporter and launches grafatui with a dashboard showcasing all 6 visualization types.
@@ -58,7 +58,7 @@ grafatui [OPTIONS]
 
 ## Configuration
 
-Grafatui supports a configuration file (`config.toml` or `grafatui.toml`) located in your system's standard configuration directory (e.g., `~/.config/grafatui/`) or the current directory.
+Grafatui supports a configuration file (`config.toml` or `grafatui.toml`) located in your system's standard configuration directory (e.g., `~/.config/grafatui/`), the current directory or the path specified by the `--config` option.
 
 **Example `config.toml`:**
 ```toml
@@ -119,9 +119,9 @@ grafatui --grafana-json examples/dashboards/all_visualizations.json --prometheus
 | `[` or `Shift+←` | Pan left (backward in time) |
 | `]` or `Shift+→` | Pan right (forward in time) |
 | `0` | Reset to live mode |
-| `↑` / `k` | Select previous panel |
-| `↓` / `j` | Select next panel |
-| `PgUp` / `PgDn` | Scroll view vertically |
+| `↑` / `k` | Select previous panel (auto-scrolls into view) |
+| `↓` / `j` | Select next panel (auto-scrolls into view) |
+| `PgUp` / `PgDn` | Scroll view vertically (fast) |
 | `Home` / `End` | Jump to top / bottom |
 | `y` | Toggle Y-axis mode (Auto / Zero-based) |
 | `1`..`9` | Toggle visibility of series N |
@@ -136,7 +136,7 @@ grafatui --grafana-json examples/dashboards/all_visualizations.json --prometheus
 
 - **Click**: Select panel (in Normal mode) / Move cursor (in Fullscreen Inspect mode)
 - **Drag**: Move cursor (in Fullscreen Inspect mode only)
-- **Scroll**: Zoom in / out (vertical scroll)
+- **Scroll**: Scroll dashboard vertically
 
 > **Note**: In Normal mode, clicking only selects panels. Press `v` to enable cursor/inspection mode. In Fullscreen mode, clicking activates cursor automatically.
 

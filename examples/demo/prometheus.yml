@@ -13,6 +13,11 @@ scrape_configs:
     static_configs:
       - targets: ["node-exporter:9100"]
 
+  # Scrape vLLM instances
+  - job_name: "vllm"
+    static_configs:
+      - targets: ["vllm-1:8000", "vllm-2:8000"]
+
   # Scrape cAdvisor (if enabled)
   # - job_name: "cadvisor"
   #   static_configs:

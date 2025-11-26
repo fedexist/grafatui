@@ -4,7 +4,7 @@ services:
     container_name: prometheus
     restart: unless-stopped
     ports:
-      - "8585:9090"
+      - "19090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prom_data:/prometheus
@@ -32,6 +32,22 @@ services:
       - --path.rootfs=/host
       - --path.procfs=/host/proc
       - --path.sysfs=/host/sys
+    networks: [ mon ]
+
+  vllm-1:
+    build: ./vllm
+    container_name: vllm-1
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    networks: [ mon ]
+
+  vllm-2:
+    build: ./vllm
+    container_name: vllm-2
+    restart: unless-stopped
+    ports:
+      - "8002:8000"
     networks: [ mon ]
   # cadvisor:  # <- optional (uncomment to enable)
   #   image: gcr.io/cadvisor/cadvisor:latest

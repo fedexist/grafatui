@@ -197,6 +197,38 @@ impl AppState {
         self.time_offset = self.time_offset.saturating_add(shift);
     }
 
+    /// Automatically scroll to ensure the selected panel is visible.
+    /// This calculates the grid position of the selected panel and adjusts vertical_scroll if needed.
+    pub fn scroll_to_selected_panel(&mut self) {
+        if let Some(panel) = self.panels.get(self.selected_panel) {
+            if let Some(grid) = panel.grid {
+                // Grid coordinates of the panel
+                let panel_top_grid = grid.y;
+                let panel_bottom_grid = grid.y + grid.h;
+
+                // Current scroll position in grid units
+                let scroll_top = self.vertical_scroll as i32;
+
+                // Estimate visible height in grid units
+                // This is an approximation - actual terminal height varies
+                // Using 20 as a reasonable visible grid height (terminal height / cell_h from ui.rs)
+                let visible_height_grid = 20;
+                let scroll_bottom = scroll_top + visible_height_grid;
+
+                // Check if panel is above the visible area
+                if panel_top_grid < scroll_top {
+                    self.vertical_scroll = panel_top_grid.max(0) as usize;
+                }
+                // Check if panel is below the visible area
+                else if panel_bottom_grid > scroll_bottom {
+                    // Scroll so the bottom of the panel is visible
+                    self.vertical_scroll =
+                        (panel_bottom_grid - visible_height_grid).max(0) as usize;
+                }
+            }
+        }
+    }
+
     /// Pan right: shift the time window forward (toward "now").
     pub fn pan_right(&mut self) {
         // Shift by 25% of the current range
@@ -690,11 +722,15 @@ pub async fn run_app<B: ratatui::backend::Backend>(
                             KeyCode::Up | KeyCode::Char('k') => {
                                 if app.selected_panel > 0 {
                                     app.selected_panel -= 1;
+                                    // Auto-scroll to ensure selected panel is visible
+                                    app.scroll_to_selected_panel();
                                 }
                             }
                             KeyCode::Down | KeyCode::Char('j') => {
                                 if app.selected_panel < app.panels.len().saturating_sub(1) {
                                     app.selected_panel += 1;
+                                    // Auto-scroll to ensure selected panel is visible
+                                    app.scroll_to_selected_panel();
                                 }
                             }
                             KeyCode::PageUp => {
