@@ -197,12 +197,6 @@ impl AppState {
         self.time_offset = self.time_offset.saturating_add(shift);
     }
 
-    /// Pan forward (toward present).
-    pub fn pan_forward(&mut self) {
-        let shift = self.range / 2;
-        self.time_offset = self.time_offset.saturating_sub(shift);
-    }
-
     /// Automatically scroll to ensure the selected panel is visible.
     /// This calculates the grid position of the selected panel and adjusts vertical_scroll if needed.
     pub fn scroll_to_selected_panel(&mut self) {

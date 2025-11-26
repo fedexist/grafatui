@@ -50,6 +50,7 @@ struct RawTemplating {
 struct RawVar {
     name: String,
     current: Option<RawVarCurrent>,
+    /// The value to use when "All" is selected. Used to replace $__all in queries.
     #[serde(rename = "allValue")]
     all_value: Option<String>,
     // We could parse 'query' or 'type' if needed, but for now we just want defaults
@@ -77,7 +78,6 @@ struct RawTarget {
     expr: Option<String>,
     #[serde(rename = "legendFormat")]
     legend_format: Option<String>,
-    hide: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
