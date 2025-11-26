@@ -1,0 +1,155 @@
+{
+    "title": "vLLM Cluster Monitor",
+    "templating": {
+        "list": [
+            {
+                "name": "instance",
+                "query": "label_values(vllm:num_requests_running, instance)",
+                "type": "query",
+                "refresh": 1,
+                "regex": "",
+                "multi": true,
+                "allValue": ".*",
+                "includeAll": true,
+                "current": {
+                    "text": "All",
+                    "value": "$__all"
+                }
+            }
+        ]
+    },
+    "panels": [
+        {
+            "type": "stat",
+            "title": "Cluster Overview",
+            "gridPos": {
+                "x": 0,
+                "y": 0,
+                "w": 12,
+                "h": 6
+            },
+            "targets": [
+                {
+                    "expr": "sum(vllm:num_requests_running{instance=~\"$instance\"})",
+                    "legendFormat": "Total Running Requests"
+                },
+                {
+                    "expr": "sum(vllm:num_requests_waiting{instance=~\"$instance\"})",
+                    "legendFormat": "Total Waiting Requests"
+                },
+                {
+                    "expr": "sum(rate(vllm:generation_tokens_total{instance=~\"$instance\"}[1m]))",
+                    "legendFormat": "Total Gen Tokens/s"
+                }
+            ]
+        },
+        {
+            "type": "gauge",
+            "title": "Avg GPU Cache Usage",
+            "gridPos": {
+                "x": 12,
+                "y": 0,
+                "w": 6,
+                "h": 6
+            },
+            "targets": [
+                {
+                    "expr": "avg(vllm:gpu_cache_usage_perc{instance=~\"$instance\"}) * 100",
+                    "legendFormat": "Avg Cache %"
+                }
+            ]
+        },
+        {
+            "type": "bargauge",
+            "title": "Load by Instance",
+            "gridPos": {
+                "x": 18,
+                "y": 0,
+                "w": 6,
+                "h": 6
+            },
+            "targets": [
+                {
+                    "expr": "sum by (instance) (vllm:num_requests_running{instance=~\"$instance\"})",
+                    "legendFormat": "{{instance}}"
+                }
+            ]
+        },
+        {
+            "type": "graph",
+            "title": "Cluster Throughput (Tokens/sec)",
+            "gridPos": {
+                "x": 0,
+                "y": 6,
+                "w": 12,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "expr": "sum(rate(vllm:prompt_tokens_total{instance=~\"$instance\"}[$__rate_interval]))",
+                    "legendFormat": "Prompt Tokens/s"
+                },
+                {
+                    "expr": "sum(rate(vllm:generation_tokens_total{instance=~\"$instance\"}[$__rate_interval]))",
+                    "legendFormat": "Generation Tokens/s"
+                }
+            ]
+        },
+        {
+            "type": "table",
+            "title": "Instance Status",
+            "gridPos": {
+                "x": 12,
+                "y": 6,
+                "w": 12,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "expr": "vllm:num_requests_running{instance=~\"$instance\"}",
+                    "legendFormat": "{{instance}} - Running"
+                },
+                {
+                    "expr": "vllm:gpu_cache_usage_perc{instance=~\"$instance\"} * 100",
+                    "legendFormat": "{{instance}} - Cache %"
+                }
+            ]
+        },
+        {
+            "type": "heatmap",
+            "title": "E2E Latency Distribution",
+            "gridPos": {
+                "x": 0,
+                "y": 14,
+                "w": 12,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "expr": "sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{instance=~\"$instance\"}[$__rate_interval]))",
+                    "legendFormat": "{{le}}"
+                }
+            ]
+        },
+        {
+            "type": "graph",
+            "title": "Time to First Token (P99)",
+            "gridPos": {
+                "x": 12,
+                "y": 14,
+                "w": 12,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.99, sum by(le) (rate(vllm:time_to_first_token_seconds_bucket{instance=~\"$instance\"}[$__rate_interval])))",
+                    "legendFormat": "P99 TTFT"
+                },
+                {
+                    "expr": "histogram_quantile(0.95, sum by(le) (rate(vllm:time_to_first_token_seconds_bucket{instance=~\"$instance\"}[$__rate_interval])))",
+                    "legendFormat": "P95 TTFT"
+                }
+            ]
+        }
+    ]
+}

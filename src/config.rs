@@ -10,11 +10,12 @@ pub struct Config {
     pub refresh_rate: Option<u64>,
     pub time_range: Option<String>,
     pub theme: Option<String>,
+    pub grafana_json: Option<PathBuf>,
 }
 
 impl Config {
-    pub fn load() -> Result<Self> {
-        let config_path = Self::get_config_path();
+    pub fn load(cli_path: Option<PathBuf>) -> Result<Self> {
+        let config_path = cli_path.or_else(Self::get_config_path);
         if let Some(path) = config_path {
             if path.exists() {
                 let content = fs::read_to_string(path)?;

@@ -15,8 +15,14 @@ jobs:
     name: Release-plz
     runs-on: ubuntu-latest
     # Only run if the PR was merged and came from the dev branch
-    if: github.event.pull_request.merged == true && github.head_ref == 'dev'
+    if: github.event.pull_request.merged == true && github.event.pull_request.head.ref == 'dev'
     steps:
+      - name: Debug PR info
+        run: |
+          echo "PR merged: ${{ github.event.pull_request.merged }}"
+          echo "Head ref: ${{ github.event.pull_request.head.ref }}"
+          echo "Base ref: ${{ github.event.pull_request.base.ref }}"
+      
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
