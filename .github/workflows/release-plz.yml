@@ -23,13 +23,15 @@ jobs:
           echo "Head ref: ${{ github.event.pull_request.head.ref }}"
           echo "Base ref: ${{ github.event.pull_request.base.ref }}"
       
-      - name: Checkout repository
+      - &checkout
+        name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install Rust toolchain
+      - &install-rust
+        name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Run release-plz
