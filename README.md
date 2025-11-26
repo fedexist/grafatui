@@ -1,5 +1,11 @@
 # Grafatui
 
+[![CI](https://github.com/fedexist/grafatui/workflows/CI/badge.svg)](https://github.com/fedexist/grafatui/actions/workflows/ci.yml)
+[![Crates.io](https://img.shields.io/crates/v/grafatui.svg)](https://crates.io/crates/grafatui)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Rust Version](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
+[![docs.rs](https://img.shields.io/docsrs/grafatui)](https://docs.rs/grafatui)
+
 **Grafatui** is a Terminal User Interface (TUI) for viewing Prometheus metrics, inspired by Grafana. It allows you to visualize time-series data directly in your terminal with a lightweight, keyboard-driven interface.
 
 ## Features
