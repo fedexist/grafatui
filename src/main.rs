@@ -27,20 +27,20 @@ use theme::Theme;
     about = "Grafana-like Prometheus charts in your terminal"
 )]
 struct Args {
-    /// Prometheus base URL (default: http://localhost:9090)
+    /// Prometheus URL (e.g., http://localhost:9090)
     #[arg(long)]
-    prometheus: Option<String>,
+    prometheus_url: Option<String>,
 
-    /// Time range window (e.g., 5m, 1h, 24h) (default: 5m)
-    #[arg(long)]
+    /// Time range to query (e.g., 5m, 1h, 3d) (default: 5m)
+    #[arg(long, value_name = "DURATION")]
     range: Option<String>,
 
     /// Query step resolution (e.g., 5s, 30s, 1m) (default: 5s)
-    #[arg(long)]
+    #[arg(long, value_name = "DURATION")]
     step: Option<String>,
 
-    /// Optional Grafana dashboard JSON path; panels with PromQL targets will be imported
-    #[arg(long)]
+    /// Grafana dashboard JSON file to import (e.g., ./dashboard.json)
+    #[arg(long, value_name = "FILE")]
     grafana_json: Option<std::path::PathBuf>,
 
     /// UI tick rate in milliseconds (screen refresh cadence)
@@ -48,23 +48,23 @@ struct Args {
     tick_rate: u64,
 
     /// Data refresh rate in milliseconds (Prometheus fetch interval) (default: 1000)
-    #[arg(long)]
+    #[arg(long, value_name = "MS")]
     refresh_rate: Option<u64>,
 
     /// Additional PromQL queries to append as panels
-    #[arg(long)]
+    #[arg(long, value_name = "EXPR")]
     query: Vec<String>,
 
-    /// Template variables to override (format: key=value)
-    #[arg(long, value_parser = parse_key_val::<String, String>)]
+    /// Template variables to override (e.g., --var instance=server1)
+    #[arg(long, value_parser = parse_key_val::<String, String>, value_name = "KEY=VALUE")]
     var: Vec<(String, String)>,
 
-    /// Theme name (e.g. "dracula", "monokai") (default: default)
-    #[arg(long)]
+    /// Color theme (default, dracula, monokai, solarized-dark, solarized-light, gruvbox, tokyo-night, catppuccin)
+    #[arg(long, value_name = "NAME")]
     theme: Option<String>,
 
-    /// Path to configuration file
-    #[arg(long)]
+    /// Configuration file path (e.g., ./grafatui.toml)
+    #[arg(long, value_name = "FILE")]
     config: Option<std::path::PathBuf>,
 }
 
@@ -92,7 +92,7 @@ async fn main() -> Result<()> {
     let config = Config::load(args.config.clone()).unwrap_or_default();
 
     let prometheus_url = args
-        .prometheus
+        .prometheus_url
         .or(config.prometheus_url)
         .unwrap_or_else(|| "http://localhost:9090".to_string());
 
