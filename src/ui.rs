@@ -226,16 +226,33 @@ fn calculate_grid_layout(area: Rect, app: &AppState) -> Vec<(Rect, usize)> {
     // Heuristic: choose a usable cell height from terminal height (min 3 rows per h-unit)
     let cell_h = std::cmp::max(3, area.height / 24);
 
-    // Render grid-backed panels
+    // Render grid-backed panels with scroll offset
+    let scroll_offset = app.vertical_scroll as u16 * cell_h;
+
     for (i, p) in app.panels.iter().enumerate() {
         if let Some(g) = p.grid {
             if g.x < 0 || g.y < 0 || g.w <= 0 || g.h <= 0 {
                 continue;
             }
             let x = area.x.saturating_add((g.x as u16).saturating_mul(cell_w));
-            let y = area.y.saturating_add((g.y as u16).saturating_mul(cell_h));
+            let y_absolute = (g.y as u16).saturating_mul(cell_h);
+
+            // Apply scroll offset
+            if y_absolute < scroll_offset {
+                // Panel is scrolled out of view at the top
+                continue;
+            }
+            let y = area
+                .y
+                .saturating_add(y_absolute.saturating_sub(scroll_offset));
+
             let w = (g.w as u16).saturating_mul(cell_w);
             let h = (g.h as u16).saturating_mul(cell_h);
+
+            // Skip panels that are completely below the visible area
+            if y >= area.bottom() {
+                continue;
+            }
 
             // Clamp to area
             let rect = Rect {

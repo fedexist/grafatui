@@ -119,9 +119,9 @@ grafatui --grafana-json examples/dashboards/all_visualizations.json --prometheus
 | `[` or `Shift+←` | Pan left (backward in time) |
 | `]` or `Shift+→` | Pan right (forward in time) |
 | `0` | Reset to live mode |
-| `↑` / `k` | Select previous panel |
-| `↓` / `j` | Select next panel |
-| `PgUp` / `PgDn` | Scroll view vertically |
+| `↑` / `k` | Select previous panel (auto-scrolls into view) |
+| `↓` / `j` | Select next panel (auto-scrolls into view) |
+| `PgUp` / `PgDn` | Scroll view vertically (fast) |
 | `Home` / `End` | Jump to top / bottom |
 | `y` | Toggle Y-axis mode (Auto / Zero-based) |
 | `1`..`9` | Toggle visibility of series N |
@@ -136,7 +136,7 @@ grafatui --grafana-json examples/dashboards/all_visualizations.json --prometheus
 
 - **Click**: Select panel (in Normal mode) / Move cursor (in Fullscreen Inspect mode)
 - **Drag**: Move cursor (in Fullscreen Inspect mode only)
-- **Scroll**: Zoom in / out (vertical scroll)
+- **Scroll**: Scroll dashboard vertically
 
 > **Note**: In Normal mode, clicking only selects panels. Press `v` to enable cursor/inspection mode. In Fullscreen mode, clicking activates cursor automatically.
 
