@@ -87,7 +87,6 @@ impl PromClient {
             }
         }
 
-        // Check in-flight
         let inflight_key = format!("{}|{}|{}|{}", expr, start, end, step.as_secs());
         let rx = {
             let mut inflight = self.inflight.lock().unwrap();
@@ -122,7 +121,6 @@ impl PromClient {
 
             match self.perform_request(&url).await {
                 Ok(series) => {
-                    // Update cache
                     {
                         let mut cache = self.cache.lock().unwrap();
                         cache.insert(expr.to_string(), (start, end, step, series.clone()));

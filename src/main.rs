@@ -170,7 +170,14 @@ async fn main() -> Result<()> {
             ("grafatui".to_string(), app::default_queries(args.query), 0)
         };
 
-    // CLI vars override dashboard defaults
+    // Merge config vars (if any)
+    if let Some(config_vars) = config.vars {
+        for (k, v) in config_vars {
+            vars.insert(k, v);
+        }
+    }
+
+    // CLI vars override dashboard defaults and config vars
     for (k, v) in &args.var {
         vars.insert(k.clone(), v.clone());
     }

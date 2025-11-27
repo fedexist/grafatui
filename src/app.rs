@@ -200,10 +200,7 @@ impl AppState {
     /// Zoom out: double the time range.
     pub fn zoom_out(&mut self) {
         self.range = self.range * 2;
-        // Cap at 7 days
-        if self.range > Duration::from_secs(7 * 24 * 3600) {
-            self.range = Duration::from_secs(7 * 24 * 3600);
-        }
+        self.range = self.range.min(Duration::from_secs(7 * 24 * 3600));
     }
 
     /// Pan left: shift the time window backward.
@@ -214,32 +211,18 @@ impl AppState {
     }
 
     /// Automatically scroll to ensure the selected panel is visible.
-    /// This calculates the grid position of the selected panel and adjusts vertical_scroll if needed.
     pub fn scroll_to_selected_panel(&mut self) {
         if let Some(panel) = self.panels.get(self.selected_panel) {
             if let Some(grid) = panel.grid {
-                // Grid coordinates of the panel
-                let panel_top_grid = grid.y;
-                let panel_bottom_grid = grid.y + grid.h;
+                let py = grid.y;
+                let ph = grid.h;
+                let scroll_y = self.vertical_scroll as i32;
+                let visible_height = 20;
 
-                // Current scroll position in grid units
-                let scroll_top = self.vertical_scroll as i32;
-
-                // Estimate visible height in grid units
-                // This is an approximation - actual terminal height varies
-                // Using 20 as a reasonable visible grid height (terminal height / cell_h from ui.rs)
-                let visible_height_grid = 20;
-                let scroll_bottom = scroll_top + visible_height_grid;
-
-                // Check if panel is above the visible area
-                if panel_top_grid < scroll_top {
-                    self.vertical_scroll = panel_top_grid.max(0) as usize;
-                }
-                // Check if panel is below the visible area
-                else if panel_bottom_grid > scroll_bottom {
-                    // Scroll so the bottom of the panel is visible
-                    self.vertical_scroll =
-                        (panel_bottom_grid - visible_height_grid).max(0) as usize;
+                if py < scroll_y {
+                    self.vertical_scroll = py as usize;
+                } else if py + ph > scroll_y + visible_height {
+                    self.vertical_scroll = (py + ph - visible_height).max(0) as usize;
                 }
             }
         }
@@ -268,23 +251,14 @@ impl AppState {
 
     /// Move cursor left/right by one step.
     pub fn move_cursor(&mut self, direction: i32) {
+        let end_ts = (chrono::Utc::now().timestamp() - self.time_offset.as_secs() as i64) as f64;
+        let start_ts = end_ts - self.range.as_secs_f64();
+
         if let Some(current_x) = self.cursor_x {
             let step_secs = self.step.as_secs_f64();
             let new_x = current_x + (direction as f64 * step_secs);
-
-            // Clamp to current view range
-            let end_ts =
-                (chrono::Utc::now().timestamp() - self.time_offset.as_secs() as i64) as f64;
-            let start_ts = end_ts - self.range.as_secs_f64();
-
-            if new_x >= start_ts && new_x <= end_ts {
-                self.cursor_x = Some(new_x);
-            }
+            self.cursor_x = Some(new_x.max(start_ts).min(end_ts));
         } else {
-            // Initialize cursor at center of view if not set
-            let end_ts =
-                (chrono::Utc::now().timestamp() - self.time_offset.as_secs() as i64) as f64;
-            let start_ts = end_ts - self.range.as_secs_f64();
             self.cursor_x = Some((start_ts + end_ts) / 2.0);
         }
     }
@@ -378,7 +352,6 @@ impl AppState {
                             points: pts,
                             visible: true,
                         });
-                        // Downsample for display
                         if let Some(last) = panel_results.last_mut() {
                             last.points = downsample(last.points.clone(), 200);
                         }
@@ -396,34 +369,20 @@ impl AppState {
 fn expand_expr(expr: &str, step: Duration, vars: &HashMap<String, String>) -> String {
     let mut s = expr.to_string();
 
-    // 1) $__rate_interval heuristic: max(step * 4, 1m)
-    // This matches Grafana's default behavior roughly
     let interval_secs = std::cmp::max(step.as_secs() * 4, 60);
     let interval_param = format!("{}s", interval_secs);
     s = s.replace("$__rate_interval", &interval_param);
 
-    // 2) ${var} and $var -> value from vars
     for (k, v) in vars {
-        // Replace ${var}
         s = s.replace(&format!("${{{}}}", k), v);
-        // Replace $var (simple word boundary check would be better but start with simple replace)
-        // We need to be careful not to replace $variable if we are replacing $var
-        // For now, simple replacement.
         s = s.replace(&format!("${}", k), v);
     }
-
-    // 3) Fallback for unset vars: if we still see $something, maybe we should warn or replace with regex?
-    // The user requested: "Fallback when a var is unset: turn label="$var" into a permissive regex (e.g., label=~".*") or skip that filter."
-    // This is complex to do with simple string replacement without parsing PromQL.
-    // For Milestone 0/1, we will just leave it, which might cause a query error, which is visible.
 
     s
 }
 
 fn format_legend(fmt: &str, metric: &HashMap<String, String>) -> String {
     let mut out = fmt.to_string();
-    // Replace {{label}} with value
-    // This is a simple replacement, Grafana supports more complex syntax but this covers 90%
     for (k, v) in metric {
         out = out.replace(&format!("{{{{{}}}}}", k), v);
     }
@@ -445,7 +404,6 @@ fn downsample(points: Vec<(f64, f64)>, max_points: usize) -> Vec<(f64, f64)> {
     points
         .chunks(chunk_size)
         .filter_map(|chunk| {
-            // Max pooling: take the point with the maximum value in the chunk
             chunk
                 .iter()
                 .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
@@ -520,8 +478,6 @@ mod tests {
         let points: Vec<(f64, f64)> = (0..1000).map(|i| (i as f64, i as f64)).collect();
         let downsampled = downsample(points, 100);
         assert_eq!(downsampled.len(), 100);
-        // Max pooling should preserve the max value in each chunk
-        // Last point should be 999.0
         assert_eq!(downsampled.last().unwrap().1, 999.0);
     }
 }
@@ -586,7 +542,6 @@ pub async fn run_app<B: ratatui::backend::Backend>(
                             }
                             KeyCode::Backspace => {
                                 app.search_query.pop();
-                                // Update results
                                 if app.search_query.is_empty() {
                                     app.search_results.clear();
                                 } else {
@@ -605,7 +560,6 @@ pub async fn run_app<B: ratatui::backend::Backend>(
                             }
                             KeyCode::Char(c) => {
                                 app.search_query.push(c);
-                                // Update results
                                 app.search_results = app
                                     .panels
                                     .iter()
@@ -724,7 +678,6 @@ pub async fn run_app<B: ratatui::backend::Backend>(
                             }
                             KeyCode::Char('v') => {
                                 app.mode = AppMode::Inspect;
-                                // Initialize cursor
                                 let end_ts = (chrono::Utc::now().timestamp()
                                     - app.time_offset.as_secs() as i64)
                                     as f64;
