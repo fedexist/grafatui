@@ -26,6 +26,7 @@ pub struct Config {
     pub prometheus_url: Option<String>,
     pub refresh_rate: Option<u64>,
     pub time_range: Option<String>,
+    pub step: Option<String>,
     pub theme: Option<String>,
     pub grafana_json: Option<PathBuf>,
     pub vars: Option<HashMap<String, String>>,

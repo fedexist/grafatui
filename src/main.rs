@@ -118,7 +118,10 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|| "5m".to_string());
     let range = app::parse_duration(&range_str).context("--range")?;
 
-    let step_str = args.step.unwrap_or_else(|| "5s".to_string());
+    let step_str = args
+        .step
+        .or(config.step)
+        .unwrap_or_else(|| "5s".to_string());
     let step = app::parse_duration(&step_str).context("--step")?;
 
     let refresh_rate = args.refresh_rate.or(config.refresh_rate).unwrap_or(1000);
