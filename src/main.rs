@@ -63,7 +63,7 @@ struct Args {
     #[arg(long, value_name = "NAME")]
     theme: Option<String>,
 
-    /// Configuration file path (e.g., ./grafatui.toml)
+    /// Configuration file path (e.g., ./grafatui.toml).
     #[arg(long, value_name = "FILE")]
     config: Option<std::path::PathBuf>,
 }
