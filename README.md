@@ -3,7 +3,7 @@
 [![CI](https://github.com/fedexist/grafatui/workflows/CI/badge.svg)](https://github.com/fedexist/grafatui/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/grafatui.svg)](https://crates.io/crates/grafatui)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Rust Version](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust Version](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 [![docs.rs](https://img.shields.io/docsrs/grafatui)](https://docs.rs/grafatui)
 
 **Grafatui** is a Terminal User Interface (TUI) for viewing Prometheus metrics, inspired by Grafana. It allows you to visualize time-series data directly in your terminal with a lightweight, keyboard-driven interface.
@@ -25,7 +25,7 @@
 
 ### From Source
 
-Ensure you have Rust installed (1.70+ recommended).
+Ensure you have Rust installed (1.85+ recommended).
 
 ```bash
 git clone https://github.com/fedexist/grafatui.git
