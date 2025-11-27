@@ -34,6 +34,15 @@ jobs:
         name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Debug Git State
+        run: |
+          echo "Current Commit: $(git rev-parse HEAD)"
+          echo "Latest Tag: $(git describe --tags --abbrev=0)"
+          echo "Git Log (last 10):"
+          git log --oneline -n 10
+          echo "Git Tags:"
+          git tag -l
+
       - name: Run release-plz
         uses: MarcoIeni/release-plz-action@v0.5
         env:
