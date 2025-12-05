@@ -1,3 +1,19 @@
+/*
+ * Copyright 2025 Federico D'Ambrosio
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 mod app;
 mod config;
 mod grafana;
@@ -102,7 +118,10 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|| "5m".to_string());
     let range = app::parse_duration(&range_str).context("--range")?;
 
-    let step_str = args.step.unwrap_or_else(|| "5s".to_string());
+    let step_str = args
+        .step
+        .or(config.step)
+        .unwrap_or_else(|| "5s".to_string());
     let step = app::parse_duration(&step_str).context("--step")?;
 
     let refresh_rate = args.refresh_rate.or(config.refresh_rate).unwrap_or(1000);
@@ -154,7 +173,14 @@ async fn main() -> Result<()> {
             ("grafatui".to_string(), app::default_queries(args.query), 0)
         };
 
-    // CLI vars override dashboard defaults
+    // Merge config vars (if any)
+    if let Some(config_vars) = config.vars {
+        for (k, v) in config_vars {
+            vars.insert(k, v);
+        }
+    }
+
+    // CLI vars override dashboard defaults and config vars
     for (k, v) in &args.var {
         vars.insert(k.clone(), v.clone());
     }

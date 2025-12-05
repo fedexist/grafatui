@@ -1,6 +1,23 @@
+/*
+ * Copyright 2025 Federico D'Ambrosio
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 use anyhow::Result;
 use directories::ProjectDirs;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -9,8 +26,10 @@ pub struct Config {
     pub prometheus_url: Option<String>,
     pub refresh_rate: Option<u64>,
     pub time_range: Option<String>,
+    pub step: Option<String>,
     pub theme: Option<String>,
     pub grafana_json: Option<PathBuf>,
+    pub vars: Option<HashMap<String, String>>,
 }
 
 impl Config {
@@ -27,23 +46,20 @@ impl Config {
     }
 
     fn get_config_path() -> Option<PathBuf> {
-        // 1. Check XDG config path
-        if let Some(proj_dirs) = ProjectDirs::from("com", "grafatui", "grafatui") {
-            let path = proj_dirs.config_dir().join("config.toml");
-            if path.exists() {
-                return Some(path);
+        if let Some(base_dirs) = ProjectDirs::from("", "", "grafatui") {
+            let config_path = base_dirs.config_dir().join("config.toml");
+            if config_path.exists() {
+                return Some(config_path);
             }
-            // Also check for grafatui.toml in config dir
-            let path = proj_dirs.config_dir().join("grafatui.toml");
-            if path.exists() {
-                return Some(path);
+            let config_path = base_dirs.config_dir().join("grafatui.toml");
+            if config_path.exists() {
+                return Some(config_path);
             }
         }
 
-        // 2. Check current directory
-        let path = PathBuf::from("grafatui.toml");
-        if path.exists() {
-            return Some(path);
+        let cwd_path = PathBuf::from("./grafatui.toml");
+        if cwd_path.exists() {
+            return Some(cwd_path.to_path_buf());
         }
 
         None
