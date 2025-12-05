@@ -1,11 +1,18 @@
 [package]
 name = "grafatui"
 version = "0.1.0"
+authors = ["Federico D'Ambrosio <fedexist@gmail.com>"]
 edition = "2024"
+rust-version = "1.85"
 description = "A Grafana-like TUI for Prometheus"
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/fedexist/grafatui"
+homepage = "https://github.com/fedexist/grafatui"
+documentation = "https://docs.rs/grafatui"
+readme = "README.md"
 keywords = ["tui", "prometheus", "grafana", "monitoring", "terminal"]
+categories = ["command-line-utilities", "visualization", "development-tools"]
+exclude = [".github/", "examples/demo/", "*.mp4", "*.webp"]
 
 [dependencies]
 anyhow = "1.0.100"
