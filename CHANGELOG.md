@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.1.1] - 2025-12-05
+
+### ⛰️  Features
+
+- Establish project governance with contribution guidelines, issue templates, and Apache-2.0 license. ([f18b74c](https://github.com/fedexist/grafatui/commit/f18b74c2dc910f1766bcd4c335e4fcf9131016f6))
+- Add Apache 2.0 license header to all source files. ([55edce5](https://github.com/fedexist/grafatui/commit/55edce5bf6cbc0e08c632d8e2c149c0329414bbd))
+- Add support for config file variables with minor app logic refactoring. ([d37efe5](https://github.com/fedexist/grafatui/commit/d37efe5f8ee202a2feedd1cfca0be91dca92ca0c))
+- Add `step` configuration option, update demo `grafatui.toml` with new settings and `vars` ([7c3651c](https://github.com/fedexist/grafatui/commit/7c3651c9bb06ea28f222cb32bcbfbf3b3bcaecac))
+
+### 📚 Documentation
+
+- Update README with a quick start guide, detailed features, comprehensive installation methods, usage options, and a Grafana comparison. ([7057933](https://github.com/fedexist/grafatui/commit/7057933db24d2c3df223fb69dc417d10cfa2126f))
+
+### ⚙️ Miscellaneous Tasks
+
+- Add cross-platform binary release workflow ([3b226e3](https://github.com/fedexist/grafatui/commit/3b226e3318ea4645da1c53583538c31dac9c18f8))
+- Cleanup CI workflows (remove debug steps and redundant files) ([250383c](https://github.com/fedexist/grafatui/commit/250383cd56049dec4d6b94e7f45b4dcf74e292c9))
+- Update Cargo.toml metadata and Rust version to 1.85 ([085ce48](https://github.com/fedexist/grafatui/commit/085ce48dc094b62f8e8390f446de228dc70412b2))
+
+
 ## [0.1.0] - 2025-11-22
 
 ### ⛰️  Features
