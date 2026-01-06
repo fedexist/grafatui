@@ -34,7 +34,9 @@ pub struct Config {
 
 impl Config {
     pub fn load(cli_path: Option<PathBuf>) -> Result<Self> {
-        let config_path = cli_path.or_else(Self::get_config_path);
+        let config_path = cli_path
+            .map(|p| expand_path(&p))
+            .or_else(Self::get_config_path);
         if let Some(path) = config_path {
             if path.exists() {
                 let content = fs::read_to_string(path)?;
@@ -66,6 +68,23 @@ impl Config {
     }
 }
 
+/// Expands a path starting with `~` to the user's home directory.
+pub fn expand_path(path: &std::path::Path) -> PathBuf {
+    let path_str = path.to_string_lossy();
+    if path_str.starts_with("~") {
+        if let Some(dirs) = directories::UserDirs::new() {
+            let home = dirs.home_dir();
+            if path_str == "~" {
+                return home.to_path_buf();
+            }
+            if path_str.starts_with("~/") || path_str.starts_with("~\\") {
+                return home.join(&path_str[2..]);
+            }
+        }
+    }
+    path.to_path_buf()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -84,5 +103,28 @@ mod tests {
         );
         assert_eq!(config.refresh_rate, Some(5000));
         assert_eq!(config.theme, Some("dracula".to_string()));
+    }
+
+    #[test]
+    fn test_expand_path() {
+        if let Some(dirs) = directories::UserDirs::new() {
+            let home = dirs.home_dir();
+
+            // Test ~
+            let p = PathBuf::from("~");
+            assert_eq!(expand_path(&p), home);
+
+            // Test ~/foo
+            let p = PathBuf::from("~/foo/bar.json");
+            assert_eq!(expand_path(&p), home.join("foo/bar.json"));
+
+            // Test path without ~
+            let p = PathBuf::from("./local.json");
+            assert_eq!(expand_path(&p), p);
+
+            // Test /absolute
+            let p = PathBuf::from("/etc/config");
+            assert_eq!(expand_path(&p), p);
+        }
     }
 }

@@ -132,46 +132,49 @@ async fn main() -> Result<()> {
     let prom = prom::PromClient::new(prometheus_url);
 
     // Build panels from Grafana import or simple queries.
-    let (title, panels, skipped_panels) =
-        if let Some(path) = args.grafana_json.or(config.grafana_json) {
-            match grafana::load_grafana_dashboard(&path) {
-                Ok(d) => {
-                    // Seed vars from dashboard defaults
-                    for (k, v) in d.vars {
-                        vars.insert(k, v);
-                    }
+    let (title, panels, skipped_panels) = if let Some(path) = args
+        .grafana_json
+        .or(config.grafana_json)
+        .map(|p| config::expand_path(&p))
+    {
+        match grafana::load_grafana_dashboard(&path) {
+            Ok(d) => {
+                // Seed vars from dashboard defaults
+                for (k, v) in d.vars {
+                    vars.insert(k, v);
+                }
 
-                    let ps = d
-                        .queries
-                        .into_iter()
-                        .map(|q| app::PanelState {
-                            title: q.title,
-                            exprs: q.exprs,
-                            legends: q.legends,
-                            series: vec![],
-                            last_error: None,
-                            last_url: None,
-                            last_samples: 0,
-                            grid: q.grid.map(|g| app::GridUnit {
-                                x: g.x,
-                                y: g.y,
-                                w: g.w,
-                                h: g.h,
-                            }),
-                            y_axis_mode: app::YAxisMode::Auto,
-                            panel_type: q.panel_type,
-                        })
-                        .collect();
-                    (format!("{} (imported)", d.title), ps, d.skipped_panels)
-                }
-                Err(e) => {
-                    eprintln!("Failed to import Grafana dashboard: {e}");
-                    ("grafatui".to_string(), app::default_queries(args.query), 0)
-                }
+                let ps = d
+                    .queries
+                    .into_iter()
+                    .map(|q| app::PanelState {
+                        title: q.title,
+                        exprs: q.exprs,
+                        legends: q.legends,
+                        series: vec![],
+                        last_error: None,
+                        last_url: None,
+                        last_samples: 0,
+                        grid: q.grid.map(|g| app::GridUnit {
+                            x: g.x,
+                            y: g.y,
+                            w: g.w,
+                            h: g.h,
+                        }),
+                        y_axis_mode: app::YAxisMode::Auto,
+                        panel_type: q.panel_type,
+                    })
+                    .collect();
+                (format!("{} (imported)", d.title), ps, d.skipped_panels)
             }
-        } else {
-            ("grafatui".to_string(), app::default_queries(args.query), 0)
-        };
+            Err(e) => {
+                eprintln!("Failed to import Grafana dashboard: {e}");
+                ("grafatui".to_string(), app::default_queries(args.query), 0)
+            }
+        }
+    } else {
+        ("grafatui".to_string(), app::default_queries(args.query), 0)
+    };
 
     // Merge config vars (if any)
     if let Some(config_vars) = config.vars {
