@@ -4,13 +4,21 @@
 prometheus_url = "http://localhost:19090"
 
 # Default Dashboard
-grafana_json = "vllm_demo.json"
+grafana_json = "vllm/grafana.json"
 
-# Refresh interval
-refresh_interval = "1s"
+# Refresh rate in milliseconds
+refresh_rate = 1000
+
+# Query step resolution
+step = "5s"
+
+# Variables
+[vars]
+model_name = "FILL ME IN"
+engine = "FILL ME IN"
 
 # Time range
-time_range = "5m"
+time_range = "30m"
 
 # Theme (optional)
 theme = "monokai"
