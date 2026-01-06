@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.1.3] - 2026-01-06
+
+### 🐛 Bug Fixes
+
+- Propagate error when loading configured dashboard fails ([1f9a6e5](https://github.com/fedexist/grafatui/commit/1f9a6e5e09640f9a548427cb9be01d9dc8413d78))
+- Improve error handling for config loading and HTTP client ([090ec71](https://github.com/fedexist/grafatui/commit/090ec714aaf0fa925dd9daf4e5df1bff894fa9b6))
+
+
 ## [0.1.2] - 2026-01-06
 
 ### 🐛 Bug Fixes
