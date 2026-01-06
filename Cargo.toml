@@ -1,6 +1,6 @@
 [package]
 name = "grafatui"
-version = "0.1.2"
+version = "0.1.3"
 authors = ["Federico D'Ambrosio <fedexist@gmail.com>"]
 edition = "2024"
 rust-version = "1.85"
