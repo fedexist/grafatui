@@ -105,7 +105,10 @@ where
 async fn main() -> Result<()> {
     let args = Args::parse();
     // Load config
-    let config = Config::load(args.config.clone()).unwrap_or_default();
+    let config = match args.config.clone() {
+        Some(path) => Config::load(Some(path))?,
+        None => Config::load(None).unwrap_or_default(),
+    };
 
     let prometheus_url = args
         .prometheus_url
