@@ -480,6 +480,31 @@ mod tests {
         assert_eq!(downsampled.len(), 100);
         assert_eq!(downsampled.last().unwrap().1, 999.0);
     }
+
+    #[tokio::test]
+    async fn test_empty_panels() {
+        let prom = prom::PromClient::new("http://localhost:9090".to_string());
+        let mut app = AppState::new(
+            prom,
+            Duration::from_secs(3600),
+            Duration::from_secs(60),
+            Duration::from_millis(1000),
+            "Test".to_string(),
+            vec![], // Empty panels
+            0,
+            Theme::default(),
+        );
+
+        // Should not panic on refresh
+        assert!(app.refresh().await.is_ok());
+
+        // Check navigation safety
+        app.scroll_to_selected_panel();
+        assert_eq!(app.selected_panel, 0);
+
+        // Check cursor movement
+        app.move_cursor(1);
+    }
 }
 
 pub fn default_queries(mut provided: Vec<String>) -> Vec<PanelState> {
