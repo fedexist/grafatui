@@ -41,7 +41,14 @@ impl PromClient {
             .timeout(Duration::from_secs(10))
             .connect_timeout(Duration::from_secs(5))
             .build()
-            .unwrap_or_else(|_| Client::new());
+            .unwrap_or_else(|e| {
+                eprintln!(
+                    "Warning: Failed to configure HTTP client with timeouts: {}",
+                    e
+                );
+                eprintln!("         Falling back to default client (requests may hang).");
+                Client::new()
+            });
 
         Self {
             base,
