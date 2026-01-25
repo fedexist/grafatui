@@ -56,6 +56,12 @@ jobs:
         run: |
           # Build release binary first if not already present (release-action might have cleaned up)
           cargo build --release --target ${{ matrix.target }}
+          
+          # Ensure target/release directory exists and copy binary there for packaging tools
+          # This is needed because cargo-generate-rpm reads paths from Cargo.toml which points to target/release
+          mkdir -p target/release
+          cp target/${{ matrix.target }}/release/grafatui target/release/grafatui
+
           # cargo-deb automatically uses target/release
           cargo deb --target ${{ matrix.target }}
           # cargo-generate-rpm needs the binary in place
