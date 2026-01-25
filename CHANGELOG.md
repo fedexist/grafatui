@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.1.4] - 2026-01-25
+
+### ⛰️  Features
+
+- Add asciicast demo and update the demo quick start command. ([b7f86e6](https://github.com/fedexist/grafatui/commit/b7f86e646c642f918af8804b1358197cbacfb8da))
+- Add shell completion generation for various shells and update documentation. ([20acb0a](https://github.com/fedexist/grafatui/commit/20acb0a07b05cf0684841d46e5215776e39ef0c6))
+- Add man page generation via a new CLI command and introduce Homebrew support with a new formula and automated workflow. ([26ee256](https://github.com/fedexist/grafatui/commit/26ee25645bdefcc54892a6a6a0ec18b73c861975))
+- Implement automatic `.deb` and `.rpm` package generation and release for Linux x86_64. ([aaa7a44](https://github.com/fedexist/grafatui/commit/aaa7a44e958e01a2dda3f3b85fa0d73bf3452ef6))
+
+### 🐛 Bug Fixes
+
+- Use rustls-only TLS to remove OpenSSL system dependency ([a652ff0](https://github.com/fedexist/grafatui/commit/a652ff065c9a00c5d66114f0c965f39b4c17a6bc))
+
+
 ## [0.1.3] - 2026-01-06
 
 ### 🐛 Bug Fixes
