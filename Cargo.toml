@@ -19,6 +19,7 @@ anyhow = "1.0.100"
 chrono = { version = "0.4.42", features = ["clock"] }
 clap = { version = "4.5.51", features = ["derive"] }
 clap_complete = "4.5.44"
+clap_mangen = "0.2.26"
 crossterm = "0.29.0"
 futures = "0.3.31"
 humantime = "2.3.0"
