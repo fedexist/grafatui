@@ -18,6 +18,8 @@ exclude = [".github/", "examples/demo/", "*.mp4", "*.webp"]
 anyhow = "1.0.100"
 chrono = { version = "0.4.42", features = ["clock"] }
 clap = { version = "4.5.51", features = ["derive"] }
+clap_complete = "4.5.44"
+clap_mangen = "0.2.26"
 crossterm = "0.29.0"
 futures = "0.3.31"
 humantime = "2.3.0"
@@ -29,3 +31,24 @@ tokio = { version = "1.48.0", features = ["full"] }
 toml = "0.8.19"
 directories = "5.0.1"
 urlencoding = "2.1.3"
+
+[package.metadata.deb]
+maintainer = "Federico D'Ambrosio <fedexist@gmail.com>"
+copyright = "2025, Federico D'Ambrosio <fedexist@gmail.com>"
+license-file = ["LICENSE", "4"]
+extended-description = """\
+Grafatui is a terminal-based user interface (TUI) for Prometheus. \
+It allows you to visualize time-series data directly in your terminal \
+with a lightweight, keyboard-driven interface."""
+assets = [
+    ["target/release/grafatui", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/grafatui/README.md", "644"],
+]
+
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/grafatui", dest = "/usr/bin/grafatui", mode = "755" },
+    { source = "README.md", dest = "/usr/share/doc/grafatui/README.md", mode = "644" },
+    { source = "LICENSE", dest = "/usr/share/doc/grafatui/LICENSE", mode = "644" },
+]
