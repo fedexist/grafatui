@@ -44,14 +44,23 @@ use cli::Args;
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    if let Some(cli::Commands::Completions { shell }) = args.command {
-        use clap::CommandFactory;
-        clap_complete::generate(
-            shell,
-            &mut Args::command(),
-            "grafatui",
-            &mut std::io::stdout(),
-        );
+    if let Some(cmd) = args.command {
+        match cmd {
+            cli::Commands::Completions { shell } => {
+                use clap::CommandFactory;
+                clap_complete::generate(
+                    shell,
+                    &mut Args::command(),
+                    "grafatui",
+                    &mut std::io::stdout(),
+                );
+            }
+            cli::Commands::Man => {
+                use clap::CommandFactory;
+                let man = clap_mangen::Man::new(Args::command());
+                man.render(&mut std::io::stdout())?;
+            }
+        }
         return Ok(());
     }
 

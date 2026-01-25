@@ -60,6 +60,8 @@ pub enum Commands {
         /// Shell to generate completions for
         shell: clap_complete::Shell,
     },
+    /// Generate man page
+    Man,
 }
 
 /// Helper to parse key=value pairs for CLI arguments.
