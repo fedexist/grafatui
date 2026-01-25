@@ -8,7 +8,7 @@
 
 **Grafatui** is a terminal-based user interface (TUI) for Prometheus, inspired by Grafana. It allows you to visualize time-series data directly in your terminal with a lightweight, keyboard-driven interface.
 
-<!-- Screenshot/demo will be added here by user -->
+[![asciicast](https://asciinema.org/a/vMRNEjG0FEDKGP31.svg)](https://asciinema.org/a/vMRNEjG0FEDKGP31)
 
 ## Why Grafatui?
 
