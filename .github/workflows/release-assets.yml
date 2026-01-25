@@ -78,7 +78,6 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: target/${{ matrix.target }}/debian/*.deb
           file_glob: true
-          file_glob: true
           tag: ${{ inputs.release_tag || github.ref }}
 
       - name: Upload RPM (Linux x86_64)
