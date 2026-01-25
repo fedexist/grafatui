@@ -7,6 +7,10 @@ on:
   release:
     types: [created]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Tag to release (e.g. v0.1.4)'
+        required: true
 
 jobs:
   upload-assets:
@@ -74,7 +78,8 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: target/${{ matrix.target }}/debian/*.deb
           file_glob: true
-          tag: ${{ github.ref }}
+          file_glob: true
+          tag: ${{ inputs.release_tag || github.ref }}
 
       - name: Upload RPM (Linux x86_64)
         if: matrix.target == 'x86_64-unknown-linux-gnu'
@@ -94,8 +99,8 @@ jobs:
           # A PR will be sent to the "homebrew-tap" repository to update this formula:
           formula-name: grafatui
           homebrew-tap: fedexist/homebrew-grafatui
-          download-url: https://github.com/fedexist/grafatui/releases/download/${{ github.event.release.tag_name }}/grafatui-x86_64-apple-darwin.tar.gz
-          commit-message: "brew: update formula to ${{ github.event.release.tag_name }}"
+          download-url: https://github.com/fedexist/grafatui/releases/download/${{ inputs.release_tag || github.event.release.tag_name }}/grafatui-x86_64-apple-darwin.tar.gz
+          commit-message: "brew: update formula to ${{ inputs.release_tag || github.event.release.tag_name }}"
         env:
           COMMITTER_TOKEN: ${{ secrets.COMMITTER_TOKEN }}
 
