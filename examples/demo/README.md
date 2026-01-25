@@ -5,7 +5,7 @@ Get started with grafatui in less than a minute using this pre-configured Promet
 ## Quick Start (One-Liner)
 
 ```bash
-docker-compose up -d && sleep 5 && cargo run -- --grafana-json ../dashboards/prometheus_demo.json --prometheus http://localhost:19090
+docker-compose up -d && sleep 5 && cargo run -- --grafana-json ../dashboards/prometheus_demo.json --prometheus-url http://localhost:19090
 ```
 
 > **Note**: The docker-compose is configured to use port **19090** to avoid conflicts with development tools and other services.
