@@ -101,6 +101,27 @@ Download the latest release for your platform from [GitHub Releases](https://git
 brew install grafatui
 ```
 
+## Shell Completions
+
+Grafatui can generate shell completions for Bash, Zsh, Fish, PowerShell, and Elvish.
+
+**Bash:**
+```bash
+# Add to .bashrc
+source <(grafatui completions bash)
+```
+
+**Zsh:**
+```zsh
+# Add to .zshrc
+source <(grafatui completions zsh)
+```
+
+**Fish:**
+```fish
+grafatui completions fish | source
+```
+
 ## Usage
 
 ```bash
