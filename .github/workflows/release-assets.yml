@@ -79,8 +79,6 @@ jobs:
           file_glob: true
           tag: ${{ github.ref }}
 
-        env:
-
   update-homebrew:
     needs: upload-assets
     runs-on: ubuntu-latest
