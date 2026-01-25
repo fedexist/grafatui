@@ -44,6 +44,41 @@ jobs:
           bin: grafatui
           target: ${{ matrix.target }}
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cargo-deb & cargo-generate-rpm (Linux x86_64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          cargo install cargo-deb
+          cargo install cargo-generate-rpm
+
+      - name: Build DEB & RPM (Linux x86_64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          # Build release binary first if not already present (release-action might have cleaned up)
+          cargo build --release --target ${{ matrix.target }}
+          # cargo-deb automatically uses target/release
+          cargo deb --target ${{ matrix.target }}
+          # cargo-generate-rpm needs the binary in place
+          cargo generate-rpm
+
+      - name: Upload DEB (Linux x86_64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: target/${{ matrix.target }}/debian/*.deb
+          file_glob: true
+          tag: ${{ github.ref }}
+
+      - name: Upload RPM (Linux x86_64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: target/generate-rpm/*.rpm
+          file_glob: true
+          tag: ${{ github.ref }}
+
         env:
 
   update-homebrew:
