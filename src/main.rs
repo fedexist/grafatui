@@ -35,75 +35,35 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use theme::Theme;
 
-/// Command-line arguments for Grafatui.
-#[derive(Debug, Parser, Clone)]
-#[command(
-    name = "grafatui",
-    version,
-    about = "Grafana-like Prometheus charts in your terminal"
-)]
-struct Args {
-    /// Prometheus URL (e.g., http://localhost:9090)
-    #[arg(long)]
-    prometheus_url: Option<String>,
+mod cli;
 
-    /// Time range to query (e.g., 5m, 1h, 3d) (default: 5m)
-    #[arg(long, value_name = "DURATION")]
-    range: Option<String>,
-
-    /// Query step resolution (e.g., 5s, 30s, 1m) (default: 5s)
-    #[arg(long, value_name = "DURATION")]
-    step: Option<String>,
-
-    /// Grafana dashboard JSON file to import (e.g., ./dashboard.json)
-    #[arg(long, value_name = "FILE")]
-    grafana_json: Option<std::path::PathBuf>,
-
-    /// UI tick rate in milliseconds (screen refresh cadence)
-    #[arg(long, default_value = "250")]
-    tick_rate: u64,
-
-    /// Data refresh rate in milliseconds (Prometheus fetch interval) (default: 1000)
-    #[arg(long, value_name = "MS")]
-    refresh_rate: Option<u64>,
-
-    /// Additional PromQL queries to append as panels
-    #[arg(long, value_name = "EXPR")]
-    query: Vec<String>,
-
-    /// Template variables to override (e.g., --var instance=server1)
-    #[arg(long, value_parser = parse_key_val::<String, String>, value_name = "KEY=VALUE")]
-    var: Vec<(String, String)>,
-
-    /// Color theme (default, dracula, monokai, solarized-dark, solarized-light, gruvbox, tokyo-night, catppuccin)
-    #[arg(long, value_name = "NAME")]
-    theme: Option<String>,
-
-    /// Configuration file path (e.g., ./grafatui.toml).
-    #[arg(long, value_name = "FILE")]
-    config: Option<std::path::PathBuf>,
-}
-
-/// Helper to parse key=value pairs for CLI arguments.
-fn parse_key_val<T, U>(
-    s: &str,
-) -> Result<(T, U), Box<dyn std::error::Error + Send + Sync + 'static>>
-where
-    T: std::str::FromStr,
-    T::Err: std::error::Error + Send + Sync + 'static,
-    U: std::str::FromStr,
-    U::Err: std::error::Error + Send + Sync + 'static,
-{
-    let pos = s
-        .find('=')
-        .ok_or_else(|| format!("invalid KEY=value: no `=` found in `{}`", s))?;
-    Ok((s[..pos].parse()?, s[pos + 1..].parse()?))
-}
+use cli::Args;
 
 /// Main entry point for the Grafatui application.
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+
+    if let Some(cmd) = args.command {
+        match cmd {
+            cli::Commands::Completions { shell } => {
+                use clap::CommandFactory;
+                clap_complete::generate(
+                    shell,
+                    &mut Args::command(),
+                    "grafatui",
+                    &mut std::io::stdout(),
+                );
+            }
+            cli::Commands::Man => {
+                use clap::CommandFactory;
+                let man = clap_mangen::Man::new(Args::command());
+                man.render(&mut std::io::stdout())?;
+            }
+        }
+        return Ok(());
+    }
+
     // Load config
     let config = match args.config.clone() {
         Some(path) => Config::load(Some(path))?,
