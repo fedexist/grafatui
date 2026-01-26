@@ -98,6 +98,7 @@ jobs:
         with:
           # A PR will be sent to the "homebrew-tap" repository to update this formula:
           formula-name: grafatui
+          tag-name: ${{ inputs.release_tag || github.event.release.tag_name }}
           homebrew-tap: fedexist/homebrew-grafatui
           download-url: https://github.com/fedexist/grafatui/releases/download/${{ inputs.release_tag || github.event.release.tag_name }}/grafatui-x86_64-apple-darwin.tar.gz
           commit-message: "brew: update formula to ${{ inputs.release_tag || github.event.release.tag_name }}"
