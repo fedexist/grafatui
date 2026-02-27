@@ -25,6 +25,12 @@ pub struct Args {
     #[arg(long, value_name = "FILE")]
     pub grafana_json: Option<PathBuf>,
 
+    /// Validate a Grafana dashboard JSON file and exit (prints a report to stdout).
+    ///
+    /// Use with `--grafana-json <FILE>` (or set `grafana_json` in the config file).
+    #[arg(long, default_value_t = false)]
+    pub validate: bool,
+
     /// UI tick rate in milliseconds (screen refresh cadence)
     #[arg(long, default_value = "250")]
     pub tick_rate: u64,

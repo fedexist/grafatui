@@ -70,6 +70,18 @@ async fn main() -> Result<()> {
         None => Config::load(None).unwrap_or_default(),
     };
 
+    if args.validate {
+        let path = args
+            .grafana_json
+            .or(config.grafana_json)
+            .map(|p| config::expand_path(&p))
+            .ok_or_else(|| anyhow::anyhow!("--validate requires --grafana-json <FILE> (or grafana_json in config)"))?;
+
+        let report = grafana::validate_grafana_dashboard(&path)?;
+        println!("{}", report.to_text());
+        return Ok(());
+    }
+
     let prometheus_url = args
         .prometheus_url
         .or(config.prometheus_url)

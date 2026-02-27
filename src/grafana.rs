@@ -18,6 +18,14 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
 
+/// A skipped / unsupported panel encountered during import or validation.
+#[derive(Debug, Clone)]
+pub struct SkippedPanel {
+    pub panel_type: String,
+    pub title: String,
+    pub reason: String,
+}
+
 /// Result of importing a Grafana dashboard.
 #[derive(Debug, Clone, Default)]
 pub struct DashboardImport {
@@ -29,6 +37,8 @@ pub struct DashboardImport {
     pub vars: HashMap<String, String>,
     /// Number of panels that were skipped (unsupported types).
     pub skipped_panels: usize,
+    /// Details about skipped panels (unsupported panel types, or panels without queries).
+    pub skipped: Vec<SkippedPanel>,
 }
 
 /// A single panel extracted from Grafana.
@@ -104,21 +114,106 @@ struct RawGridPos {
     h: i32,
 }
 
+/// A human-friendly validation report for a Grafana dashboard JSON file.
+#[derive(Debug, Clone, Default)]
+pub struct ValidationReport {
+    pub title: String,
+    pub vars: HashMap<String, String>,
+    /// Number of non-row panels encountered in the JSON.
+    pub total_panels: usize,
+    /// Number of panels that can be imported and rendered (supported type + at least one PromQL expr).
+    pub supported_panels: usize,
+    /// Panels that cannot be rendered or imported (unsupported type or missing query targets).
+    pub skipped: Vec<SkippedPanel>,
+}
+
+impl ValidationReport {
+    pub fn to_text(&self) -> String {
+        let mut out = String::new();
+        out.push_str("Grafana dashboard validation\n");
+        out.push_str("===========================\n");
+        out.push_str(&format!("Title: {}\n", if self.title.is_empty() { "-" } else { &self.title }));
+        out.push_str(&format!(
+            "Panels: total={} supported={} skipped={}\n",
+            self.total_panels,
+            self.supported_panels,
+            self.skipped.len()
+        ));
+        out.push_str(&format!("Variables: {}\n", self.vars.len()));
+        if !self.vars.is_empty() {
+            let mut keys: Vec<_> = self.vars.keys().cloned().collect();
+            keys.sort();
+            for k in keys {
+                let v = self.vars.get(&k).map(String::as_str).unwrap_or("-");
+                out.push_str(&format!("  - {}={}\n", k, v));
+            }
+        }
+        if !self.skipped.is_empty() {
+            out.push('\n');
+            out.push_str("Skipped panels:\n");
+            for p in &self.skipped {
+                let title = if p.title.is_empty() { "-" } else { &p.title };
+                out.push_str(&format!(
+                    "  - type={} title={} reason={}\n",
+                    p.panel_type, title, p.reason
+                ));
+            }
+        }
+        out
+    }
+}
+
 pub fn load_grafana_dashboard(path: &std::path::Path) -> Result<DashboardImport> {
     let data = std::fs::read_to_string(path)
         .with_context(|| format!("reading grafana dashboard: {}", path.display()))?;
-    let raw: RawDashboard =
-        serde_json::from_str(&data).with_context(|| "parsing grafana dashboard JSON")?;
+    let raw: RawDashboard = parse_raw_dashboard(&data)?;
+    let vars = extract_vars(&raw);
 
+    let mut out = DashboardImport {
+        title: raw.title.unwrap_or_default(),
+        queries: vec![],
+        vars,
+        skipped_panels: 0,
+        skipped: vec![],
+    };
+
+    if let Some(panels) = raw.panels {
+        collect_panels(&mut out, panels)?;
+    }
+    Ok(out)
+}
+
+pub fn validate_grafana_dashboard(path: &std::path::Path) -> Result<ValidationReport> {
+    let data = std::fs::read_to_string(path)
+        .with_context(|| format!("reading grafana dashboard: {}", path.display()))?;
+    let raw: RawDashboard = parse_raw_dashboard(&data)?;
+
+    let mut report = ValidationReport {
+        title: raw.title.clone().unwrap_or_default(),
+        vars: extract_vars(&raw),
+        total_panels: 0,
+        supported_panels: 0,
+        skipped: Vec::new(),
+    };
+
+    if let Some(panels) = raw.panels {
+        collect_validation(&mut report, panels);
+    }
+
+    Ok(report)
+}
+
+fn parse_raw_dashboard(data: &str) -> Result<RawDashboard> {
+    serde_json::from_str(data).with_context(|| "parsing grafana dashboard JSON")
+}
+
+fn extract_vars(raw: &RawDashboard) -> HashMap<String, String> {
     let mut vars = HashMap::new();
-    if let Some(templating) = raw.templating {
-        if let Some(list) = templating.list {
+
+    if let Some(templating) = raw.templating.as_ref() {
+        if let Some(list) = templating.list.as_ref() {
             for v in list {
-                // Heuristic: prefer 'value' over 'text', handle arrays by taking first or joining?
-                // Grafana 'current' value can be "All" or ["val1", "val2"].
-                // For simple PromQL substitution, we usually want the raw value.
-                // If it's "All", it might be $__all, which is tricky.
-                // Let's try to get a string representation.
+                // Heuristic: prefer 'value' over 'text', handle arrays by taking first string.
                 let val = v
                     .current
                     .as_ref()
@@ -128,43 +223,28 @@ pub fn load_grafana_dashboard(path: &std::path::Path) -> Result<DashboardImport>
                 if let Some(val) = val {
                     let mut s = match val {
                         serde_json::Value::String(s) => s.clone(),
-                        serde_json::Value::Array(arr) => {
-                            // If array, maybe join with pipe for regex? or just take first?
-                            // For now, let's take the first string we find.
-                            arr.iter()
-                                .find_map(|x| x.as_str())
-                                .unwrap_or("")
-                                .to_string()
-                        }
+                        serde_json::Value::Array(arr) => arr
+                            .iter()
+                            .find_map(|x| x.as_str())
+                            .unwrap_or("")
+                            .to_string(),
                         serde_json::Value::Number(n) => n.to_string(),
                         _ => String::new(),
                     };
 
-                    // Handle $__all
                     if s == "$__all" {
-                        // Use allValue if present, otherwise permissive regex
                         s = v.all_value.clone().unwrap_or_else(|| ".*".to_string());
                     }
 
                     if !s.is_empty() {
-                        vars.insert(v.name, s);
+                        vars.insert(v.name.clone(), s);
                     }
                 }
             }
         }
     }
 
-    let mut out = DashboardImport {
-        title: raw.title.unwrap_or_default(),
-        queries: vec![],
-        vars,
-        skipped_panels: 0,
-    };
-
-    if let Some(panels) = raw.panels {
-        collect_panels(&mut out, panels)?;
-    }
-    Ok(out)
+    vars
 }
 
 fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()> {
@@ -209,13 +289,70 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
                     grid: gp,
                     panel_type,
                 });
+            } else if kind != "row" {
+                out.skipped_panels += 1;
+                out.skipped.push(SkippedPanel {
+                    panel_type: kind,
+                    title: p.title.unwrap_or_default(),
+                    reason: "no PromQL targets found".to_string(),
+                });
             }
         } else if !kind.is_empty() && kind != "row" {
             // Count skipped panels (ignore rows)
             out.skipped_panels += 1;
+            out.skipped.push(SkippedPanel {
+                panel_type: kind,
+                title: p.title.unwrap_or_default(),
+                reason: "unsupported panel type".to_string(),
+            });
         }
     }
     Ok(())
+}
+
+fn collect_validation(report: &mut ValidationReport, panels: Vec<RawPanel>) {
+    for p in panels.into_iter() {
+        if let Some(children) = p.panels {
+            collect_validation(report, children);
+        }
+
+        let kind = p.panel_type;
+        if kind.is_empty() || kind == "row" {
+            continue;
+        }
+
+        report.total_panels += 1;
+
+        let is_supported_type = matches!(
+            kind.as_str(),
+            "graph" | "timeseries" | "stat" | "gauge" | "bargauge" | "table" | "heatmap"
+        );
+
+        if !is_supported_type {
+            report.skipped.push(SkippedPanel {
+                panel_type: kind,
+                title: p.title.unwrap_or_default(),
+                reason: "unsupported panel type".to_string(),
+            });
+            continue;
+        }
+
+        let has_expr = p
+            .targets
+            .unwrap_or_default()
+            .into_iter()
+            .any(|t| t.expr.as_ref().is_some_and(|e| !e.trim().is_empty()));
+
+        if has_expr {
+            report.supported_panels += 1;
+        } else {
+            report.skipped.push(SkippedPanel {
+                panel_type: kind,
+                title: p.title.unwrap_or_default(),
+                reason: "no PromQL targets found".to_string(),
+            });
+        }
+    }
 }
 
 #[cfg(test)]
@@ -256,5 +393,37 @@ mod tests {
             .and_then(|c| c.value.as_ref())
             .or(v.current.as_ref().and_then(|c| c.text.as_ref()));
         assert_eq!(val.unwrap().as_str(), Some("node-exporter"));
+    }
+
+    #[test]
+    fn test_validation_counts_unsupported_and_empty_targets() {
+        let json = r#"
+        {
+            "title": "Dash",
+            "panels": [
+                { "type": "timeseries", "title": "OK", "targets": [ { "expr": "up" } ] },
+                { "type": "timeseries", "title": "Empty", "targets": [] },
+                { "type": "custom", "title": "Unsupported", "targets": [ { "expr": "up" } ] },
+                { "type": "row", "title": "Row", "panels": [
+                    { "type": "graph", "title": "Nested OK", "targets": [ { "expr": "up" } ] }
+                ]}
+            ]
+        }
+        "#;
+
+        let raw: RawDashboard = serde_json::from_str(json).unwrap();
+        let mut report = ValidationReport {
+            title: raw.title.clone().unwrap_or_default(),
+            vars: extract_vars(&raw),
+            total_panels: 0,
+            supported_panels: 0,
+            skipped: Vec::new(),
+        };
+
+        collect_validation(&mut report, raw.panels.unwrap());
+
+        assert_eq!(report.total_panels, 4); // excludes row, includes nested
+        assert_eq!(report.supported_panels, 2);
+        assert_eq!(report.skipped.len(), 2);
     }
 }
