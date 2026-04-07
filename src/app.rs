@@ -20,7 +20,7 @@ use crate::ui;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use futures::StreamExt;
-use ratatui::Terminal;
+use ratatui::{style::Color, Terminal};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
@@ -48,6 +48,12 @@ pub struct PanelState {
     pub y_axis_mode: YAxisMode,
     /// Visualization type.
     pub panel_type: PanelType,
+    /// Threshold configuration.
+    pub thresholds: Option<Thresholds>,
+    /// Optional minimum value for gauge and thresholds.
+    pub min: Option<f64>,
+    /// Optional maximum value for gauge and thresholds.
+    pub max: Option<f64>,
 }
 
 /// Visualization types supported by Grafatui.
@@ -91,6 +97,73 @@ pub struct GridUnit {
     pub y: i32,
     pub w: i32,
     pub h: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ThresholdMode {
+    Absolute,
+    Percentage,
+}
+
+#[derive(Debug, Clone)]
+pub struct ThresholdStep {
+    pub value: Option<f64>,
+    pub color: Color,
+}
+
+#[derive(Debug, Clone)]
+pub struct Thresholds {
+    pub mode: ThresholdMode,
+    pub steps: Vec<ThresholdStep>,
+}
+
+impl PanelState {
+    pub fn get_color_for_value(&self, val: f64) -> Option<Color> {
+        let thresholds = self.thresholds.as_ref()?;
+        
+        let mut matched_color = None;
+
+        match thresholds.mode {
+            ThresholdMode::Absolute => {
+                for step in &thresholds.steps {
+                    if let Some(step_val) = step.value {
+                        if val >= step_val {
+                            matched_color = Some(step.color);
+                        }
+                    } else {
+                        // Null value represents the base step (lowest possible)
+                        if matched_color.is_none() {
+                            matched_color = Some(step.color);
+                        }
+                    }
+                }
+            }
+            ThresholdMode::Percentage => {
+                let min = self.min.unwrap_or(0.0);
+                let max = self.max.unwrap_or(100.0);
+                let range = max - min;
+                
+                let pct = if range > 0.0 {
+                    (val - min) / range * 100.0
+                } else {
+                    0.0
+                };
+
+                for step in &thresholds.steps {
+                    if let Some(step_val) = step.value {
+                        if pct >= step_val {
+                            matched_color = Some(step.color);
+                        }
+                    } else {
+                        if matched_color.is_none() {
+                            matched_color = Some(step.color);
+                        }
+                    }
+                }
+            }
+        }
+        matched_color
+    }
 }
 
 /// Application mode.
@@ -528,6 +601,9 @@ pub fn default_queries(mut provided: Vec<String>) -> Vec<PanelState> {
             grid: None,
             y_axis_mode: YAxisMode::Auto,
             panel_type: PanelType::Graph,
+            thresholds: None,
+            min: None,
+            max: None,
         })
         .collect()
 }
