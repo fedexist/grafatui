@@ -684,10 +684,10 @@ fn render_gauge(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
         .find_map(|s| s.value.map(|v| (v, s.name.clone())))
         .unwrap_or((0.0, "No data".to_string()));
 
-    // Determine bounds (simple auto-scale for now, 0 to max(100, value))
-    // TODO: Support min/max from Grafana config
-    let min = 0.0;
-    let max = if value > 100.0 { value * 1.2 } else { 100.0 };
+    let min = p.min.unwrap_or(0.0);
+    let max = p.max.unwrap_or_else(|| if value > 100.0 { value * 1.2 } else { 100.0 });
+    
+    let color = p.get_color_for_value(value).unwrap_or(theme.palette[0]);
 
     let ratio = if max > min {
         ((value - min) / (max - min)).clamp(0.0, 1.0)
@@ -697,7 +697,7 @@ fn render_gauge(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
 
     let gauge = ratatui::widgets::Gauge::default()
         .block(Block::default().borders(Borders::NONE))
-        .gauge_style(Style::default().fg(theme.palette[0]).bg(Color::DarkGray))
+        .gauge_style(Style::default().fg(color).bg(Color::DarkGray))
         .ratio(ratio)
         .label(format!("{} ({})", format_si(value), name));
 
@@ -707,27 +707,33 @@ fn render_gauge(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
 fn render_bar_gauge(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
     let theme = &app.theme;
 
-    // Collect latest values from all visible series
-    let data: Vec<(&str, u64)> = p
-        .series
-        .iter()
-        .filter(|s| s.visible)
-        .filter_map(|s| s.value.map(|v| (s.name.as_str(), v as u64)))
-        .collect();
+    let mut bars = Vec::new();
 
-    if data.is_empty() {
+    for s in p.series.iter().filter(|s| s.visible) {
+        if let Some(v) = s.value {
+            let color = p.get_color_for_value(v).unwrap_or(theme.palette[0]);
+            let bar = ratatui::widgets::Bar::default()
+                .value(v as u64)
+                .label(ratatui::text::Line::from(s.name.as_str()))
+                .style(Style::default().fg(color))
+                .value_style(Style::default().fg(theme.text).bg(color));
+            bars.push(bar);
+        }
+    }
+
+    if bars.is_empty() {
         let para = Paragraph::new("No data").style(Style::default().fg(theme.text));
         frame.render_widget(para, area);
         return;
     }
 
+    let bar_group = ratatui::widgets::BarGroup::default().bars(&bars);
+
     let bar_chart = ratatui::widgets::BarChart::default()
         .block(Block::default().borders(Borders::NONE))
-        .data(&data)
+        .data(bar_group)
         .bar_width(3)
-        .bar_gap(1)
-        .bar_style(Style::default().fg(theme.palette[0]))
-        .value_style(Style::default().fg(theme.text).bg(theme.palette[0]));
+        .bar_gap(1);
 
     frame.render_widget(bar_chart, area);
 }
@@ -742,8 +748,12 @@ fn render_table(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
         .filter(|s| s.visible)
         .map(|s| {
             let val_str = s.value.map(format_si).unwrap_or_else(|| "-".to_string());
-            ratatui::widgets::Row::new(vec![s.name.clone(), val_str])
-                .style(Style::default().fg(theme.text))
+            let color = s.value.and_then(|v| p.get_color_for_value(v)).unwrap_or(theme.text);
+            
+            ratatui::widgets::Row::new(vec![
+                ratatui::text::Span::styled(s.name.clone(), Style::default().fg(theme.text)),
+                ratatui::text::Span::styled(val_str, Style::default().fg(color)),
+            ])
         })
         .collect();
 
@@ -783,6 +793,8 @@ fn render_stat(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
         .find_map(|s| s.value.map(|v| (v, s.name.clone())))
         .unwrap_or((0.0, "No data".to_string()));
 
+    let color = p.get_color_for_value(value).unwrap_or(theme.palette[0]);
+
     // Split area into value (top) and sparkline (bottom)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -794,26 +806,21 @@ fn render_stat(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
     let big_value = Paragraph::new(val_str)
         .style(
             Style::default()
-                .fg(theme.palette[0])
+                .fg(color)
                 .add_modifier(Modifier::BOLD),
         )
         .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::NONE)); // Centered vertically?
-
-    // To center vertically, we might need another layout or just rely on the font size/area
-    // Ratatui doesn't have vertical alignment for Paragraph yet (except via padding)
-    // But for now, top alignment is fine or we can pad it.
+        .block(Block::default().borders(Borders::NONE));
 
     frame.render_widget(big_value, chunks[0]);
 
     // Render Sparkline
-    // Collect data points from the first series
     if let Some(s) = p.series.iter().find(|s| s.visible && s.name == name) {
         let data: Vec<u64> = s.points.iter().map(|(_, v)| *v as u64).collect();
         let sparkline = ratatui::widgets::Sparkline::default()
             .block(Block::default().borders(Borders::NONE))
             .data(&data)
-            .style(Style::default().fg(theme.palette[0]));
+            .style(Style::default().fg(color));
         frame.render_widget(sparkline, chunks[1]);
     }
 }
@@ -1058,6 +1065,9 @@ mod tests {
             grid: None,
             y_axis_mode: YAxisMode::Auto,
             panel_type: crate::app::PanelType::Graph,
+            thresholds: None,
+            min: None,
+            max: None,
         }
     }
 

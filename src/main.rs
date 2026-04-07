@@ -125,6 +125,9 @@ async fn main() -> Result<()> {
                 }),
                 y_axis_mode: app::YAxisMode::Auto,
                 panel_type: q.panel_type,
+                thresholds: q.thresholds,
+                min: q.min,
+                max: q.max,
             })
             .collect();
         (format!("{} (imported)", d.title), ps, d.skipped_panels)
