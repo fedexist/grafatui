@@ -86,6 +86,24 @@ cd grafatui
 cargo install --path .
 ```
 
+### With Nix
+
+If you use [Nix](https://nixos.org/), you can build and run Grafatui directly:
+
+```bash
+# Build the binary
+nix build
+
+# Run the binary from the build output
+./result/bin/grafatui --help
+```
+
+Or run it without keeping the build result:
+
+```bash
+nix run . -- --prometheus-url http://localhost:9090
+```
+
 ### Prebuilt Binaries
 
 Download the latest release for your platform from [GitHub Releases](https://github.com/fedexist/grafatui/releases):
