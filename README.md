@@ -55,6 +55,8 @@ This demo showcases all 7 visualization types (graph, stat, gauge, bar gauge, ta
 - **Legend formatting** (`{{label}}` syntax)
 - **Grid layouts** using `gridPos`
 
+> 📋 For a detailed breakdown of which Grafana JSON features are supported, see [GRAFANA_COMPATIBILITY.md](GRAFANA_COMPATIBILITY.md).
+
 ### Interactive TUI
 - **Time controls**: Zoom, pan, and jump to live updates
 - **Panel navigation**: Arrow keys, vim-style, or mouse
@@ -237,6 +239,8 @@ grafatui --config examples/demo/grafatui.toml
 - You need advanced features (alerts, annotations, user management)
 - You're building dashboards for a team
 - You need rich visualizations and plugins
+
+> 📋 See [GRAFANA_COMPATIBILITY.md](GRAFANA_COMPATIBILITY.md) for a field-by-field breakdown of Grafana JSON features and their support status in Grafatui.
 
 ## Performance
 
