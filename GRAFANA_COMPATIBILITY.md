@@ -165,8 +165,8 @@ This document provides a comprehensive feature-parity table between the [Grafana
 | `fieldConfig` | ❌ Not Implemented | Top-level field config object is ignored |
 | `fieldConfig.defaults` | ❌ Not Implemented | |
 | `fieldConfig.defaults.unit` | ❌ Not Implemented | Values displayed as raw numbers with SI suffixes |
-| `fieldConfig.defaults.min` | ❌ Not Implemented | Gauge uses hardcoded 0–100 range |
-| `fieldConfig.defaults.max` | ❌ Not Implemented | Gauge auto-scales to `max(100, value×1.2)` |
+| `fieldConfig.defaults.min` | ✅ Supported | Used for interpolating percentage thresholds and Gauge limits |
+| `fieldConfig.defaults.max` | ✅ Supported | Used for scaling gauges and threshold boundaries |
 | `fieldConfig.defaults.decimals` | ❌ Not Implemented | Always uses 2 decimal places |
 | `fieldConfig.defaults.color` | ❌ Not Implemented | Uses theme palette instead |
 | `fieldConfig.defaults.mappings` | ❌ Not Implemented | Value mappings not supported |
@@ -187,11 +187,11 @@ This document provides a comprehensive feature-parity table between the [Grafana
 
 | JSON Field | Status | Notes |
 |---|---|---|
-| `fieldConfig.defaults.thresholds` | ❌ Not Implemented | |
-| `fieldConfig.defaults.thresholds.mode` | ❌ Not Implemented | (`absolute` / `percentage`) |
-| `fieldConfig.defaults.thresholds.steps` | ❌ Not Implemented | |
-| `fieldConfig.defaults.thresholds.steps[].value` | ❌ Not Implemented | |
-| `fieldConfig.defaults.thresholds.steps[].color` | ❌ Not Implemented | |
+| `fieldConfig.defaults.thresholds` | ✅ Supported | Applied to Graph limit lines and dynamic coloring for Stat, Gauge & BarGauge |
+| `fieldConfig.defaults.thresholds.mode` | ✅ Supported | (`absolute` / `percentage`) |
+| `fieldConfig.defaults.thresholds.steps` | ✅ Supported | |
+| `fieldConfig.defaults.thresholds.steps[].value` | ✅ Supported | Evaluated mathematically against metric values |
+| `fieldConfig.defaults.thresholds.steps[].color` | ✅ Supported | Maps keywords (e.g., `green`) and hex codes (e.g., `#FF0000`) |
 
 ---
 
