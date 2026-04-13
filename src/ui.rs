@@ -571,12 +571,48 @@ fn render_graph_panel(
     let chart_area = chunks[0];
     let legend_area = chunks[1];
 
+    // Determine x bounds from range window (unix seconds)
+    // Use app.time_offset to shift the window
+    let now = (chrono::Utc::now().timestamp() - app.time_offset.as_secs() as i64) as f64;
+    let start = now - app.range.as_secs_f64();
+
+    // Calculate y_bounds once
+    let y_bounds = calculate_y_bounds(p);
+
     // Prepare datasets (without names for the chart itself to avoid built-in legend)
     let mut chart_datasets = Vec::new();
     let mut legend_items = Vec::new();
 
-    // Declare cursor_dataset here to extend its lifetime
+    // Declare helper datasets to extend their lifetimes
     let mut cursor_dataset = vec![];
+    let mut threshold_datasets = vec![];
+
+    // Generate threshold limit lines
+    if let Some(th) = &p.thresholds {
+        for step in th.steps.iter().filter(|s| s.value.is_some()) {
+            let val = step.value.unwrap();
+            let abs_val = match th.mode {
+                crate::app::ThresholdMode::Absolute => val,
+                crate::app::ThresholdMode::Percentage => {
+                    let min = p.min.unwrap_or(0.0);
+                    let max = p.max.unwrap_or(100.0);
+                    min + (val / 100.0) * (max - min)
+                }
+            };
+            threshold_datasets.push(vec![(start, abs_val), (now, abs_val)]);
+        }
+        
+        for (i, step) in th.steps.iter().filter(|s| s.value.is_some()).enumerate() {
+            chart_datasets.push(
+                Dataset::default()
+                    .name("")
+                    .marker(ratatui::symbols::Marker::Dot)
+                    .graph_type(GraphType::Line)
+                    .style(Style::default().fg(step.color))
+                    .data(&threshold_datasets[i]),
+            );
+        }
+    }
 
     for (i, s) in p.series.iter().enumerate() {
         let color = if use_hash_colors {
@@ -615,9 +651,6 @@ fn render_graph_panel(
         );
     }
 
-    // Calculate y_bounds once
-    let y_bounds = calculate_y_bounds(p);
-
     // Add cursor line if inspecting
     if let Some(cx) = cursor_x {
         cursor_dataset.push((cx, y_bounds[0]));
@@ -632,11 +665,6 @@ fn render_graph_panel(
                 .data(&cursor_dataset),
         );
     }
-
-    // Determine x bounds from range window (unix seconds)
-    // Use app.time_offset to shift the window
-    let now = (chrono::Utc::now().timestamp() - app.time_offset.as_secs() as i64) as f64;
-    let start = now - app.range.as_secs_f64();
 
     let x_labels = vec![
         Span::styled(format_time(start), Style::default().fg(theme.text)),
@@ -707,18 +735,37 @@ fn render_gauge(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
 fn render_bar_gauge(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
     let theme = &app.theme;
 
-    let mut bars = Vec::new();
+    let mut max_label_len = 3;
 
-    for s in p.series.iter().filter(|s| s.visible) {
-        if let Some(v) = s.value {
-            let color = p.get_color_for_value(v).unwrap_or(theme.palette[0]);
-            let bar = ratatui::widgets::Bar::default()
-                .value(v as u64)
-                .label(ratatui::text::Line::from(s.name.as_str()))
-                .style(Style::default().fg(color))
-                .value_style(Style::default().fg(theme.text).bg(color));
-            bars.push(bar);
-        }
+    let scale = 1000.0;
+
+    // Map intermediate valid series
+    let mut valid_series: Vec<_> = p.series.iter().filter(|s| s.visible && s.value.is_some()).collect();
+
+    // Sort descending safely
+    valid_series.sort_by(|a, b| {
+        let v_a = a.value.unwrap_or(0.0);
+        let v_b = b.value.unwrap_or(0.0);
+        v_b.partial_cmp(&v_a).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    // Truncate based on area width
+    let max_bars = (area.width / 4).saturating_sub(1).max(1) as usize;
+    valid_series.truncate(max_bars);
+
+    let mut bars = Vec::with_capacity(valid_series.len());
+
+    for s in valid_series {
+        let v = s.value.unwrap();
+        max_label_len = max_label_len.max(s.name.len());
+        let color = p.get_color_for_value(v).unwrap_or(theme.palette[0]);
+        let bar = ratatui::widgets::Bar::default()
+            .value((v * scale) as u64)
+            .text_value(format_si(v))
+            .label(ratatui::text::Line::from(s.name.as_str()))
+            .style(Style::default().fg(color))
+            .value_style(Style::default().fg(theme.text).bg(color));
+        bars.push(bar);
     }
 
     if bars.is_empty() {
@@ -727,12 +774,17 @@ fn render_bar_gauge(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppStat
         return;
     }
 
+    let bar_width = (area.width / bars.len() as u16)
+        .saturating_sub(1)
+        .min(max_label_len as u16)
+        .max(3);
+
     let bar_group = ratatui::widgets::BarGroup::default().bars(&bars);
 
     let bar_chart = ratatui::widgets::BarChart::default()
         .block(Block::default().borders(Borders::NONE))
         .data(bar_group)
-        .bar_width(3)
+        .bar_width(bar_width)
         .bar_gap(1);
 
     frame.render_widget(bar_chart, area);

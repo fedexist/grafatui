@@ -54,6 +54,7 @@ This demo showcases all 7 visualization types (graph, stat, gauge, bar gauge, ta
 - **Template variables** with CLI overrides
 - **Legend formatting** (`{{label}}` syntax)
 - **Grid layouts** using `gridPos`
+- **Thresholds** dynamically applied to metrics and graph limits
 
 > 📋 For a detailed breakdown of which Grafana JSON features are supported, see [GRAFANA_COMPATIBILITY.md](GRAFANA_COMPATIBILITY.md).
 
