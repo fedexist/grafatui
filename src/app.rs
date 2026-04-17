@@ -20,7 +20,7 @@ use crate::ui;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use futures::StreamExt;
-use ratatui::{style::Color, Terminal};
+use ratatui::{Terminal, style::Color};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
@@ -121,7 +121,7 @@ pub struct Thresholds {
 impl PanelState {
     pub fn get_color_for_value(&self, val: f64) -> Option<Color> {
         let thresholds = self.thresholds.as_ref()?;
-        
+
         let mut matched_color = None;
 
         match thresholds.mode {
@@ -143,7 +143,7 @@ impl PanelState {
                 let min = self.min.unwrap_or(0.0);
                 let max = self.max.unwrap_or(100.0);
                 let range = max - min;
-                
+
                 let pct = if range > 0.0 {
                     (val - min) / range * 100.0
                 } else {
@@ -622,7 +622,10 @@ pub async fn run_app<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     app: &mut AppState,
     tick_rate: Duration,
-) -> Result<()> {
+) -> Result<()>
+where
+    <B as ratatui::backend::Backend>::Error: Send + Sync + 'static,
+{
     loop {
         terminal.draw(|f| ui::draw_ui(f, app))?;
 
