@@ -115,6 +115,7 @@ pub struct ThresholdStep {
 pub struct Thresholds {
     pub mode: ThresholdMode,
     pub steps: Vec<ThresholdStep>,
+    pub style: Option<String>,
 }
 
 impl PanelState {
@@ -215,6 +216,8 @@ pub struct AppState {
     pub search_results: Vec<usize>,
     /// Cursor X position (timestamp) for inspection.
     pub cursor_x: Option<f64>,
+    /// Global marker set for rendering thresholds
+    pub threshold_marker: String,
 }
 
 impl AppState {
@@ -239,6 +242,7 @@ impl AppState {
         panels: Vec<PanelState>,
         skipped_panels: usize,
         theme: Theme,
+        threshold_marker: String,
     ) -> Self {
         Self {
             prometheus,
@@ -259,6 +263,7 @@ impl AppState {
             search_query: String::new(),
             search_results: Vec::new(),
             cursor_x: None,
+            threshold_marker,
         }
     }
 
@@ -566,6 +571,7 @@ mod tests {
             vec![], // Empty panels
             0,
             Theme::default(),
+            "dashed".to_string(),
         );
 
         // Should not panic on refresh

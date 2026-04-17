@@ -154,6 +154,12 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|| "default".to_string());
     let theme = Theme::from_str(&theme_name);
 
+    // Determine threshold marker
+    let marker_name = args
+        .threshold_marker
+        .or(config.threshold_marker)
+        .unwrap_or_else(|| "dashed".to_string());
+
     let mut state = app::AppState::new(
         prom,
         range,
@@ -163,6 +169,7 @@ async fn main() -> Result<()> {
         panels,
         skipped_panels,
         theme,
+        marker_name,
     );
     state.vars = vars; // <— pass variables into the app
     state.refresh().await?;

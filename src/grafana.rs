@@ -104,6 +104,18 @@ struct RawFieldConfigDefaults {
     min: Option<f64>,
     max: Option<f64>,
     thresholds: Option<RawThresholds>,
+    custom: Option<RawCustom>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawCustom {
+    #[serde(rename = "thresholdsStyle")]
+    thresholds_style: Option<RawThresholdsStyle>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawThresholdsStyle {
+    mode: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -257,7 +269,13 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
                         }
                         
                         if !steps.is_empty() {
-                            thresholds = Some(crate::app::Thresholds { mode, steps });
+                            let style = defaults
+                                .custom
+                                .and_then(|c| c.thresholds_style)
+                                .and_then(|t| t.mode)
+                                .unwrap_or_else(|| "line".to_string());
+                                
+                            thresholds = Some(crate::app::Thresholds { mode, steps, style: Some(style) });
                         }
                     }
                 }
