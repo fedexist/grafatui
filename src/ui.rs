@@ -620,14 +620,26 @@ fn render_graph_panel(
         }
         
         for (i, step) in th.steps.iter().filter(|s| s.value.is_some()).enumerate() {
+            if app.threshold_marker.ends_with("line") {
+                // Skips dataset rendering; handled via post-render buffer overwrite
+                continue;
+            }
+
             let (marker, graph_type) = match app.threshold_marker.to_lowercase().as_str() {
                 "braille" => (ratatui::symbols::Marker::Braille, GraphType::Line),
                 "block" => (ratatui::symbols::Marker::Block, GraphType::Line),
                 "bar" => (ratatui::symbols::Marker::Bar, GraphType::Line),
                 "half-block" => (ratatui::symbols::Marker::HalfBlock, GraphType::Line),
+                "quadrant" => (ratatui::symbols::Marker::Quadrant, GraphType::Line),
+                "sextant" => (ratatui::symbols::Marker::Sextant, GraphType::Line),
+                "octant" => (ratatui::symbols::Marker::Octant, GraphType::Line),
                 "dashed" | "dashed-braille" => (ratatui::symbols::Marker::Braille, GraphType::Scatter),
                 "dashed-block" => (ratatui::symbols::Marker::Block, GraphType::Scatter),
                 "dashed-bar" => (ratatui::symbols::Marker::Bar, GraphType::Scatter),
+                "dashed-half-block" => (ratatui::symbols::Marker::HalfBlock, GraphType::Scatter),
+                "dashed-quadrant" => (ratatui::symbols::Marker::Quadrant, GraphType::Scatter),
+                "dashed-sextant" => (ratatui::symbols::Marker::Sextant, GraphType::Scatter),
+                "dashed-octant" => (ratatui::symbols::Marker::Octant, GraphType::Scatter),
                 "dashed-dot" => (ratatui::symbols::Marker::Dot, GraphType::Scatter),
                 _ => (ratatui::symbols::Marker::Dot, GraphType::Line),
             };
@@ -707,15 +719,18 @@ fn render_graph_panel(
     y_labels[y_axis_height - 1] = Span::styled(format_si(y_bounds[1]), Style::default().fg(theme.text));
     
     if y_bounds[1] > y_bounds[0] {
-        for (th_val, color) in threshold_labels_info {
-            if th_val > y_bounds[0] && th_val < y_bounds[1] {
-                let ratio = (th_val - y_bounds[0]) / (y_bounds[1] - y_bounds[0]);
+        for (th_val, color) in &threshold_labels_info {
+            if *th_val > y_bounds[0] && *th_val < y_bounds[1] {
+                let ratio = (*th_val - y_bounds[0]) / (y_bounds[1] - y_bounds[0]);
                 let index = (ratio * (y_axis_height - 1) as f64).round() as usize;
                 let index = index.min(y_axis_height - 2).max(1);
-                y_labels[index] = Span::styled(format_si(th_val), Style::default().fg(color));
+                y_labels[index] = Span::styled(format_si(*th_val), Style::default().fg(*color));
             }
         }
     }
+
+    // Evaluate y_max_width before moving y_labels into Chart block
+    let y_max_width = y_labels.iter().map(|s| s.width() as u16).max().unwrap_or(0);
 
     let chart = Chart::new(chart_datasets)
         // No block, as we rendered it outside
@@ -734,6 +749,41 @@ fn render_graph_panel(
     // No legend position needed as we disabled names
 
     frame.render_widget(chart, chart_area);
+
+    // Render custom raw lines by hijacking buffer space
+    if app.threshold_marker.ends_with("line") && y_bounds[1] > y_bounds[0] {
+        let buf = frame.buffer_mut();
+        
+        let chart_left = chart_area.left() + y_max_width + 1; // +1 for the | axis line
+        let chart_right = chart_area.right();
+        let chart_bottom = chart_area.bottom().saturating_sub(2); // x-axis occupies last rows
+        let chart_top = chart_area.top();
+        let chart_h = chart_bottom.saturating_sub(chart_top) as f64;
+    
+        if chart_h > 0.0 {
+            let is_dashed = app.threshold_marker.starts_with("dashed");
+            let line_char = if is_dashed { '-' } else { '─' };
+            
+            for (th_val, color) in &threshold_labels_info {
+                if *th_val > y_bounds[0] && *th_val < y_bounds[1] {
+                    let ratio = (*th_val - y_bounds[0]) / (y_bounds[1] - y_bounds[0]);
+                    let y_offset = (ratio * chart_h).round() as u16;
+                    let phys_y = chart_bottom.saturating_sub(y_offset);
+    
+                    if phys_y >= chart_top && phys_y <= chart_bottom {
+                        for x in chart_left..chart_right {
+                            if is_dashed && x % 2 == 0 {
+                                continue;
+                            }
+                            if let Some(cell) = buf.cell_mut((x, phys_y)) {
+                                cell.set_char(line_char).set_style(Style::default().fg(*color));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // Render custom legend
     if legend_height > 0 {

@@ -45,7 +45,7 @@ pub struct Args {
     #[arg(long, value_name = "NAME")]
     pub theme: Option<String>,
 
-    /// Marker symbol to use for threshold lines (dot, braille, block, bar, half-block)
+    /// Marker symbol to use for threshold lines (dashed, dot, braille, block, bar, quadrant, sextant, octant)
     #[arg(long, value_name = "MARKER")]
     pub threshold_marker: Option<String>,
 
