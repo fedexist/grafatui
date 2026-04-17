@@ -587,6 +587,8 @@ fn render_graph_panel(
     let mut cursor_dataset = vec![];
     let mut threshold_datasets = vec![];
 
+    let mut threshold_labels_info = Vec::new();
+
     // Generate threshold limit lines
     if let Some(th) = &p.thresholds {
         for step in th.steps.iter().filter(|s| s.value.is_some()) {
@@ -599,15 +601,42 @@ fn render_graph_panel(
                     min + (val / 100.0) * (max - min)
                 }
             };
-            threshold_datasets.push(vec![(start, abs_val), (now, abs_val)]);
+            
+            let mut dataset = Vec::new();
+            if app.threshold_marker.starts_with("dashed") || th.style.as_deref() == Some("dashed") {
+                let points_count = 15; // 15 evenly spaced ticks across any width length
+                let step_x = (now - start) / points_count as f64;
+                for i in 0..=points_count {
+                    let x = start + (i as f64 * step_x);
+                    dataset.push((x, abs_val));
+                }
+            } else {
+                dataset.push((start, abs_val));
+                dataset.push((now, abs_val));
+            }
+            
+            threshold_datasets.push(dataset);
+            threshold_labels_info.push((abs_val, step.color));
         }
         
         for (i, step) in th.steps.iter().filter(|s| s.value.is_some()).enumerate() {
+            let (marker, graph_type) = match app.threshold_marker.to_lowercase().as_str() {
+                "braille" => (ratatui::symbols::Marker::Braille, GraphType::Line),
+                "block" => (ratatui::symbols::Marker::Block, GraphType::Line),
+                "bar" => (ratatui::symbols::Marker::Bar, GraphType::Line),
+                "half-block" => (ratatui::symbols::Marker::HalfBlock, GraphType::Line),
+                "dashed" | "dashed-braille" => (ratatui::symbols::Marker::Braille, GraphType::Scatter),
+                "dashed-block" => (ratatui::symbols::Marker::Block, GraphType::Scatter),
+                "dashed-bar" => (ratatui::symbols::Marker::Bar, GraphType::Scatter),
+                "dashed-dot" => (ratatui::symbols::Marker::Dot, GraphType::Scatter),
+                _ => (ratatui::symbols::Marker::Dot, GraphType::Line),
+            };
+            
             chart_datasets.push(
                 Dataset::default()
                     .name("")
-                    .marker(ratatui::symbols::Marker::Dot)
-                    .graph_type(GraphType::Line)
+                    .marker(marker)
+                    .graph_type(graph_type)
                     .style(Style::default().fg(step.color))
                     .data(&threshold_datasets[i]),
             );
@@ -671,10 +700,22 @@ fn render_graph_panel(
         Span::styled(format_time(now), Style::default().fg(theme.text)),
     ];
 
-    let y_labels = vec![
-        Span::styled(format_si(y_bounds[0]), Style::default().fg(theme.text)),
-        Span::styled(format_si(y_bounds[1]), Style::default().fg(theme.text)),
-    ];
+    let y_axis_height = chart_area.height.saturating_sub(1).max(2) as usize;
+    let mut y_labels = vec![Span::raw(""); y_axis_height];
+    
+    y_labels[0] = Span::styled(format_si(y_bounds[0]), Style::default().fg(theme.text));
+    y_labels[y_axis_height - 1] = Span::styled(format_si(y_bounds[1]), Style::default().fg(theme.text));
+    
+    if y_bounds[1] > y_bounds[0] {
+        for (th_val, color) in threshold_labels_info {
+            if th_val > y_bounds[0] && th_val < y_bounds[1] {
+                let ratio = (th_val - y_bounds[0]) / (y_bounds[1] - y_bounds[0]);
+                let index = (ratio * (y_axis_height - 1) as f64).round() as usize;
+                let index = index.min(y_axis_height - 2).max(1);
+                y_labels[index] = Span::styled(format_si(th_val), Style::default().fg(color));
+            }
+        }
+    }
 
     let chart = Chart::new(chart_datasets)
         // No block, as we rendered it outside
