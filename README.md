@@ -141,7 +141,7 @@ grafatui [OPTIONS]
 | `--step <DURATION>` | Query step resolution (e.g., `5s`, `30s`) | `5s` |
 | `--var <KEY=VALUE>` | Override dashboard variables | - |
 | `--theme <NAME>` | UI theme | `default` |
-| `--threshold-marker <MARKER>` | Marker for threshold lines (`dashed`, `dot`, `block`, etc.) | `dashed` |
+| `--threshold-marker <MARKER>` | Marker for threshold lines (`dashed`, `dot`, `block`, `quadrant`, etc.) | `dashed` |
 | `--refresh-rate <MS>` | Data fetch interval (milliseconds) | `1000` |
 | `--config <FILE>` | Custom config file path | - |
 
