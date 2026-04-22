@@ -199,7 +199,7 @@ pub fn parse_grafana_color(c: &str) -> Color {
         let b = u8::from_str_radix(&c[5..7], 16).unwrap_or(0);
         return Color::Rgb(r, g, b);
     }
-    
+
     match c.to_lowercase().as_str() {
         "green" | "dark-green" => Color::Green,
         "super-light-green" | "light-green" => Color::LightGreen,
