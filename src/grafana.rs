@@ -244,13 +244,13 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
                 if let Some(defaults) = fc.defaults {
                     min = defaults.min;
                     max = defaults.max;
-                    
+
                     if let Some(th) = defaults.thresholds {
                         let mode = match th.mode.as_deref() {
                             Some("percentage") => crate::app::ThresholdMode::Percentage,
                             _ => crate::app::ThresholdMode::Absolute,
                         };
-                        
+
                         let mut steps = Vec::new();
                         if let Some(raw_steps) = th.steps {
                             for s in raw_steps {
@@ -264,18 +264,24 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
                             steps.sort_by(|a, b| {
                                 let a_val = a.value.unwrap_or(f64::NEG_INFINITY);
                                 let b_val = b.value.unwrap_or(f64::NEG_INFINITY);
-                                a_val.partial_cmp(&b_val).unwrap_or(std::cmp::Ordering::Equal)
+                                a_val
+                                    .partial_cmp(&b_val)
+                                    .unwrap_or(std::cmp::Ordering::Equal)
                             });
                         }
-                        
+
                         if !steps.is_empty() {
                             let style = defaults
                                 .custom
                                 .and_then(|c| c.thresholds_style)
                                 .and_then(|t| t.mode)
                                 .unwrap_or_else(|| "line".to_string());
-                                
-                            thresholds = Some(crate::app::Thresholds { mode, steps, style: Some(style) });
+
+                            thresholds = Some(crate::app::Thresholds {
+                                mode,
+                                steps,
+                                style: Some(style),
+                            });
                         }
                     }
                 }
