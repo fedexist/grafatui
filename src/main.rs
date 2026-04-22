@@ -158,7 +158,7 @@ async fn main() -> Result<()> {
     let marker_name = args
         .threshold_marker
         .or(config.threshold_marker)
-        .unwrap_or_else(|| "dashed".to_string());
+        .unwrap_or_else(|| "dashed-line".to_string());
 
     let mut state = app::AppState::new(
         prom,
