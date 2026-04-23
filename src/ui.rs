@@ -586,6 +586,7 @@ fn render_graph_panel(
     // Declare helper datasets to extend their lifetimes
     let mut cursor_dataset = vec![];
     let mut threshold_datasets = vec![];
+    let mut threshold_overlay_datasets = Vec::new();
 
     let mut threshold_labels_info = Vec::new();
 
@@ -646,7 +647,7 @@ fn render_graph_panel(
                 _ => (ratatui::symbols::Marker::Dot, GraphType::Line),
             };
 
-            chart_datasets.push(
+            threshold_overlay_datasets.push(
                 Dataset::default()
                     .name("")
                     .marker(marker)
@@ -740,27 +741,61 @@ fn render_graph_panel(
         .x_axis(
             Axis::default()
                 .bounds([start, now])
-                .labels(x_labels)
+                .labels(x_labels.clone())
                 .style(Style::default().fg(theme.text)),
         )
         .y_axis(
             Axis::default()
                 .style(Style::default().fg(Color::Gray))
                 .bounds(y_bounds)
-                .labels(y_labels),
+                .labels(y_labels.clone()),
         );
     // No legend position needed as we disabled names
 
     frame.render_widget(chart, chart_area);
 
+    let chart_left = chart_area.left() + y_max_width + 1; // +1 for the | axis line
+    let chart_right = chart_area.right();
+    let chart_bottom = chart_area.bottom().saturating_sub(2); // x-axis occupies last rows
+    let chart_top = chart_area.top();
+
+    // Render threshold markers after chart rendering by merging only onto blank cells.
+    // This guarantees data curves keep precedence wherever both map to the same terminal cell.
+    if !threshold_overlay_datasets.is_empty() && chart_top <= chart_bottom {
+        let threshold_chart = Chart::new(threshold_overlay_datasets)
+            .x_axis(
+                Axis::default()
+                    .bounds([start, now])
+                    .labels(x_labels)
+                    .style(Style::default().fg(theme.text)),
+            )
+            .y_axis(
+                Axis::default()
+                    .style(Style::default().fg(Color::Gray))
+                    .bounds(y_bounds)
+                    .labels(y_labels),
+            );
+
+        let mut threshold_buf = ratatui::buffer::Buffer::empty(chart_area);
+        threshold_chart.render(chart_area, &mut threshold_buf);
+
+        let buf = frame.buffer_mut();
+        for y in chart_top..=chart_bottom {
+            for x in chart_left..chart_right {
+                let Some(src_cell) = threshold_buf.cell((x, y)) else {
+                    continue;
+                };
+                if let Some(dst_cell) = buf.cell_mut((x, y)) {
+                    overlay_threshold_cell(dst_cell, src_cell);
+                }
+            }
+        }
+    }
+
     // Render custom raw lines by hijacking buffer space
     if app.threshold_marker.ends_with("line") && y_bounds[1] > y_bounds[0] {
         let buf = frame.buffer_mut();
 
-        let chart_left = chart_area.left() + y_max_width + 1; // +1 for the | axis line
-        let chart_right = chart_area.right();
-        let chart_bottom = chart_area.bottom().saturating_sub(2); // x-axis occupies last rows
-        let chart_top = chart_area.top();
         let chart_h = chart_bottom.saturating_sub(chart_top) as f64;
 
         if chart_h > 0.0 {
@@ -800,6 +835,12 @@ fn render_graph_panel(
 
 fn should_draw_threshold_on_cell(cell: &ratatui::buffer::Cell) -> bool {
     cell.symbol().chars().all(char::is_whitespace)
+}
+
+fn overlay_threshold_cell(dst: &mut ratatui::buffer::Cell, src: &ratatui::buffer::Cell) {
+    if should_draw_threshold_on_cell(dst) && !should_draw_threshold_on_cell(src) {
+        dst.set_symbol(src.symbol()).set_style(src.style());
+    }
 }
 
 fn render_gauge(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
@@ -1303,5 +1344,31 @@ mod tests {
         let mut cell = ratatui::buffer::Cell::default();
         cell.set_char('x');
         assert!(!should_draw_threshold_on_cell(&cell));
+    }
+
+    #[test]
+    fn test_overlay_threshold_cell_copies_when_destination_is_empty() {
+        let mut dst = ratatui::buffer::Cell::default();
+        let mut src = ratatui::buffer::Cell::default();
+        src.set_char('-').set_style(Style::default().fg(Color::Red));
+
+        overlay_threshold_cell(&mut dst, &src);
+
+        assert_eq!(dst.symbol(), "-");
+        assert_eq!(dst.style().fg, Some(Color::Red));
+    }
+
+    #[test]
+    fn test_overlay_threshold_cell_keeps_existing_destination_marker() {
+        let mut dst = ratatui::buffer::Cell::default();
+        dst.set_char('x')
+            .set_style(Style::default().fg(Color::LightBlue));
+        let mut src = ratatui::buffer::Cell::default();
+        src.set_char('-').set_style(Style::default().fg(Color::Red));
+
+        overlay_threshold_cell(&mut dst, &src);
+
+        assert_eq!(dst.symbol(), "x");
+        assert_eq!(dst.style().fg, Some(Color::LightBlue));
     }
 }
