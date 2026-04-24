@@ -206,6 +206,16 @@ For the first release after setting this up:
 - Verify `release-plz.toml` has correct paths
 - Ensure commits are not filtered by `commit_parsers`
 
+## Trigger a Release Manually
+
+If the automated release PR was not created (e.g. the workflow was skipped), you can trigger it manually:
+
+1. Ensure `dev` is up to date with `main`: `git switch dev && git merge origin/main`
+2. Make a trivial commit: `git commit --allow-empty -m "chore: trigger release"`
+3. Push: `git push origin dev`
+4. Open a PR from `dev` → `main` on GitHub and merge it
+5. The `release-plz` GitHub Action will fire and create (or update) the Release PR
+
 ## Resources
 
 - [Conventional Commits Specification](https://www.conventionalcommits.org/)
