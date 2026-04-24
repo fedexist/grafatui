@@ -29,6 +29,7 @@ pub struct Config {
     pub step: Option<String>,
     pub theme: Option<String>,
     pub grafana_json: Option<PathBuf>,
+    pub threshold_marker: Option<String>,
     pub vars: Option<HashMap<String, String>>,
 }
 

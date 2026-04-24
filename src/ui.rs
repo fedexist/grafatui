@@ -571,12 +571,92 @@ fn render_graph_panel(
     let chart_area = chunks[0];
     let legend_area = chunks[1];
 
+    // Determine x bounds from range window (unix seconds)
+    // Use app.time_offset to shift the window
+    let now = (chrono::Utc::now().timestamp() - app.time_offset.as_secs() as i64) as f64;
+    let start = now - app.range.as_secs_f64();
+
+    // Calculate y_bounds once
+    let y_bounds = calculate_y_bounds(p);
+
     // Prepare datasets (without names for the chart itself to avoid built-in legend)
     let mut chart_datasets = Vec::new();
     let mut legend_items = Vec::new();
 
-    // Declare cursor_dataset here to extend its lifetime
+    // Declare helper datasets to extend their lifetimes
     let mut cursor_dataset = vec![];
+    let mut threshold_datasets = vec![];
+    let mut threshold_overlay_datasets = Vec::new();
+
+    let mut threshold_labels_info = Vec::new();
+
+    // Generate threshold limit lines
+    if let Some(th) = &p.thresholds {
+        for step in th.steps.iter().filter(|s| s.value.is_some()) {
+            let val = step.value.unwrap();
+            let abs_val = match th.mode {
+                crate::app::ThresholdMode::Absolute => val,
+                crate::app::ThresholdMode::Percentage => {
+                    let min = p.min.unwrap_or(0.0);
+                    let max = p.max.unwrap_or(100.0);
+                    min + (val / 100.0) * (max - min)
+                }
+            };
+
+            let mut dataset = Vec::new();
+            if app.threshold_marker.starts_with("dashed") || th.style.as_deref() == Some("dashed") {
+                let points_count = 15; // 15 evenly spaced ticks across any width length
+                let step_x = (now - start) / points_count as f64;
+                for i in 0..=points_count {
+                    let x = start + (i as f64 * step_x);
+                    dataset.push((x, abs_val));
+                }
+            } else {
+                dataset.push((start, abs_val));
+                dataset.push((now, abs_val));
+            }
+
+            threshold_datasets.push(dataset);
+            threshold_labels_info.push((abs_val, step.color));
+        }
+
+        for (i, step) in th.steps.iter().filter(|s| s.value.is_some()).enumerate() {
+            if app.threshold_marker.ends_with("line") {
+                // Skips dataset rendering; handled via post-render buffer overwrite
+                continue;
+            }
+
+            let (marker, graph_type) = match app.threshold_marker.to_lowercase().as_str() {
+                "braille" => (ratatui::symbols::Marker::Braille, GraphType::Line),
+                "block" => (ratatui::symbols::Marker::Block, GraphType::Line),
+                "bar" => (ratatui::symbols::Marker::Bar, GraphType::Line),
+                "half-block" => (ratatui::symbols::Marker::HalfBlock, GraphType::Line),
+                "quadrant" => (ratatui::symbols::Marker::Quadrant, GraphType::Line),
+                "sextant" => (ratatui::symbols::Marker::Sextant, GraphType::Line),
+                "octant" => (ratatui::symbols::Marker::Octant, GraphType::Line),
+                "dashed" | "dashed-braille" => {
+                    (ratatui::symbols::Marker::Braille, GraphType::Scatter)
+                }
+                "dashed-block" => (ratatui::symbols::Marker::Block, GraphType::Scatter),
+                "dashed-bar" => (ratatui::symbols::Marker::Bar, GraphType::Scatter),
+                "dashed-half-block" => (ratatui::symbols::Marker::HalfBlock, GraphType::Scatter),
+                "dashed-quadrant" => (ratatui::symbols::Marker::Quadrant, GraphType::Scatter),
+                "dashed-sextant" => (ratatui::symbols::Marker::Sextant, GraphType::Scatter),
+                "dashed-octant" => (ratatui::symbols::Marker::Octant, GraphType::Scatter),
+                "dashed-dot" => (ratatui::symbols::Marker::Dot, GraphType::Scatter),
+                _ => (ratatui::symbols::Marker::Dot, GraphType::Line),
+            };
+
+            threshold_overlay_datasets.push(
+                Dataset::default()
+                    .name("")
+                    .marker(marker)
+                    .graph_type(graph_type)
+                    .style(Style::default().fg(step.color))
+                    .data(&threshold_datasets[i]),
+            );
+        }
+    }
 
     for (i, s) in p.series.iter().enumerate() {
         let color = if use_hash_colors {
@@ -615,9 +695,6 @@ fn render_graph_panel(
         );
     }
 
-    // Calculate y_bounds once
-    let y_bounds = calculate_y_bounds(p);
-
     // Add cursor line if inspecting
     if let Some(cx) = cursor_x {
         cursor_dataset.push((cx, y_bounds[0]));
@@ -633,43 +710,136 @@ fn render_graph_panel(
         );
     }
 
-    // Determine x bounds from range window (unix seconds)
-    // Use app.time_offset to shift the window
-    let now = (chrono::Utc::now().timestamp() - app.time_offset.as_secs() as i64) as f64;
-    let start = now - app.range.as_secs_f64();
-
     let x_labels = vec![
         Span::styled(format_time(start), Style::default().fg(theme.text)),
         Span::styled(format_time(now), Style::default().fg(theme.text)),
     ];
 
-    let y_labels = vec![
-        Span::styled(format_si(y_bounds[0]), Style::default().fg(theme.text)),
-        Span::styled(format_si(y_bounds[1]), Style::default().fg(theme.text)),
-    ];
+    let y_axis_height = chart_area.height.saturating_sub(1).max(2) as usize;
+    let mut y_labels = vec![Span::raw(""); y_axis_height];
+
+    y_labels[0] = Span::styled(format_si(y_bounds[0]), Style::default().fg(theme.text));
+    y_labels[y_axis_height - 1] =
+        Span::styled(format_si(y_bounds[1]), Style::default().fg(theme.text));
+
+    if y_bounds[1] > y_bounds[0] {
+        for (th_val, color) in &threshold_labels_info {
+            if *th_val > y_bounds[0] && *th_val < y_bounds[1] {
+                let ratio = (*th_val - y_bounds[0]) / (y_bounds[1] - y_bounds[0]);
+                let index = (ratio * (y_axis_height - 1) as f64).round() as usize;
+                let index = index.min(y_axis_height - 2).max(1);
+                y_labels[index] = Span::styled(format_si(*th_val), Style::default().fg(*color));
+            }
+        }
+    }
+
+    // Evaluate y_max_width before moving y_labels into Chart block
+    let y_max_width = y_labels.iter().map(|s| s.width() as u16).max().unwrap_or(0);
 
     let chart = Chart::new(chart_datasets)
         // No block, as we rendered it outside
         .x_axis(
             Axis::default()
                 .bounds([start, now])
-                .labels(x_labels)
+                .labels(x_labels.clone())
                 .style(Style::default().fg(theme.text)),
         )
         .y_axis(
             Axis::default()
                 .style(Style::default().fg(Color::Gray))
                 .bounds(y_bounds)
-                .labels(y_labels),
+                .labels(y_labels.clone()),
         );
     // No legend position needed as we disabled names
 
     frame.render_widget(chart, chart_area);
 
+    let chart_left = chart_area.left() + y_max_width + 1; // +1 for the | axis line
+    let chart_right = chart_area.right();
+    let chart_bottom = chart_area.bottom().saturating_sub(2); // x-axis occupies last rows
+    let chart_top = chart_area.top();
+
+    // Render threshold markers after chart rendering by merging only onto blank cells.
+    // This guarantees data curves keep precedence wherever both map to the same terminal cell.
+    if !threshold_overlay_datasets.is_empty() && chart_top <= chart_bottom {
+        let threshold_chart = Chart::new(threshold_overlay_datasets)
+            .x_axis(
+                Axis::default()
+                    .bounds([start, now])
+                    .labels(x_labels)
+                    .style(Style::default().fg(theme.text)),
+            )
+            .y_axis(
+                Axis::default()
+                    .style(Style::default().fg(Color::Gray))
+                    .bounds(y_bounds)
+                    .labels(y_labels),
+            );
+
+        let mut threshold_buf = ratatui::buffer::Buffer::empty(chart_area);
+        threshold_chart.render(chart_area, &mut threshold_buf);
+
+        let buf = frame.buffer_mut();
+        for y in chart_top..=chart_bottom {
+            for x in chart_left..chart_right {
+                let Some(src_cell) = threshold_buf.cell((x, y)) else {
+                    continue;
+                };
+                if let Some(dst_cell) = buf.cell_mut((x, y)) {
+                    overlay_threshold_cell(dst_cell, src_cell);
+                }
+            }
+        }
+    }
+
+    // Render custom raw lines by hijacking buffer space
+    if app.threshold_marker.ends_with("line") && y_bounds[1] > y_bounds[0] {
+        let buf = frame.buffer_mut();
+
+        let chart_h = chart_bottom.saturating_sub(chart_top) as f64;
+
+        if chart_h > 0.0 {
+            let is_dashed = app.threshold_marker.starts_with("dashed");
+            let line_char = if is_dashed { '-' } else { '─' };
+
+            for (th_val, color) in &threshold_labels_info {
+                if *th_val > y_bounds[0] && *th_val < y_bounds[1] {
+                    let ratio = (*th_val - y_bounds[0]) / (y_bounds[1] - y_bounds[0]);
+                    let y_offset = (ratio * chart_h).round() as u16;
+                    let phys_y = chart_bottom.saturating_sub(y_offset);
+
+                    if phys_y >= chart_top && phys_y <= chart_bottom {
+                        for x in chart_left..chart_right {
+                            if is_dashed && x % 2 == 0 {
+                                continue;
+                            }
+                            if let Some(cell) = buf.cell_mut((x, phys_y)) {
+                                if should_draw_threshold_on_cell(cell) {
+                                    cell.set_char(line_char)
+                                        .set_style(Style::default().fg(*color));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Render custom legend
     if legend_height > 0 {
         let legend = Paragraph::new(Line::from(legend_items)).wrap(Wrap { trim: true });
         frame.render_widget(legend, legend_area);
+    }
+}
+
+fn should_draw_threshold_on_cell(cell: &ratatui::buffer::Cell) -> bool {
+    cell.symbol().chars().all(char::is_whitespace)
+}
+
+fn overlay_threshold_cell(dst: &mut ratatui::buffer::Cell, src: &ratatui::buffer::Cell) {
+    if should_draw_threshold_on_cell(dst) && !should_draw_threshold_on_cell(src) {
+        dst.set_symbol(src.symbol()).set_style(src.style());
     }
 }
 
@@ -684,10 +854,12 @@ fn render_gauge(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
         .find_map(|s| s.value.map(|v| (v, s.name.clone())))
         .unwrap_or((0.0, "No data".to_string()));
 
-    // Determine bounds (simple auto-scale for now, 0 to max(100, value))
-    // TODO: Support min/max from Grafana config
-    let min = 0.0;
-    let max = if value > 100.0 { value * 1.2 } else { 100.0 };
+    let min = p.min.unwrap_or(0.0);
+    let max = p
+        .max
+        .unwrap_or_else(|| if value > 100.0 { value * 1.2 } else { 100.0 });
+
+    let color = p.get_color_for_value(value).unwrap_or(theme.palette[0]);
 
     let ratio = if max > min {
         ((value - min) / (max - min)).clamp(0.0, 1.0)
@@ -697,7 +869,7 @@ fn render_gauge(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
 
     let gauge = ratatui::widgets::Gauge::default()
         .block(Block::default().borders(Borders::NONE))
-        .gauge_style(Style::default().fg(theme.palette[0]).bg(Color::DarkGray))
+        .gauge_style(Style::default().fg(color).bg(Color::DarkGray))
         .ratio(ratio)
         .label(format!("{} ({})", format_si(value), name));
 
@@ -707,27 +879,61 @@ fn render_gauge(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
 fn render_bar_gauge(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
     let theme = &app.theme;
 
-    // Collect latest values from all visible series
-    let data: Vec<(&str, u64)> = p
+    let mut max_label_len = 3;
+
+    let scale = 1000.0;
+
+    // Map intermediate valid series
+    let mut valid_series: Vec<_> = p
         .series
         .iter()
-        .filter(|s| s.visible)
-        .filter_map(|s| s.value.map(|v| (s.name.as_str(), v as u64)))
+        .filter(|s| s.visible && s.value.is_some())
         .collect();
 
-    if data.is_empty() {
+    // Sort descending safely
+    valid_series.sort_by(|a, b| {
+        let v_a = a.value.unwrap_or(0.0);
+        let v_b = b.value.unwrap_or(0.0);
+        v_b.partial_cmp(&v_a).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    // Truncate based on area width
+    let max_bars = (area.width / 4).saturating_sub(1).max(1) as usize;
+    valid_series.truncate(max_bars);
+
+    let mut bars = Vec::with_capacity(valid_series.len());
+
+    for s in valid_series {
+        let v = s.value.unwrap();
+        max_label_len = max_label_len.max(s.name.len());
+        let color = p.get_color_for_value(v).unwrap_or(theme.palette[0]);
+        let bar = ratatui::widgets::Bar::default()
+            .value((v * scale) as u64)
+            .text_value(format_si(v))
+            .label(ratatui::text::Line::from(s.name.as_str()))
+            .style(Style::default().fg(color))
+            .value_style(Style::default().fg(theme.text).bg(color));
+        bars.push(bar);
+    }
+
+    if bars.is_empty() {
         let para = Paragraph::new("No data").style(Style::default().fg(theme.text));
         frame.render_widget(para, area);
         return;
     }
 
+    let bar_width = (area.width / bars.len() as u16)
+        .saturating_sub(1)
+        .min(max_label_len as u16)
+        .max(3);
+
+    let bar_group = ratatui::widgets::BarGroup::default().bars(&bars);
+
     let bar_chart = ratatui::widgets::BarChart::default()
         .block(Block::default().borders(Borders::NONE))
-        .data(&data)
-        .bar_width(3)
-        .bar_gap(1)
-        .bar_style(Style::default().fg(theme.palette[0]))
-        .value_style(Style::default().fg(theme.text).bg(theme.palette[0]));
+        .data(bar_group)
+        .bar_width(bar_width)
+        .bar_gap(1);
 
     frame.render_widget(bar_chart, area);
 }
@@ -742,8 +948,15 @@ fn render_table(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
         .filter(|s| s.visible)
         .map(|s| {
             let val_str = s.value.map(format_si).unwrap_or_else(|| "-".to_string());
-            ratatui::widgets::Row::new(vec![s.name.clone(), val_str])
-                .style(Style::default().fg(theme.text))
+            let color = s
+                .value
+                .and_then(|v| p.get_color_for_value(v))
+                .unwrap_or(theme.text);
+
+            ratatui::widgets::Row::new(vec![
+                ratatui::text::Span::styled(s.name.clone(), Style::default().fg(theme.text)),
+                ratatui::text::Span::styled(val_str, Style::default().fg(color)),
+            ])
         })
         .collect();
 
@@ -783,6 +996,8 @@ fn render_stat(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
         .find_map(|s| s.value.map(|v| (v, s.name.clone())))
         .unwrap_or((0.0, "No data".to_string()));
 
+    let color = p.get_color_for_value(value).unwrap_or(theme.palette[0]);
+
     // Split area into value (top) and sparkline (bottom)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -792,28 +1007,19 @@ fn render_stat(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
     // Render Big Value
     let val_str = format_si(value);
     let big_value = Paragraph::new(val_str)
-        .style(
-            Style::default()
-                .fg(theme.palette[0])
-                .add_modifier(Modifier::BOLD),
-        )
+        .style(Style::default().fg(color).add_modifier(Modifier::BOLD))
         .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::NONE)); // Centered vertically?
-
-    // To center vertically, we might need another layout or just rely on the font size/area
-    // Ratatui doesn't have vertical alignment for Paragraph yet (except via padding)
-    // But for now, top alignment is fine or we can pad it.
+        .block(Block::default().borders(Borders::NONE));
 
     frame.render_widget(big_value, chunks[0]);
 
     // Render Sparkline
-    // Collect data points from the first series
     if let Some(s) = p.series.iter().find(|s| s.visible && s.name == name) {
         let data: Vec<u64> = s.points.iter().map(|(_, v)| *v as u64).collect();
         let sparkline = ratatui::widgets::Sparkline::default()
             .block(Block::default().borders(Borders::NONE))
             .data(&data)
-            .style(Style::default().fg(theme.palette[0]));
+            .style(Style::default().fg(color));
         frame.render_widget(sparkline, chunks[1]);
     }
 }
@@ -1058,6 +1264,9 @@ mod tests {
             grid: None,
             y_axis_mode: YAxisMode::Auto,
             panel_type: crate::app::PanelType::Graph,
+            thresholds: None,
+            min: None,
+            max: None,
         }
     }
 
@@ -1122,5 +1331,44 @@ mod tests {
         // So min should be 0.0 - 1.0 = -1.0.
         assert_eq!(bounds[0], -1.0);
         assert!(bounds[1] > 20.0);
+    }
+
+    #[test]
+    fn test_should_draw_threshold_on_cell_empty() {
+        let cell = ratatui::buffer::Cell::default();
+        assert!(should_draw_threshold_on_cell(&cell));
+    }
+
+    #[test]
+    fn test_should_draw_threshold_on_cell_filled() {
+        let mut cell = ratatui::buffer::Cell::default();
+        cell.set_char('x');
+        assert!(!should_draw_threshold_on_cell(&cell));
+    }
+
+    #[test]
+    fn test_overlay_threshold_cell_copies_when_destination_is_empty() {
+        let mut dst = ratatui::buffer::Cell::default();
+        let mut src = ratatui::buffer::Cell::default();
+        src.set_char('-').set_style(Style::default().fg(Color::Red));
+
+        overlay_threshold_cell(&mut dst, &src);
+
+        assert_eq!(dst.symbol(), "-");
+        assert_eq!(dst.style().fg, Some(Color::Red));
+    }
+
+    #[test]
+    fn test_overlay_threshold_cell_keeps_existing_destination_marker() {
+        let mut dst = ratatui::buffer::Cell::default();
+        dst.set_char('x')
+            .set_style(Style::default().fg(Color::LightBlue));
+        let mut src = ratatui::buffer::Cell::default();
+        src.set_char('-').set_style(Style::default().fg(Color::Red));
+
+        overlay_threshold_cell(&mut dst, &src);
+
+        assert_eq!(dst.symbol(), "x");
+        assert_eq!(dst.style().fg, Some(Color::LightBlue));
     }
 }
