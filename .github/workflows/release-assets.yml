@@ -5,15 +5,12 @@ permissions:
 
 on:
   release:
-    types: [published]
+    types: [created]
   workflow_dispatch:
     inputs:
       release_tag:
         description: 'Tag to release (e.g. v0.1.4)'
         required: true
-
-env:
-  RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name || github.ref_name }}
 
 jobs:
   upload-assets:
@@ -51,7 +48,7 @@ jobs:
           bin: grafatui
           target: ${{ matrix.target }}
           token: ${{ secrets.GITHUB_TOKEN }}
-          ref: refs/tags/${{ env.RELEASE_TAG }}
+          ref: ${{ inputs.release_tag != '' && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
 
       - name: Install cargo-deb & cargo-generate-rpm (Linux x86_64)
         if: matrix.target == 'x86_64-unknown-linux-gnu'
@@ -82,7 +79,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: target/${{ matrix.target }}/debian/*.deb
           file_glob: true
-          tag: ${{ env.RELEASE_TAG }}
+          tag: ${{ inputs.release_tag || github.ref }}
 
       - name: Upload RPM (Linux x86_64)
         if: matrix.target == 'x86_64-unknown-linux-gnu'
@@ -91,7 +88,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: target/generate-rpm/*.rpm
           file_glob: true
-          tag: ${{ env.RELEASE_TAG }}
+          tag: ${{ github.ref }}
 
   update-homebrew:
     needs: upload-assets
@@ -101,9 +98,9 @@ jobs:
         with:
           # A PR will be sent to the "homebrew-tap" repository to update this formula:
           formula-name: grafatui
-          tag-name: ${{ env.RELEASE_TAG }}
+          tag-name: ${{ inputs.release_tag || github.event.release.tag_name }}
           homebrew-tap: fedexist/homebrew-grafatui
-          download-url: https://github.com/fedexist/grafatui/releases/download/${{ env.RELEASE_TAG }}/grafatui-x86_64-apple-darwin.tar.gz
-          commit-message: "brew: update formula to ${{ env.RELEASE_TAG }}"
+          download-url: https://github.com/fedexist/grafatui/releases/download/${{ inputs.release_tag || github.event.release.tag_name }}/grafatui-x86_64-apple-darwin.tar.gz
+          commit-message: "brew: update formula to ${{ inputs.release_tag || github.event.release.tag_name }}"
         env:
           COMMITTER_TOKEN: ${{ secrets.COMMITTER_TOKEN }}
