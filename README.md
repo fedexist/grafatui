@@ -54,6 +54,7 @@ This demo showcases all 7 visualization types (graph, stat, gauge, bar gauge, ta
 - **Template variables** with CLI overrides
 - **Legend formatting** (`{{label}}` syntax)
 - **Grid layouts** using `gridPos`
+- **Thresholds** dynamically applied to metrics and graph limits
 
 > 📋 For a detailed breakdown of which Grafana JSON features are supported, see [GRAFANA_COMPATIBILITY.md](GRAFANA_COMPATIBILITY.md).
 
@@ -140,6 +141,7 @@ grafatui [OPTIONS]
 | `--step <DURATION>` | Query step resolution (e.g., `5s`, `30s`) | `5s` |
 | `--var <KEY=VALUE>` | Override dashboard variables | - |
 | `--theme <NAME>` | UI theme | `default` |
+| `--threshold-marker <MARKER>` | Marker for threshold lines (`dashed`, `dot`, `block`, `quadrant`, etc.) | `dashed` |
 | `--refresh-rate <MS>` | Data fetch interval (milliseconds) | `1000` |
 | `--config <FILE>` | Custom config file path | - |
 
@@ -154,6 +156,7 @@ prometheus_url = "http://localhost:9090"
 refresh_rate = 1000
 time_range = "1h"
 theme = "dracula"
+threshold_marker = "dashed"
 grafana_json = "~/.config/grafatui/my-dashboard.json"
 ```
 

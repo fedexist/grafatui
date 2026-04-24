@@ -1,0 +1,111 @@
+{
+    "title": "Grafatui Test Dashboard - Thresholds Demo",
+    "templating": {
+        "list": [
+            {
+                "name": "job",
+                "current": {
+                    "text": "prometheus",
+                    "value": "prometheus"
+                }
+            }
+        ]
+    },
+    "panels": [
+        {
+            "type": "graph",
+            "title": "1. Graph - CPU Rate (Absolute Thresholds)",
+            "gridPos": { "x": 0, "y": 0, "w": 12, "h": 12 },
+            "targets": [
+                {
+                    "expr": "rate(process_cpu_seconds_total{job=\"$job\"}[1m]) * 100",
+                    "legendFormat": "CPU Usage"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            { "color": "green", "value": null },
+                            { "color": "yellow", "value": 11.5 },
+                            { "color": "red", "value": 13.5 }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "type": "gauge",
+            "title": "2. Gauge - Memory Usage (Percentage Thresholds)",
+            "gridPos": { "x": 12, "y": 0, "w": 12, "h": 12 },
+            "targets": [
+                {
+                    "expr": "process_resident_memory_bytes{job=\"$job\"} / 1024 / 1024",
+                    "legendFormat": "Memory MB"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "min": 0,
+                    "max": 200,
+                    "thresholds": {
+                        "mode": "percentage",
+                        "steps": [
+                            { "color": "super-light-blue", "value": null },
+                            { "color": "orange", "value": 50.0 },
+                            { "color": "red", "value": 85.0 }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "type": "stat",
+            "title": "3. Stat - Goroutines (Absolute Hex Colors)",
+            "gridPos": { "x": 0, "y": 12, "w": 12, "h": 12 },
+            "targets": [
+                {
+                    "expr": "go_goroutines{job=\"$job\"}",
+                    "legendFormat": "Goroutines"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            { "color": "#00FF00", "value": null },
+                            { "color": "#FFFF00", "value": 40.0 },
+                            { "color": "#FF0000", "value": 60.0 }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "type": "bargauge",
+            "title": "4. Bar Gauge - Requests Running (vLLM Nodes)",
+            "gridPos": { "x": 12, "y": 12, "w": 12, "h": 12 },
+            "targets": [
+                {
+                    "expr": "vllm:num_requests_running",
+                    "legendFormat": "{{instance}}"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            { "color": "green", "value": null },
+                            { "color": "yellow", "value": 15.0 },
+                            { "color": "orange", "value": 30.0 },
+                            { "color": "red", "value": 45.0 }
+                        ]
+                    }
+                }
+            }
+        }
+    ]
+}

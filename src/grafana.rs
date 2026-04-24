@@ -39,6 +39,9 @@ pub struct QueryPanel {
     pub legends: Vec<Option<String>>, // Parallel to exprs
     pub grid: Option<GridPos>,
     pub panel_type: crate::app::PanelType,
+    pub thresholds: Option<crate::app::Thresholds>,
+    pub min: Option<f64>,
+    pub max: Option<f64>,
 }
 
 /// Grid position extracted from Grafana.
@@ -87,6 +90,44 @@ struct RawPanel {
     #[serde(rename = "gridPos")]
     grid_pos: Option<RawGridPos>,
     panels: Option<Vec<RawPanel>>, // nested rows
+    #[serde(rename = "fieldConfig")]
+    field_config: Option<RawFieldConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawFieldConfig {
+    defaults: Option<RawFieldConfigDefaults>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawFieldConfigDefaults {
+    min: Option<f64>,
+    max: Option<f64>,
+    thresholds: Option<RawThresholds>,
+    custom: Option<RawCustom>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawCustom {
+    #[serde(rename = "thresholdsStyle")]
+    thresholds_style: Option<RawThresholdsStyle>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawThresholdsStyle {
+    mode: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawThresholds {
+    mode: Option<String>,
+    steps: Option<Vec<RawThresholdStep>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawThresholdStep {
+    value: Option<f64>,
+    color: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -195,6 +236,57 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
                 }
             }
 
+            let mut thresholds = None;
+            let mut min = None;
+            let mut max = None;
+
+            if let Some(fc) = p.field_config {
+                if let Some(defaults) = fc.defaults {
+                    min = defaults.min;
+                    max = defaults.max;
+
+                    if let Some(th) = defaults.thresholds {
+                        let mode = match th.mode.as_deref() {
+                            Some("percentage") => crate::app::ThresholdMode::Percentage,
+                            _ => crate::app::ThresholdMode::Absolute,
+                        };
+
+                        let mut steps = Vec::new();
+                        if let Some(raw_steps) = th.steps {
+                            for s in raw_steps {
+                                let color = s.color.unwrap_or_else(|| "green".to_string());
+                                let parsed_color = crate::theme::parse_grafana_color(&color);
+                                steps.push(crate::app::ThresholdStep {
+                                    value: s.value,
+                                    color: parsed_color,
+                                });
+                            }
+                            steps.sort_by(|a, b| {
+                                let a_val = a.value.unwrap_or(f64::NEG_INFINITY);
+                                let b_val = b.value.unwrap_or(f64::NEG_INFINITY);
+                                a_val
+                                    .partial_cmp(&b_val)
+                                    .unwrap_or(std::cmp::Ordering::Equal)
+                            });
+                        }
+
+                        if !steps.is_empty() {
+                            let style = defaults
+                                .custom
+                                .and_then(|c| c.thresholds_style)
+                                .and_then(|t| t.mode)
+                                .unwrap_or_else(|| "line".to_string());
+
+                            thresholds = Some(crate::app::Thresholds {
+                                mode,
+                                steps,
+                                style: Some(style),
+                            });
+                        }
+                    }
+                }
+            }
+
             if !exprs.is_empty() {
                 let gp = p.grid_pos.map(|g| GridPos {
                     x: g.x,
@@ -208,6 +300,9 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
                     legends,
                     grid: gp,
                     panel_type,
+                    thresholds,
+                    min,
+                    max,
                 });
             }
         } else if !kind.is_empty() && kind != "row" {
