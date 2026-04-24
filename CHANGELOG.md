@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.1.5] - 2026-04-24
+
+### ⛰️  Features
+
+- Implement dynamic panel coloring based on configurable thresholds and axis bounds ([8b8893f](https://github.com/fedexist/grafatui/commit/8b8893fa677e322b5e307b49b28740aea4288269))
+- Implement support for dynamic panel thresholds and add a demo dashboard for verification ([f2b5bbe](https://github.com/fedexist/grafatui/commit/f2b5bbec09e951434c61029b44c5573035f02b0b))
+- Add configurable threshold markers and styles with support for custom rendering modes ([44c5dbb](https://github.com/fedexist/grafatui/commit/44c5dbb397fb9d67b53a115ff53dffb7e1e97316))
+- Add quadrant, sextant, and octant threshold markers with custom line rendering support ([9ed1ba6](https://github.com/fedexist/grafatui/commit/9ed1ba67f50e02e96e71ed9d9138876bf03c7593))
+- Update default threshold marker to dashed-line ([6bd62b8](https://github.com/fedexist/grafatui/commit/6bd62b883c3874e1df853fc27f47f05e8d3fb0d8))
+- Fix dashed-line threshold rendering not replacing the graph marker ([1d0d835](https://github.com/fedexist/grafatui/commit/1d0d8351ef92e65676c9f8e97c2b53196ba000ff))
+
+### 🐛 Bug Fixes
+
+- Fix threshold overlay rendering for graph charts, now having precedence over thresholds ([ebb805c](https://github.com/fedexist/grafatui/commit/ebb805cee3b801bcdf9110c6c96399b6d329c9ce))
+
+### 📚 Documentation
+
+- Add Grafana compatibility matrix and project roadmap to documentation ([3f068e0](https://github.com/fedexist/grafatui/commit/3f068e06b24e38682d4784222cbdf2f5695f74e7))
+- Add threshold-marker configuration option to README documentation ([283dc73](https://github.com/fedexist/grafatui/commit/283dc73e63147cee3c5095dec6a1c4ae21cb424d))
+- Add instructions for triggering a manual release to the release process documentation ([b4ddc43](https://github.com/fedexist/grafatui/commit/b4ddc432259b848f17998b55aebc9c07d89ef807))
+
+### ⚙️ Miscellaneous Tasks
+
+- Upgrade ratatui to 0.30.0 and update run_app trait bounds ([558b2b4](https://github.com/fedexist/grafatui/commit/558b2b45aea417a5c59b001ca2ecd705836baa0e))
+
+
 ## [0.1.4] - 2026-01-25
 
 ### ⛰️  Features
