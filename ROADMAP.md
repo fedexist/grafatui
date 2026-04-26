@@ -2,7 +2,7 @@
 
 Grafatui is a terminal-based Grafana-like UI for Prometheus. This roadmap outlines what's been built, what's coming next, and longer-term goals. It's intended to help contributors find impactful areas to work on and to set expectations for users.
 
-> **Current version**: 0.1.4 · **Status**: Active development, pre-1.0
+> **Current version**: 0.1.5 · **Status**: Active development, pre-1.0
 
 **Legend**:
 - 🟢 Low complexity · 🟡 Medium complexity · 🔴 High complexity
@@ -32,6 +32,9 @@ These features are shipped and available today:
 | **Downsampling** | Max-pooling to ~200 points to preserve peaks |
 | **Config file** | TOML-based persistent configuration |
 | **`$__rate_interval`** | Automatic computation as `max(step × 4, 60s)` |
+| **Thresholds** | `fieldConfig.defaults.thresholds` for graph limit lines and dynamic Stat/Gauge/BarGauge coloring |
+| **Threshold marker styles** | Configurable marker styles including dashed line, braille, block, quadrant, sextant, and octant modes |
+| **Field min/max bounds** | `fieldConfig.defaults.min` / `max` for gauge scaling and percentage threshold interpolation |
 | **Shell completions** | Bash, Zsh, Fish, PowerShell, Elvish |
 | **Cross-platform binaries** | Linux (x86_64, aarch64), macOS (x86_64, aarch64), Windows (x86_64) |
 | **Package formats** | `.deb`, `.rpm`, Homebrew formula |
@@ -44,9 +47,7 @@ For a field-by-field breakdown of Grafana JSON compatibility, see [GRAFANA_COMPA
 
 | Feature | Description | Complexity | Status |
 |---|---|---|---|
-| **Thresholds** | Color values based on `fieldConfig.defaults.thresholds` steps | 🟡 | 🔜 |
 | **Unit formatting** | Display values as bytes, percent, duration, etc. (`fieldConfig.defaults.unit`) | 🟡 | 🔜 |
-| **Gauge min/max** | Read `fieldConfig.defaults.min` and `max` instead of hardcoded 0–100 | 🟢 | 🔜 |
 | **Unsupported panel warnings** | Surface clear warnings for panel types that can't be rendered | 🟢 | 🔜 |
 | **Value mappings** | Map numeric values to text labels (`fieldConfig.defaults.mappings`) | 🟡 | 📋 |
 | **Reduce options** | Support `calcs` other than "last" for stat/gauge panels | 🟡 | 📋 |
@@ -153,9 +154,7 @@ For a field-by-field breakdown of Grafana JSON compatibility, see [GRAFANA_COMPA
 
 ### 🔜 Up Next
 High-value items actively being considered for the next release(s):
-- **Thresholds** - Color values based on `fieldConfig.defaults.thresholds` steps
 - **Unit formatting** - Display values in human-readable units
-- **Gauge min/max** - Quick win for better gauge rendering
 - **Import validation & panel warnings** - Better error experience
 - **Export to CSV** - Simple, high-value data export
 - **Fuzzy finder** - Quality-of-life navigation improvement
