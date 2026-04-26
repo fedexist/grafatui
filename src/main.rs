@@ -89,6 +89,7 @@ async fn main() -> Result<()> {
 
     let refresh_rate = args.refresh_rate.or(config.refresh_rate).unwrap_or(1000);
     let refresh_every = Duration::from_millis(refresh_rate);
+    let autogrid_enabled = config.autogrid.unwrap_or(true);
 
     let mut vars: HashMap<String, String> = HashMap::new();
 
@@ -128,6 +129,7 @@ async fn main() -> Result<()> {
                 thresholds: q.thresholds,
                 min: q.min,
                 max: q.max,
+                autogrid: q.autogrid,
             })
             .collect();
         (format!("{} (imported)", d.title), ps, d.skipped_panels)
@@ -171,6 +173,7 @@ async fn main() -> Result<()> {
         theme,
         marker_name,
     );
+    state.autogrid_enabled = autogrid_enabled;
     state.vars = vars; // <— pass variables into the app
     state.refresh().await?;
 

@@ -157,6 +157,7 @@ refresh_rate = 1000
 time_range = "1h"
 theme = "dracula"
 threshold_marker = "dashed"
+autogrid = true
 grafana_json = "~/.config/grafatui/my-dashboard.json"
 ```
 
@@ -207,6 +208,7 @@ grafatui --config examples/demo/grafatui.toml
 | `PgUp` / `PgDn` | Scroll vertically |
 | `Home` / `End` | Jump to top / bottom |
 | `y` | Toggle Y-axis mode |
+| `g` | Toggle autogrid guide lines |
 | `1`..`9` | Toggle series visibility |
 | `f` / `Enter` | Fullscreen mode |
 | `v` | Value inspection mode |
