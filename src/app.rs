@@ -54,6 +54,8 @@ pub struct PanelState {
     pub min: Option<f64>,
     /// Optional maximum value for gauge and thresholds.
     pub max: Option<f64>,
+    /// Whether to render automatic grid lines for this panel.
+    pub autogrid: Option<bool>,
 }
 
 /// Visualization types supported by Grafatui.
@@ -218,6 +220,8 @@ pub struct AppState {
     pub cursor_x: Option<f64>,
     /// Global marker set for rendering thresholds
     pub threshold_marker: String,
+    /// Global runtime toggle for automatic grid rendering.
+    pub autogrid_enabled: bool,
 }
 
 impl AppState {
@@ -233,6 +237,7 @@ impl AppState {
     /// * `panels` - The list of panels to display.
     /// * `skipped_panels` - The count of panels that were skipped during import.
     /// * `theme` - The UI theme to use.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         prometheus: prom::PromClient,
         range: Duration,
@@ -264,12 +269,13 @@ impl AppState {
             search_results: Vec::new(),
             cursor_x: None,
             threshold_marker,
+            autogrid_enabled: true,
         }
     }
 
     /// Zoom in: halve the time range.
     pub fn zoom_in(&mut self) {
-        self.range = self.range / 2;
+        self.range /= 2;
         if self.range < Duration::from_secs(10) {
             self.range = Duration::from_secs(10);
         }
@@ -277,7 +283,7 @@ impl AppState {
 
     /// Zoom out: double the time range.
     pub fn zoom_out(&mut self) {
-        self.range = self.range * 2;
+        self.range *= 2;
         self.range = self.range.min(Duration::from_secs(7 * 24 * 3600));
     }
 
@@ -490,102 +496,6 @@ fn downsample(points: Vec<(f64, f64)>, max_points: usize) -> Vec<(f64, f64)> {
         .collect()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_expand_expr_rate_interval() {
-        let vars = HashMap::new();
-        let step = Duration::from_secs(15);
-        // heuristic: max(15*4, 60) = 60s
-        let expr = "rate(http_requests_total[$__rate_interval])";
-        let expanded = expand_expr(expr, step, &vars);
-        assert_eq!(expanded, "rate(http_requests_total[60s])");
-
-        let step = Duration::from_secs(30);
-        // heuristic: max(30*4, 60) = 120s
-        let expr = "rate(http_requests_total[$__rate_interval])";
-        let expanded = expand_expr(expr, step, &vars);
-        assert_eq!(expanded, "rate(http_requests_total[120s])");
-    }
-
-    #[test]
-    fn test_expand_expr_vars() {
-        let mut vars = HashMap::new();
-        vars.insert("job".to_string(), "node-exporter".to_string());
-        vars.insert("instance".to_string(), "localhost:9100".to_string());
-
-        let step = Duration::from_secs(15);
-
-        // Test $var
-        let expr = "up{job=\"$job\"}";
-        let expanded = expand_expr(expr, step, &vars);
-        assert_eq!(expanded, "up{job=\"node-exporter\"}");
-
-        // Test ${var}
-        let expr = "up{instance=\"${instance}\"}";
-        let expanded = expand_expr(expr, step, &vars);
-        assert_eq!(expanded, "up{instance=\"localhost:9100\"}");
-
-        // Test multiple vars
-        let expr =
-            "rate(http_requests_total{job=\"$job\", instance=\"$instance\"}[$__rate_interval])";
-        let expanded = expand_expr(expr, step, &vars);
-        assert_eq!(
-            expanded,
-            "rate(http_requests_total{job=\"node-exporter\", instance=\"localhost:9100\"}[60s])"
-        );
-    }
-
-    #[test]
-    fn test_format_legend() {
-        let mut metric = HashMap::new();
-        metric.insert("job".to_string(), "node".to_string());
-        metric.insert("instance".to_string(), "localhost".to_string());
-
-        let fmt = "Job: {{job}} - {{instance}}";
-        assert_eq!(format_legend(fmt, &metric), "Job: node - localhost");
-
-        let fmt2 = "Static Text";
-        assert_eq!(format_legend(fmt2, &metric), "Static Text");
-    }
-
-    #[test]
-    fn test_downsample() {
-        let points: Vec<(f64, f64)> = (0..1000).map(|i| (i as f64, i as f64)).collect();
-        let downsampled = downsample(points, 100);
-        assert_eq!(downsampled.len(), 100);
-        assert_eq!(downsampled.last().unwrap().1, 999.0);
-    }
-
-    #[tokio::test]
-    async fn test_empty_panels() {
-        let prom = prom::PromClient::new("http://localhost:9090".to_string());
-        let mut app = AppState::new(
-            prom,
-            Duration::from_secs(3600),
-            Duration::from_secs(60),
-            Duration::from_millis(1000),
-            "Test".to_string(),
-            vec![], // Empty panels
-            0,
-            Theme::default(),
-            "dashed".to_string(),
-        );
-
-        // Should not panic on refresh
-        assert!(app.refresh().await.is_ok());
-
-        // Check navigation safety
-        app.scroll_to_selected_panel();
-        assert_eq!(app.selected_panel, 0);
-
-        // Check cursor movement
-        app.move_cursor(1);
-    }
-}
-
 pub fn default_queries(mut provided: Vec<String>) -> Vec<PanelState> {
     if provided.is_empty() {
         provided = vec![
@@ -610,6 +520,7 @@ pub fn default_queries(mut provided: Vec<String>) -> Vec<PanelState> {
             thresholds: None,
             min: None,
             max: None,
+            autogrid: None,
         })
         .collect()
 }
@@ -727,29 +638,21 @@ where
                                 app.zoom_in();
                                 app.refresh().await?;
                             }
-                            KeyCode::Char('[') => {
-                                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                                    app.pan_left();
-                                    app.refresh().await?;
-                                }
+                            KeyCode::Char('[') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.pan_left();
+                                app.refresh().await?;
                             }
-                            KeyCode::Left => {
-                                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                                    app.pan_left();
-                                    app.refresh().await?;
-                                }
+                            KeyCode::Left if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.pan_left();
+                                app.refresh().await?;
                             }
-                            KeyCode::Char(']') => {
-                                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                                    app.pan_right();
-                                    app.refresh().await?;
-                                }
+                            KeyCode::Char(']') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.pan_right();
+                                app.refresh().await?;
                             }
-                            KeyCode::Right => {
-                                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                                    app.pan_right();
-                                    app.refresh().await?;
-                                }
+                            KeyCode::Right if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.pan_right();
+                                app.refresh().await?;
                             }
                             KeyCode::Char('0') => {
                                 app.reset_to_live();
@@ -763,6 +666,9 @@ where
                                     };
                                 }
                             }
+                            KeyCode::Char('g') => {
+                                app.autogrid_enabled = !app.autogrid_enabled;
+                            }
                             _ => {}
                         }
                     } else if app.mode == AppMode::FullscreenInspect {
@@ -770,6 +676,9 @@ where
                             KeyCode::Esc | KeyCode::Char('v') => {
                                 app.mode = AppMode::Fullscreen;
                                 app.cursor_x = None;
+                            }
+                            KeyCode::Char('g') => {
+                                app.autogrid_enabled = !app.autogrid_enabled;
                             }
                             KeyCode::Left => {
                                 app.move_cursor(-1);
@@ -798,19 +707,17 @@ where
                             KeyCode::Char('r') | KeyCode::Char('R') => {
                                 app.refresh().await?;
                             }
-                            KeyCode::Up | KeyCode::Char('k') => {
-                                if app.selected_panel > 0 {
-                                    app.selected_panel -= 1;
-                                    // Auto-scroll to ensure selected panel is visible
-                                    app.scroll_to_selected_panel();
-                                }
+                            KeyCode::Up | KeyCode::Char('k') if app.selected_panel > 0 => {
+                                app.selected_panel -= 1;
+                                // Auto-scroll to ensure selected panel is visible
+                                app.scroll_to_selected_panel();
                             }
-                            KeyCode::Down | KeyCode::Char('j') => {
-                                if app.selected_panel < app.panels.len().saturating_sub(1) {
-                                    app.selected_panel += 1;
-                                    // Auto-scroll to ensure selected panel is visible
-                                    app.scroll_to_selected_panel();
-                                }
+                            KeyCode::Down | KeyCode::Char('j')
+                                if app.selected_panel < app.panels.len().saturating_sub(1) =>
+                            {
+                                app.selected_panel += 1;
+                                // Auto-scroll to ensure selected panel is visible
+                                app.scroll_to_selected_panel();
                             }
                             KeyCode::PageUp => {
                                 app.vertical_scroll = app.vertical_scroll.saturating_sub(10);
@@ -818,7 +725,7 @@ where
                             KeyCode::PageDown => {
                                 app.vertical_scroll = app.vertical_scroll.saturating_add(10);
                             }
-                            KeyCode::Char(c) if c.is_digit(10) => {
+                            KeyCode::Char(c) if c.is_ascii_digit() => {
                                 if let Some(digit) = c.to_digit(10) {
                                     if let Some(panel) = app.panels.get_mut(app.selected_panel) {
                                         if digit == 0 {
@@ -844,6 +751,9 @@ where
                                     };
                                 }
                             }
+                            KeyCode::Char('g') => {
+                                app.autogrid_enabled = !app.autogrid_enabled;
+                            }
                             KeyCode::Home => {
                                 app.vertical_scroll = 0;
                             }
@@ -858,29 +768,21 @@ where
                                 app.zoom_in();
                                 app.refresh().await?;
                             }
-                            KeyCode::Char('[') => {
-                                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                                    app.pan_left();
-                                    app.refresh().await?;
-                                }
+                            KeyCode::Char('[') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.pan_left();
+                                app.refresh().await?;
                             }
-                            KeyCode::Left => {
-                                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                                    app.pan_left();
-                                    app.refresh().await?;
-                                }
+                            KeyCode::Left if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.pan_left();
+                                app.refresh().await?;
                             }
-                            KeyCode::Char(']') => {
-                                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                                    app.pan_right();
-                                    app.refresh().await?;
-                                }
+                            KeyCode::Char(']') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.pan_right();
+                                app.refresh().await?;
                             }
-                            KeyCode::Right => {
-                                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                                    app.pan_right();
-                                    app.refresh().await?;
-                                }
+                            KeyCode::Right if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.pan_right();
+                                app.refresh().await?;
                             }
                             KeyCode::Char('0') => {
                                 app.reset_to_live();
@@ -959,5 +861,101 @@ where
         }
 
         sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_expand_expr_rate_interval() {
+        let vars = HashMap::new();
+        let step = Duration::from_secs(15);
+        // heuristic: max(15*4, 60) = 60s
+        let expr = "rate(http_requests_total[$__rate_interval])";
+        let expanded = expand_expr(expr, step, &vars);
+        assert_eq!(expanded, "rate(http_requests_total[60s])");
+
+        let step = Duration::from_secs(30);
+        // heuristic: max(30*4, 60) = 120s
+        let expr = "rate(http_requests_total[$__rate_interval])";
+        let expanded = expand_expr(expr, step, &vars);
+        assert_eq!(expanded, "rate(http_requests_total[120s])");
+    }
+
+    #[test]
+    fn test_expand_expr_vars() {
+        let mut vars = HashMap::new();
+        vars.insert("job".to_string(), "node-exporter".to_string());
+        vars.insert("instance".to_string(), "localhost:9100".to_string());
+
+        let step = Duration::from_secs(15);
+
+        // Test $var
+        let expr = "up{job=\"$job\"}";
+        let expanded = expand_expr(expr, step, &vars);
+        assert_eq!(expanded, "up{job=\"node-exporter\"}");
+
+        // Test ${var}
+        let expr = "up{instance=\"${instance}\"}";
+        let expanded = expand_expr(expr, step, &vars);
+        assert_eq!(expanded, "up{instance=\"localhost:9100\"}");
+
+        // Test multiple vars
+        let expr =
+            "rate(http_requests_total{job=\"$job\", instance=\"$instance\"}[$__rate_interval])";
+        let expanded = expand_expr(expr, step, &vars);
+        assert_eq!(
+            expanded,
+            "rate(http_requests_total{job=\"node-exporter\", instance=\"localhost:9100\"}[60s])"
+        );
+    }
+
+    #[test]
+    fn test_format_legend() {
+        let mut metric = HashMap::new();
+        metric.insert("job".to_string(), "node".to_string());
+        metric.insert("instance".to_string(), "localhost".to_string());
+
+        let fmt = "Job: {{job}} - {{instance}}";
+        assert_eq!(format_legend(fmt, &metric), "Job: node - localhost");
+
+        let fmt2 = "Static Text";
+        assert_eq!(format_legend(fmt2, &metric), "Static Text");
+    }
+
+    #[test]
+    fn test_downsample() {
+        let points: Vec<(f64, f64)> = (0..1000).map(|i| (i as f64, i as f64)).collect();
+        let downsampled = downsample(points, 100);
+        assert_eq!(downsampled.len(), 100);
+        assert_eq!(downsampled.last().unwrap().1, 999.0);
+    }
+
+    #[tokio::test]
+    async fn test_empty_panels() {
+        let prom = prom::PromClient::new("http://localhost:9090".to_string());
+        let mut app = AppState::new(
+            prom,
+            Duration::from_secs(3600),
+            Duration::from_secs(60),
+            Duration::from_millis(1000),
+            "Test".to_string(),
+            vec![], // Empty panels
+            0,
+            Theme::default(),
+            "dashed".to_string(),
+        );
+
+        // Should not panic on refresh
+        assert!(app.refresh().await.is_ok());
+
+        // Check navigation safety
+        app.scroll_to_selected_panel();
+        assert_eq!(app.selected_panel, 0);
+
+        // Check cursor movement
+        app.move_cursor(1);
     }
 }

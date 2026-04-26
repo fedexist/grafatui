@@ -172,7 +172,7 @@ This document provides a comprehensive feature-parity table between the [Grafana
 | `fieldConfig.defaults.mappings` | ❌ Not Implemented | Value mappings not supported |
 | `fieldConfig.defaults.noValue` | ❌ Not Implemented | |
 | `fieldConfig.defaults.displayName` | ❌ Not Implemented | |
-| `fieldConfig.defaults.custom` | ❌ Not Implemented | |
+| `fieldConfig.defaults.custom` | 🟡 Partially Supported | Used for thresholds style and axis grid visibility |
 | `fieldConfig.defaults.custom.drawStyle` | ❌ Not Implemented | Always drawn as lines |
 | `fieldConfig.defaults.custom.lineWidth` | ❌ Not Implemented | TUI limitation |
 | `fieldConfig.defaults.custom.fillOpacity` | ⛔ Not Applicable | TUI limitation |
@@ -180,6 +180,7 @@ This document provides a comprehensive feature-parity table between the [Grafana
 | `fieldConfig.defaults.custom.stacking` | ❌ Not Implemented | No stacked charts |
 | `fieldConfig.defaults.custom.axisPlacement` | ❌ Not Implemented | |
 | `fieldConfig.defaults.custom.axisLabel` | ❌ Not Implemented | |
+| `fieldConfig.defaults.custom.axisGridShow` | ✅ Supported | Controls per-panel autogrid guide lines for graph/time-series panels |
 | `fieldConfig.defaults.custom.scaleDistribution` | ❌ Not Implemented | Always linear |
 | `fieldConfig.overrides` | ❌ Not Implemented | |
 

@@ -21,6 +21,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+type QueryCache = Arc<Mutex<HashMap<String, (i64, i64, Duration, Vec<Series>)>>>;
+type QueryWaiter = tokio::sync::oneshot::Sender<Result<Vec<Series>, String>>;
+type InflightQueries = Arc<Mutex<HashMap<String, Vec<QueryWaiter>>>>;
+
 /// A simple Prometheus HTTP client.
 #[derive(Debug, Clone)]
 pub struct PromClient {
@@ -29,10 +33,9 @@ pub struct PromClient {
     /// HTTP client.
     client: reqwest::Client,
     /// Query cache: expr -> (start, end, step, data)
-    cache: Arc<Mutex<HashMap<String, (i64, i64, Duration, Vec<Series>)>>>,
+    cache: QueryCache,
     /// In-flight requests: key -> list of waiters
-    inflight:
-        Arc<Mutex<HashMap<String, Vec<tokio::sync::oneshot::Sender<Result<Vec<Series>, String>>>>>>,
+    inflight: InflightQueries,
 }
 
 impl PromClient {

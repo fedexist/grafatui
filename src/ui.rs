@@ -113,12 +113,13 @@ pub fn draw_ui(frame: &mut Frame, app: &AppState) {
     };
 
     let summary = format!(
-        "Mode: {} | Prom: {} | range={} step={:?} refresh={} | panels={} (skipped {}) errors={} | keys: ↑/↓ scroll, r refresh, +/- range, q quit, ? debug:{}",
+        "Mode: {} | Prom: {} | range={} step={:?} refresh={} | grid={} | panels={} (skipped {}) errors={} | keys: ↑/↓ scroll, r refresh, +/- range, q quit, ? debug:{}",
         mode_display,
         app.prometheus.base,
         format_duration(app.range),
         app.step,
         format_duration(app.refresh_every),
+        if app.autogrid_enabled { "on" } else { "off" },
         panel_count_display,
         app.skipped_panels,
         errors,
@@ -137,7 +138,7 @@ pub fn draw_ui(frame: &mut Frame, app: &AppState) {
                     (g.y, g.x)
                 })
         } else {
-            app.panels.get(0)
+            app.panels.first()
         };
 
         if let Some(p) = debug_panel {
@@ -578,6 +579,7 @@ fn render_graph_panel(
 
     // Calculate y_bounds once
     let y_bounds = calculate_y_bounds(p);
+    let show_autogrid = app.autogrid_enabled && p.autogrid.unwrap_or(true);
 
     // Prepare datasets (without names for the chart itself to avoid built-in legend)
     let mut chart_datasets = Vec::new();
@@ -678,7 +680,7 @@ fn render_graph_panel(
             name = format!("Series {}", i);
         }
 
-        legend_items.push(Span::styled(format!("■ "), Style::default().fg(color)));
+        legend_items.push(Span::styled("■ ".to_string(), Style::default().fg(color)));
         legend_items.push(Span::styled(
             format!("{}  ", name),
             Style::default().fg(theme.text),
@@ -715,19 +717,31 @@ fn render_graph_panel(
         Span::styled(format_time(now), Style::default().fg(theme.text)),
     ];
 
-    let y_axis_height = chart_area.height.saturating_sub(1).max(2) as usize;
+    let chart_bottom = chart_area.bottom().saturating_sub(2); // x-axis occupies last rows
+    let chart_top = chart_area.top();
+    let plot_height = chart_bottom.saturating_sub(chart_top).saturating_add(1);
+    let y_axis_height = usize::from(plot_height).max(2);
     let mut y_labels = vec![Span::raw(""); y_axis_height];
+    let autogrid_value_ticks = if show_autogrid {
+        calculate_value_grid_ticks(y_bounds, plot_height)
+    } else {
+        Vec::new()
+    };
 
     y_labels[0] = Span::styled(format_si(y_bounds[0]), Style::default().fg(theme.text));
     y_labels[y_axis_height - 1] =
         Span::styled(format_si(y_bounds[1]), Style::default().fg(theme.text));
 
     if y_bounds[1] > y_bounds[0] {
+        for grid_val in &autogrid_value_ticks {
+            if let Some(index) = y_axis_label_index(*grid_val, y_bounds, y_axis_height) {
+                y_labels[index] =
+                    Span::styled(format_si(*grid_val), Style::default().fg(Color::DarkGray));
+            }
+        }
+
         for (th_val, color) in &threshold_labels_info {
-            if *th_val > y_bounds[0] && *th_val < y_bounds[1] {
-                let ratio = (*th_val - y_bounds[0]) / (y_bounds[1] - y_bounds[0]);
-                let index = (ratio * (y_axis_height - 1) as f64).round() as usize;
-                let index = index.min(y_axis_height - 2).max(1);
+            if let Some(index) = y_axis_label_index(*th_val, y_bounds, y_axis_height) {
                 y_labels[index] = Span::styled(format_si(*th_val), Style::default().fg(*color));
             }
         }
@@ -756,8 +770,12 @@ fn render_graph_panel(
 
     let chart_left = chart_area.left() + y_max_width + 1; // +1 for the | axis line
     let chart_right = chart_area.right();
-    let chart_bottom = chart_area.bottom().saturating_sub(2); // x-axis occupies last rows
-    let chart_top = chart_area.top();
+    let plot_bounds = PlotBounds {
+        left: chart_left,
+        right: chart_right,
+        top: chart_top,
+        bottom: chart_bottom,
+    };
 
     // Render threshold markers after chart rendering by merging only onto blank cells.
     // This guarantees data curves keep precedence wherever both map to the same terminal cell.
@@ -766,30 +784,20 @@ fn render_graph_panel(
             .x_axis(
                 Axis::default()
                     .bounds([start, now])
-                    .labels(x_labels)
+                    .labels(x_labels.clone())
                     .style(Style::default().fg(theme.text)),
             )
             .y_axis(
                 Axis::default()
                     .style(Style::default().fg(Color::Gray))
                     .bounds(y_bounds)
-                    .labels(y_labels),
+                    .labels(y_labels.clone()),
             );
 
         let mut threshold_buf = ratatui::buffer::Buffer::empty(chart_area);
         threshold_chart.render(chart_area, &mut threshold_buf);
 
-        let buf = frame.buffer_mut();
-        for y in chart_top..=chart_bottom {
-            for x in chart_left..chart_right {
-                let Some(src_cell) = threshold_buf.cell((x, y)) else {
-                    continue;
-                };
-                if let Some(dst_cell) = buf.cell_mut((x, y)) {
-                    overlay_threshold_cell(dst_cell, src_cell);
-                }
-            }
-        }
+        merge_overlay_buffer(frame, &threshold_buf, plot_bounds);
     }
 
     // Render custom raw lines by hijacking buffer space
@@ -814,7 +822,7 @@ fn render_graph_panel(
                                 continue;
                             }
                             if let Some(cell) = buf.cell_mut((x, phys_y)) {
-                                if should_draw_threshold_on_cell(cell) {
+                                if is_blank_cell(cell) {
                                     cell.set_char(line_char)
                                         .set_style(Style::default().fg(*color));
                                 }
@@ -826,6 +834,49 @@ fn render_graph_panel(
         }
     }
 
+    if show_autogrid && chart_top <= chart_bottom {
+        let plot_width = chart_right.saturating_sub(chart_left);
+        let autogrid_time_ticks = calculate_time_grid_ticks(start, now, plot_width);
+        let autogrid_datasets = build_autogrid_datasets(
+            [start, now],
+            y_bounds,
+            &autogrid_time_ticks,
+            &autogrid_value_ticks,
+            plot_width,
+            plot_height,
+        );
+        let autogrid_overlay_datasets: Vec<_> = autogrid_datasets
+            .iter()
+            .map(|dataset| {
+                Dataset::default()
+                    .name("")
+                    .marker(ratatui::symbols::Marker::Braille)
+                    .graph_type(GraphType::Line)
+                    .style(Style::default().fg(Color::DarkGray))
+                    .data(dataset)
+            })
+            .collect();
+
+        let autogrid_chart = Chart::new(autogrid_overlay_datasets)
+            .x_axis(
+                Axis::default()
+                    .bounds([start, now])
+                    .labels(x_labels)
+                    .style(Style::default().fg(theme.text)),
+            )
+            .y_axis(
+                Axis::default()
+                    .style(Style::default().fg(Color::Gray))
+                    .bounds(y_bounds)
+                    .labels(y_labels),
+            );
+
+        let mut autogrid_buf = ratatui::buffer::Buffer::empty(chart_area);
+        autogrid_chart.render(chart_area, &mut autogrid_buf);
+
+        merge_overlay_buffer(frame, &autogrid_buf, plot_bounds);
+    }
+
     // Render custom legend
     if legend_height > 0 {
         let legend = Paragraph::new(Line::from(legend_items)).wrap(Wrap { trim: true });
@@ -833,14 +884,221 @@ fn render_graph_panel(
     }
 }
 
-fn should_draw_threshold_on_cell(cell: &ratatui::buffer::Cell) -> bool {
+#[derive(Debug, Clone, Copy)]
+struct PlotBounds {
+    left: u16,
+    right: u16,
+    top: u16,
+    bottom: u16,
+}
+
+fn merge_overlay_buffer(
+    frame: &mut Frame,
+    overlay_buf: &ratatui::buffer::Buffer,
+    plot: PlotBounds,
+) {
+    let buf = frame.buffer_mut();
+    for y in plot.top..=plot.bottom {
+        for x in plot.left..plot.right {
+            let Some(src_cell) = overlay_buf.cell((x, y)) else {
+                continue;
+            };
+            if let Some(dst_cell) = buf.cell_mut((x, y)) {
+                overlay_cell_if_blank(dst_cell, src_cell);
+            }
+        }
+    }
+}
+
+fn is_blank_cell(cell: &ratatui::buffer::Cell) -> bool {
     cell.symbol().chars().all(char::is_whitespace)
 }
 
-fn overlay_threshold_cell(dst: &mut ratatui::buffer::Cell, src: &ratatui::buffer::Cell) {
-    if should_draw_threshold_on_cell(dst) && !should_draw_threshold_on_cell(src) {
+fn overlay_cell_if_blank(dst: &mut ratatui::buffer::Cell, src: &ratatui::buffer::Cell) {
+    if is_blank_cell(dst) && !is_blank_cell(src) {
         dst.set_symbol(src.symbol()).set_style(src.style());
     }
+}
+
+fn y_axis_label_index(value: f64, y_bounds: [f64; 2], y_axis_height: usize) -> Option<usize> {
+    if value <= y_bounds[0] || value >= y_bounds[1] || y_axis_height < 3 {
+        return None;
+    }
+
+    let ratio = (value - y_bounds[0]) / (y_bounds[1] - y_bounds[0]);
+    let index_from_bottom = (ratio * (y_axis_height - 1) as f64).round() as usize;
+    Some(index_from_bottom.min(y_axis_height - 2).max(1))
+}
+
+fn calculate_value_grid_ticks(y_bounds: [f64; 2], chart_height: u16) -> Vec<f64> {
+    let min = y_bounds[0];
+    let max = y_bounds[1];
+    if !min.is_finite() || !max.is_finite() || max <= min || chart_height < 4 {
+        return Vec::new();
+    }
+
+    let target_lines = (usize::from(chart_height) / 6).clamp(2, 4);
+    let step = nice_grid_step(max - min, target_lines);
+    if step <= 0.0 || !step.is_finite() {
+        return Vec::new();
+    }
+
+    let mut ticks = Vec::new();
+    let mut tick = (min / step).ceil() * step;
+    while tick < max {
+        if tick > min {
+            ticks.push(tick);
+        }
+        tick += step;
+    }
+    ticks
+}
+
+fn nice_grid_step(range: f64, target_lines: usize) -> f64 {
+    if range <= 0.0 || !range.is_finite() || target_lines == 0 {
+        return 0.0;
+    }
+
+    let raw_step = range / target_lines as f64;
+    let magnitude = 10_f64.powf(raw_step.log10().floor());
+    let fraction = raw_step / magnitude;
+    let nice_fraction = if fraction <= 1.0 {
+        1.0
+    } else if fraction <= 2.0 {
+        2.0
+    } else if fraction <= 5.0 {
+        5.0
+    } else {
+        10.0
+    };
+    nice_fraction * magnitude
+}
+
+fn calculate_time_grid_ticks(start: f64, end: f64, chart_width: u16) -> Vec<f64> {
+    if !start.is_finite() || !end.is_finite() || end <= start || chart_width < 8 {
+        return Vec::new();
+    }
+
+    let range = end - start;
+    let mut step = base_time_grid_step(range);
+    let max_ticks = (usize::from(chart_width) / 20).clamp(3, 8);
+    while count_interior_ticks(start, end, step) > max_ticks {
+        step = next_time_grid_step(step);
+    }
+
+    let mut ticks = Vec::new();
+    let mut tick = (start / step).ceil() * step;
+    while tick < end {
+        if tick > start {
+            ticks.push(tick);
+        }
+        tick += step;
+    }
+    ticks
+}
+
+fn base_time_grid_step(range: f64) -> f64 {
+    const MINUTE: f64 = 60.0;
+    const HOUR: f64 = 60.0 * MINUTE;
+    const DAY: f64 = 24.0 * HOUR;
+
+    if range <= 10.0 * MINUTE {
+        MINUTE
+    } else if range <= 30.0 * MINUTE {
+        5.0 * MINUTE
+    } else if range <= 90.0 * MINUTE {
+        30.0 * MINUTE
+    } else if range <= 3.0 * HOUR {
+        HOUR
+    } else if range <= 6.0 * HOUR {
+        2.0 * HOUR
+    } else if range <= 12.0 * HOUR {
+        3.0 * HOUR
+    } else if range <= DAY {
+        6.0 * HOUR
+    } else if range <= 2.0 * DAY {
+        12.0 * HOUR
+    } else {
+        DAY
+    }
+}
+
+fn next_time_grid_step(step: f64) -> f64 {
+    const STEPS: [f64; 10] = [
+        60.0, 300.0, 600.0, 1800.0, 3600.0, 7200.0, 10800.0, 21600.0, 43200.0, 86400.0,
+    ];
+
+    STEPS
+        .iter()
+        .copied()
+        .find(|candidate| *candidate > step)
+        .unwrap_or(step * 2.0)
+}
+
+fn count_interior_ticks(start: f64, end: f64, step: f64) -> usize {
+    if step <= 0.0 {
+        return 0;
+    }
+
+    let mut count = 0;
+    let mut tick = (start / step).ceil() * step;
+    while tick < end {
+        if tick > start {
+            count += 1;
+        }
+        tick += step;
+    }
+    count
+}
+
+fn build_autogrid_datasets(
+    x_bounds: [f64; 2],
+    y_bounds: [f64; 2],
+    time_ticks: &[f64],
+    value_ticks: &[f64],
+    plot_width: u16,
+    plot_height: u16,
+) -> Vec<Vec<(f64, f64)>> {
+    if x_bounds[1] <= x_bounds[0] || y_bounds[1] <= y_bounds[0] {
+        return Vec::new();
+    }
+
+    let mut datasets = Vec::new();
+    let vertical_samples = usize::from(plot_height).saturating_mul(4).max(2);
+    let horizontal_samples = usize::from(plot_width).saturating_mul(2).max(2);
+
+    for tick in time_ticks {
+        if *tick <= x_bounds[0] || *tick >= x_bounds[1] {
+            continue;
+        }
+        datasets.push(
+            (0..=vertical_samples)
+                .map(|i| {
+                    let y = interpolate(y_bounds[0], y_bounds[1], i, vertical_samples);
+                    (*tick, y)
+                })
+                .collect(),
+        );
+    }
+
+    for tick in value_ticks {
+        if *tick <= y_bounds[0] || *tick >= y_bounds[1] {
+            continue;
+        }
+        datasets.push(
+            (0..=horizontal_samples)
+                .map(|i| {
+                    let x = interpolate(x_bounds[0], x_bounds[1], i, horizontal_samples);
+                    (x, *tick)
+                })
+                .collect(),
+        );
+    }
+    datasets
+}
+
+fn interpolate(start: f64, end: f64, index: usize, total: usize) -> f64 {
+    start + (end - start) * index as f64 / total as f64
 }
 
 fn render_gauge(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
@@ -857,7 +1115,7 @@ fn render_gauge(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
     let min = p.min.unwrap_or(0.0);
     let max = p
         .max
-        .unwrap_or_else(|| if value > 100.0 { value * 1.2 } else { 100.0 });
+        .unwrap_or(if value > 100.0 { value * 1.2 } else { 100.0 });
 
     let color = p.get_color_for_value(value).unwrap_or(theme.palette[0]);
 
@@ -1267,6 +1525,7 @@ mod tests {
             thresholds: None,
             min: None,
             max: None,
+            autogrid: None,
         }
     }
 
@@ -1334,41 +1593,117 @@ mod tests {
     }
 
     #[test]
-    fn test_should_draw_threshold_on_cell_empty() {
+    fn test_is_blank_cell_empty() {
         let cell = ratatui::buffer::Cell::default();
-        assert!(should_draw_threshold_on_cell(&cell));
+        assert!(is_blank_cell(&cell));
     }
 
     #[test]
-    fn test_should_draw_threshold_on_cell_filled() {
+    fn test_is_blank_cell_filled() {
         let mut cell = ratatui::buffer::Cell::default();
         cell.set_char('x');
-        assert!(!should_draw_threshold_on_cell(&cell));
+        assert!(!is_blank_cell(&cell));
     }
 
     #[test]
-    fn test_overlay_threshold_cell_copies_when_destination_is_empty() {
+    fn test_overlay_cell_if_blank_copies_when_destination_is_empty() {
         let mut dst = ratatui::buffer::Cell::default();
         let mut src = ratatui::buffer::Cell::default();
         src.set_char('-').set_style(Style::default().fg(Color::Red));
 
-        overlay_threshold_cell(&mut dst, &src);
+        overlay_cell_if_blank(&mut dst, &src);
 
         assert_eq!(dst.symbol(), "-");
         assert_eq!(dst.style().fg, Some(Color::Red));
     }
 
     #[test]
-    fn test_overlay_threshold_cell_keeps_existing_destination_marker() {
+    fn test_overlay_cell_if_blank_keeps_existing_destination_marker() {
         let mut dst = ratatui::buffer::Cell::default();
         dst.set_char('x')
             .set_style(Style::default().fg(Color::LightBlue));
         let mut src = ratatui::buffer::Cell::default();
         src.set_char('-').set_style(Style::default().fg(Color::Red));
 
-        overlay_threshold_cell(&mut dst, &src);
+        overlay_cell_if_blank(&mut dst, &src);
 
         assert_eq!(dst.symbol(), "x");
         assert_eq!(dst.style().fg, Some(Color::LightBlue));
+    }
+
+    #[test]
+    fn test_y_axis_label_index_matches_chart_orientation() {
+        assert_eq!(y_axis_label_index(10.0, [0.0, 20.0], 11), Some(5));
+        assert_eq!(y_axis_label_index(5.0, [0.0, 20.0], 11), Some(3));
+        assert_eq!(y_axis_label_index(15.0, [0.0, 20.0], 11), Some(8));
+        assert_eq!(y_axis_label_index(0.0, [0.0, 20.0], 11), None);
+        assert_eq!(y_axis_label_index(20.0, [0.0, 20.0], 11), None);
+    }
+
+    #[test]
+    fn test_calculate_value_grid_ticks_round_values() {
+        let ticks = calculate_value_grid_ticks([329.0, 1287.0], 20);
+        assert_eq!(ticks, vec![500.0, 1000.0]);
+    }
+
+    #[test]
+    fn test_calculate_value_grid_ticks_excludes_boundaries() {
+        let ticks = calculate_value_grid_ticks([0.0, 100.0], 20);
+        assert!(!ticks.contains(&0.0));
+        assert!(!ticks.contains(&100.0));
+    }
+
+    #[test]
+    fn test_calculate_value_grid_ticks_invalid_ranges() {
+        assert!(calculate_value_grid_ticks([1.0, 1.0], 20).is_empty());
+        assert!(calculate_value_grid_ticks([2.0, 1.0], 20).is_empty());
+        assert!(calculate_value_grid_ticks([f64::NAN, 1.0], 20).is_empty());
+        assert!(calculate_value_grid_ticks([0.0, 1.0], 3).is_empty());
+    }
+
+    #[test]
+    fn test_calculate_time_grid_ticks_two_hour_window() {
+        let start = 41_820.0; // 11:37 UTC
+        let end = start + 2.0 * 60.0 * 60.0;
+
+        let ticks = calculate_time_grid_ticks(start, end, 80);
+
+        assert_eq!(ticks, vec![43_200.0, 46_800.0]); // 12:00, 13:00 UTC
+    }
+
+    #[test]
+    fn test_calculate_time_grid_ticks_one_hour_window() {
+        let start = 44_520.0; // 12:22 UTC
+        let end = start + 60.0 * 60.0;
+
+        let ticks = calculate_time_grid_ticks(start, end, 80);
+
+        assert_eq!(ticks, vec![45_000.0, 46_800.0]); // 12:30, 13:00 UTC
+    }
+
+    #[test]
+    fn test_calculate_time_grid_ticks_five_minute_window() {
+        let start = 43_335.0; // 12:02:15 UTC
+        let end = start + 5.0 * 60.0;
+
+        let ticks = calculate_time_grid_ticks(start, end, 120);
+
+        assert_eq!(
+            ticks,
+            vec![43_380.0, 43_440.0, 43_500.0, 43_560.0, 43_620.0]
+        );
+    }
+
+    #[test]
+    fn test_build_autogrid_datasets() {
+        let datasets = build_autogrid_datasets([0.0, 10.0], [0.0, 10.0], &[5.0], &[5.0], 10, 5);
+
+        assert_eq!(datasets.len(), 2);
+        assert_eq!(datasets[0].first(), Some(&(5.0, 0.0)));
+        assert_eq!(datasets[0].last(), Some(&(5.0, 10.0)));
+        assert_eq!(datasets[0].len(), 21);
+        assert_eq!(datasets[1].first(), Some(&(0.0, 5.0)));
+        assert_eq!(datasets[1].last(), Some(&(10.0, 5.0)));
+        assert_eq!(datasets[1].len(), 21);
     }
 }
