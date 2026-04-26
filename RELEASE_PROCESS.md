@@ -135,11 +135,12 @@ GitHub Actions workflow that:
 - Creates release PRs
 - Creates GitHub Release and Tag upon merge
 
-### `.github/workflows/publish-assets.yml`
+### `.github/workflows/release-assets.yml`
 GitHub Actions workflow that:
-- Triggers on push to `tags` (created by release-plz)
-- Builds the release binary
-- Uploads the binary to the existing GitHub Release
+- Triggers on GitHub release creation or manual dispatch
+- Builds and uploads release assets for each supported target
+- Updates the `fedexist/homebrew-grafatui` tap after assets are uploaded
+- Recomputes all platform-specific SHA256 values in the Homebrew formula
 
 ## Manual Operations
 
