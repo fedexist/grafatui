@@ -30,6 +30,9 @@ pub struct Config {
     pub theme: Option<String>,
     pub grafana_json: Option<PathBuf>,
     pub threshold_marker: Option<String>,
+    pub export_dir: Option<PathBuf>,
+    pub export_format: Option<crate::export::ExportFormat>,
+    pub record_max_frames: Option<usize>,
     pub vars: Option<HashMap<String, String>>,
 }
 
@@ -96,6 +99,7 @@ mod tests {
             prometheus_url = "http://localhost:9090"
             refresh_rate = 5000
             theme = "dracula"
+            export_format = "svg"
         "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(
@@ -104,6 +108,7 @@ mod tests {
         );
         assert_eq!(config.refresh_rate, Some(5000));
         assert_eq!(config.theme, Some("dracula".to_string()));
+        assert_eq!(config.export_format, Some(crate::export::ExportFormat::Svg));
     }
 
     #[test]

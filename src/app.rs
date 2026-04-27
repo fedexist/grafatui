@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+use crate::export::{ExportOptions, RecordingState};
 use crate::prom;
 use crate::theme::Theme;
 use crate::ui;
@@ -218,6 +219,12 @@ pub struct AppState {
     pub cursor_x: Option<f64>,
     /// Global marker set for rendering thresholds
     pub threshold_marker: String,
+    /// Image export and recording configuration.
+    pub export: ExportOptions,
+    /// Active frame recording state, if recording is enabled.
+    pub recording: Option<RecordingState>,
+    /// Last export or recording status message.
+    pub export_status: Option<String>,
 }
 
 impl AppState {
@@ -233,6 +240,7 @@ impl AppState {
     /// * `panels` - The list of panels to display.
     /// * `skipped_panels` - The count of panels that were skipped during import.
     /// * `theme` - The UI theme to use.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         prometheus: prom::PromClient,
         range: Duration,
@@ -243,6 +251,7 @@ impl AppState {
         skipped_panels: usize,
         theme: Theme,
         threshold_marker: String,
+        export: ExportOptions,
     ) -> Self {
         Self {
             prometheus,
@@ -264,12 +273,15 @@ impl AppState {
             search_results: Vec::new(),
             cursor_x: None,
             threshold_marker,
+            export,
+            recording: None,
+            export_status: None,
         }
     }
 
     /// Zoom in: halve the time range.
     pub fn zoom_in(&mut self) {
-        self.range = self.range / 2;
+        self.range /= 2;
         if self.range < Duration::from_secs(10) {
             self.range = Duration::from_secs(10);
         }
@@ -277,7 +289,7 @@ impl AppState {
 
     /// Zoom out: double the time range.
     pub fn zoom_out(&mut self) {
-        self.range = self.range * 2;
+        self.range *= 2;
         self.range = self.range.min(Duration::from_secs(7 * 24 * 3600));
     }
 
@@ -490,6 +502,7 @@ fn downsample(points: Vec<(f64, f64)>, max_points: usize) -> Vec<(f64, f64)> {
         .collect()
 }
 
+#[allow(clippy::items_after_test_module)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -572,6 +585,7 @@ mod tests {
             0,
             Theme::default(),
             "dashed".to_string(),
+            ExportOptions::default(),
         );
 
         // Should not panic on refresh
@@ -618,6 +632,7 @@ pub fn parse_duration(s: &str) -> Result<Duration> {
     Ok(humantime::parse_duration(s)?)
 }
 
+#[allow(clippy::collapsible_match)]
 pub async fn run_app<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     app: &mut AppState,
@@ -631,11 +646,24 @@ where
 
         let timeout = tick_rate.saturating_sub(app.last_refresh.elapsed().min(tick_rate));
         let should_refresh = app.last_refresh.elapsed() >= app.refresh_every;
+        let mut state_changed = false;
 
         if event::poll(timeout)? {
             match event::read()? {
                 Event::Key(key) => {
-                    if app.mode == AppMode::Search {
+                    let size = terminal.size()?;
+                    let viewport = ratatui::layout::Rect::new(0, 0, size.width, size.height);
+                    let is_ctrl_export = key.code == KeyCode::Char('e')
+                        && key.modifiers.contains(KeyModifiers::CONTROL);
+                    let is_export = key.code == KeyCode::Char('e')
+                        && key.modifiers.is_empty()
+                        && app.mode != AppMode::Search;
+
+                    if is_ctrl_export {
+                        crate::export::toggle_recording(app, viewport)?;
+                    } else if is_export {
+                        crate::export::export_current(app, viewport)?;
+                    } else if app.mode == AppMode::Search {
                         match key.code {
                             KeyCode::Esc => {
                                 app.mode = AppMode::Normal;
@@ -684,6 +712,7 @@ where
                             }
                             _ => {}
                         }
+                        state_changed = true;
                     } else if app.mode == AppMode::Inspect {
                         match key.code {
                             KeyCode::Esc | KeyCode::Char('v') => {
@@ -699,6 +728,7 @@ where
                             KeyCode::Char('q') => return Ok(()),
                             _ => {}
                         }
+                        state_changed = true;
                     } else if app.mode == AppMode::Fullscreen {
                         match key.code {
                             KeyCode::Esc | KeyCode::Char('f') | KeyCode::Enter => {
@@ -765,6 +795,7 @@ where
                             }
                             _ => {}
                         }
+                        state_changed = true;
                     } else if app.mode == AppMode::FullscreenInspect {
                         match key.code {
                             KeyCode::Esc | KeyCode::Char('v') => {
@@ -780,6 +811,7 @@ where
                             KeyCode::Char('q') => return Ok(()),
                             _ => {}
                         }
+                        state_changed = true;
                     } else {
                         // Normal Mode
                         match key.code {
@@ -818,7 +850,7 @@ where
                             KeyCode::PageDown => {
                                 app.vertical_scroll = app.vertical_scroll.saturating_add(10);
                             }
-                            KeyCode::Char(c) if c.is_digit(10) => {
+                            KeyCode::Char(c) if c.is_ascii_digit() => {
                                 if let Some(digit) = c.to_digit(10) {
                                     if let Some(panel) = app.panels.get_mut(app.selected_panel) {
                                         if digit == 0 {
@@ -896,6 +928,7 @@ where
                             }
                             _ => {}
                         }
+                        state_changed = true;
                     }
                 }
                 Event::Mouse(mouse) => match mouse.kind {
@@ -941,12 +974,15 @@ where
                                 _ => {}
                             }
                         }
+                        state_changed = true;
                     }
                     crossterm::event::MouseEventKind::ScrollDown => {
                         app.vertical_scroll = app.vertical_scroll.saturating_add(1);
+                        state_changed = true;
                     }
                     crossterm::event::MouseEventKind::ScrollUp => {
                         app.vertical_scroll = app.vertical_scroll.saturating_sub(1);
+                        state_changed = true;
                     }
                     _ => {}
                 },
@@ -956,6 +992,13 @@ where
 
         if should_refresh {
             app.refresh().await?;
+            state_changed = true;
+        }
+
+        if state_changed && app.recording.is_some() {
+            let size = terminal.size()?;
+            let viewport = ratatui::layout::Rect::new(0, 0, size.width, size.height);
+            crate::export::capture_recording_frame(app, viewport)?;
         }
 
         sleep(Duration::from_millis(10)).await;

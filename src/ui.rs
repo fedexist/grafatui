@@ -70,12 +70,7 @@ pub fn draw_ui(frame: &mut Frame, app: &AppState) {
         }
     } else {
         let has_grid = app.panels.iter().any(|p| p.grid.is_some());
-
-        let panel_rects = if has_grid {
-            calculate_grid_layout(inner_area, app)
-        } else {
-            calculate_two_column_layout(inner_area, app)
-        };
+        let panel_rects = calculate_panel_layout(inner_area, app);
 
         for (rect, panel_idx) in &panel_rects {
             // eprintln!("Rendering panel {} at {:?}", panel_idx, rect);
@@ -113,8 +108,9 @@ pub fn draw_ui(frame: &mut Frame, app: &AppState) {
     };
 
     let summary = format!(
-        "Mode: {} | Prom: {} | range={} step={:?} refresh={} | panels={} (skipped {}) errors={} | keys: ↑/↓ scroll, r refresh, +/- range, q quit, ? debug:{}",
+        "Mode: {}{} | Prom: {} | range={} step={:?} refresh={} | panels={} (skipped {}) errors={} | keys: ↑/↓ scroll, r refresh, e export, Ctrl+E record, +/- range, q quit, ? debug:{}",
         mode_display,
+        if app.recording.is_some() { " REC" } else { "" },
         app.prometheus.base,
         format_duration(app.range),
         app.step,
@@ -126,6 +122,9 @@ pub fn draw_ui(frame: &mut Frame, app: &AppState) {
     );
 
     let mut detail = String::new();
+    if let Some(status) = &app.export_status {
+        detail = status.clone();
+    }
     if app.debug_bar {
         // Choose a debug panel: if we have grid, pick the top-left grid panel; otherwise pick the first panel
         let debug_panel: Option<&PanelState> = if app.panels.iter().any(|p| p.grid.is_some()) {
@@ -137,15 +136,20 @@ pub fn draw_ui(frame: &mut Frame, app: &AppState) {
                     (g.y, g.x)
                 })
         } else {
-            app.panels.get(0)
+            app.panels.first()
         };
 
         if let Some(p) = debug_panel {
             let url = p.last_url.as_deref().unwrap_or("-");
-            detail = format!(
+            let debug_detail = format!(
                 "last panel: {} | samples={} | url={} ",
                 p.title, p.last_samples, url
             );
+            detail = if detail.is_empty() {
+                debug_detail
+            } else {
+                format!("{} | {}", detail, debug_detail)
+            };
         }
     }
 
@@ -230,6 +234,36 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+pub(crate) fn visible_panel_rects(area: Rect, app: &AppState) -> Vec<(Rect, usize)> {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(5),
+            Constraint::Length(2),
+        ])
+        .split(area);
+
+    let inner_area = chunks[1].inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+
+    if app.mode == AppMode::Fullscreen || app.mode == AppMode::FullscreenInspect {
+        return vec![(inner_area, app.selected_panel)];
+    }
+
+    calculate_panel_layout(inner_area, app)
+}
+
+fn calculate_panel_layout(area: Rect, app: &AppState) -> Vec<(Rect, usize)> {
+    if app.panels.iter().any(|p| p.grid.is_some()) {
+        calculate_grid_layout(area, app)
+    } else {
+        calculate_two_column_layout(area, app)
+    }
 }
 
 /// Returns a list of (Rect, panel_index) for all panels to be rendered.
@@ -405,7 +439,6 @@ fn calculate_two_column_layout_subset(
 ///
 /// An `Option` containing a tuple of `(panel_index, panel_rect)` if a panel was hit.
 pub fn hit_test(app: &AppState, area: Rect, x: u16, y: u16) -> Option<(usize, Rect)> {
-    // Replicate main layout
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -414,30 +447,18 @@ pub fn hit_test(app: &AppState, area: Rect, x: u16, y: u16) -> Option<(usize, Re
             Constraint::Length(2),
         ])
         .split(area);
-
-    let charts_area = chunks[1];
-    let inner_area = charts_area.inner(Margin {
+    let inner_area = chunks[1].inner(Margin {
         vertical: 1,
         horizontal: 1,
     });
+    let pos = ratatui::layout::Position { x, y };
 
-    if !inner_area.contains(ratatui::layout::Position { x, y }) {
+    if !inner_area.contains(pos) {
         return None;
     }
 
-    if app.mode == AppMode::Fullscreen || app.mode == AppMode::FullscreenInspect {
-        return Some((app.selected_panel, inner_area));
-    }
-
-    let has_grid = app.panels.iter().any(|p| p.grid.is_some());
-    let panel_rects = if has_grid {
-        calculate_grid_layout(inner_area, app)
-    } else {
-        calculate_two_column_layout(inner_area, app)
-    };
-
-    for (rect, idx) in panel_rects {
-        if rect.contains(ratatui::layout::Position { x, y }) {
+    for (rect, idx) in visible_panel_rects(area, app) {
+        if rect.contains(pos) {
             return Some((idx, rect));
         }
     }
@@ -678,7 +699,7 @@ fn render_graph_panel(
             name = format!("Series {}", i);
         }
 
-        legend_items.push(Span::styled(format!("■ "), Style::default().fg(color)));
+        legend_items.push(Span::styled("■ ".to_string(), Style::default().fg(color)));
         legend_items.push(Span::styled(
             format!("{}  ", name),
             Style::default().fg(theme.text),
@@ -857,7 +878,7 @@ fn render_gauge(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
     let min = p.min.unwrap_or(0.0);
     let max = p
         .max
-        .unwrap_or_else(|| if value > 100.0 { value * 1.2 } else { 100.0 });
+        .unwrap_or(if value > 100.0 { value * 1.2 } else { 100.0 });
 
     let color = p.get_color_for_value(value).unwrap_or(theme.palette[0]);
 
@@ -1127,7 +1148,7 @@ fn value_to_heatmap_color(normalized: f64) -> Color {
     }
 }
 
-fn calculate_y_bounds(p: &PanelState) -> [f64; 2] {
+pub(crate) fn calculate_y_bounds(p: &PanelState) -> [f64; 2] {
     let mut min = f64::MAX;
     let mut max = f64::MIN;
     let mut has_data = false;
@@ -1172,7 +1193,7 @@ fn calculate_y_bounds(p: &PanelState) -> [f64; 2] {
     [min - range * 0.05, max + range * 0.05]
 }
 
-fn format_si(val: f64) -> String {
+pub(crate) fn format_si(val: f64) -> String {
     let abs = val.abs();
     if abs >= 1e9 {
         format!("{:.2}G", val / 1e9)
@@ -1185,7 +1206,7 @@ fn format_si(val: f64) -> String {
     }
 }
 
-fn format_time(ts: f64) -> String {
+pub(crate) fn format_time(ts: f64) -> String {
     use chrono::TimeZone;
     if let Some(dt) = chrono::Utc.timestamp_opt(ts as i64, 0).single() {
         dt.format("%H:%M:%S").to_string()
@@ -1196,7 +1217,7 @@ fn format_time(ts: f64) -> String {
 
 /// Generate a color from a string using hash-based approach.
 /// Uses HSL color space to ensure visually distinct, vibrant colors.
-fn get_hash_color(name: &str) -> Color {
+pub(crate) fn get_hash_color(name: &str) -> Color {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 
