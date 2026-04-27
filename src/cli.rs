@@ -49,6 +49,10 @@ pub struct Args {
     #[arg(long, value_name = "MARKER")]
     pub threshold_marker: Option<String>,
 
+    /// Color to use for automatic grid lines and labels (e.g., gray, dark-gray, #666666).
+    #[arg(long, value_name = "COLOR")]
+    pub autogrid_color: Option<String>,
+
     /// Configuration file path (e.g., ./grafatui.toml).
     #[arg(long, value_name = "FILE")]
     pub config: Option<PathBuf>,
