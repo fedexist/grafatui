@@ -1237,13 +1237,46 @@ fn write_centered_label(
     color: Color,
 ) {
     let label_width = label.chars().count() as u16;
-    let half_width = label_width / 2;
-    let max_start = max_x.saturating_sub(label_width);
-    if max_start < min_x {
+    let Some(start_x) = centered_label_start(center, label_width, min_x, max_x) else {
         return;
+    };
+
+    let buf = frame.buffer_mut();
+    for offset in 0..label_width {
+        let Some(cell) = buf.cell((start_x.saturating_add(offset), y)) else {
+            return;
+        };
+        if !is_blank_cell(cell) {
+            return;
+        }
     }
-    let x = center.saturating_sub(half_width).clamp(min_x, max_start);
-    write_label(frame, x, y, label, color, true);
+
+    let style = Style::default().fg(color);
+    for (offset, ch) in label.chars().enumerate() {
+        if let Some(cell) = buf.cell_mut((start_x.saturating_add(offset as u16), y)) {
+            cell.set_char(ch).set_style(style);
+        }
+    }
+}
+
+fn centered_label_start(center: u16, label_width: u16, min_x: u16, max_x: u16) -> Option<u16> {
+    if label_width == 0 || max_x <= min_x {
+        return None;
+    }
+
+    let half_width = label_width / 2;
+    // For even-length labels, bias one cell right so the visual midpoint better matches
+    // the target chart column instead of consistently leaning left.
+    let mut start_x = center.checked_sub(half_width)?;
+    if label_width % 2 == 0 {
+        start_x = start_x.saturating_add(1);
+    }
+    let end_x_exclusive = start_x.saturating_add(label_width);
+    if start_x < min_x || end_x_exclusive > max_x {
+        return None;
+    }
+
+    Some(start_x)
 }
 
 fn write_label(frame: &mut Frame, x: u16, y: u16, label: &str, color: Color, blank_only: bool) {
@@ -1833,6 +1866,18 @@ mod tests {
         assert_eq!(value_to_plot_x(5.0, [0.0, 10.0], plot), Some(15));
         assert_eq!(value_to_plot_x(0.0, [0.0, 10.0], plot), None);
         assert_eq!(value_to_plot_x(10.0, [0.0, 10.0], plot), None);
+    }
+
+    #[test]
+    fn test_centered_label_start_returns_centered_position_when_it_fits() {
+        assert_eq!(centered_label_start(50, 8, 10, 90), Some(47));
+        assert_eq!(centered_label_start(50, 7, 10, 90), Some(47));
+    }
+
+    #[test]
+    fn test_centered_label_start_skips_labels_that_would_be_clamped() {
+        assert_eq!(centered_label_start(12, 8, 10, 90), None);
+        assert_eq!(centered_label_start(88, 8, 10, 90), None);
     }
 
     #[test]
