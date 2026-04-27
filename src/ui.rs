@@ -571,10 +571,8 @@ fn render_graph_panel(
     let chart_area = chunks[0];
     let legend_area = chunks[1];
 
-    // Determine x bounds from range window (unix seconds)
-    // Use app.time_offset to shift the window
-    let now = (chrono::Utc::now().timestamp() - app.time_offset.as_secs() as i64) as f64;
-    let start = now - app.range.as_secs_f64();
+    // Determine x bounds from the last refreshed query window.
+    let (start, now) = app.time_bounds();
 
     // Calculate y_bounds once
     let y_bounds = calculate_y_bounds(p);
