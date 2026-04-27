@@ -732,23 +732,8 @@ fn render_graph_panel(
     y_labels[y_axis_height - 1] =
         Span::styled(format_si(y_bounds[1]), Style::default().fg(theme.text));
 
-    if y_bounds[1] > y_bounds[0] {
-        for grid_val in &autogrid_value_ticks {
-            if let Some(index) = y_axis_label_index(*grid_val, y_bounds, y_axis_height) {
-                y_labels[index] =
-                    Span::styled(format_si(*grid_val), Style::default().fg(Color::DarkGray));
-            }
-        }
-
-        for (th_val, color) in &threshold_labels_info {
-            if let Some(index) = y_axis_label_index(*th_val, y_bounds, y_axis_height) {
-                y_labels[index] = Span::styled(format_si(*th_val), Style::default().fg(*color));
-            }
-        }
-    }
-
     // Evaluate y_max_width before moving y_labels into Chart block
-    let y_max_width = y_labels.iter().map(|s| s.width() as u16).max().unwrap_or(0);
+    let y_max_width = y_label_width(&y_labels, &autogrid_value_ticks, &threshold_labels_info);
 
     let chart = Chart::new(chart_datasets)
         // No block, as we rendered it outside
@@ -852,7 +837,7 @@ fn render_graph_panel(
                     .name("")
                     .marker(ratatui::symbols::Marker::Braille)
                     .graph_type(GraphType::Line)
-                    .style(Style::default().fg(Color::DarkGray))
+                    .style(Style::default().fg(app.autogrid_color))
                     .data(dataset)
             })
             .collect();
@@ -875,7 +860,27 @@ fn render_graph_panel(
         autogrid_chart.render(chart_area, &mut autogrid_buf);
 
         merge_overlay_buffer(frame, &autogrid_buf, plot_bounds);
+        render_autogrid_time_labels(
+            frame,
+            plot_bounds,
+            [start, now],
+            &autogrid_time_ticks,
+            app.autogrid_color,
+        );
     }
+
+    render_intermediate_y_labels(
+        frame,
+        YLabelArea {
+            left: chart_area.left(),
+            width: y_max_width,
+        },
+        plot_bounds,
+        y_bounds,
+        &autogrid_value_ticks,
+        &threshold_labels_info,
+        app.autogrid_color,
+    );
 
     // Render custom legend
     if legend_height > 0 {
@@ -890,6 +895,12 @@ struct PlotBounds {
     right: u16,
     top: u16,
     bottom: u16,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct YLabelArea {
+    left: u16,
+    width: u16,
 }
 
 fn merge_overlay_buffer(
@@ -918,16 +929,6 @@ fn overlay_cell_if_blank(dst: &mut ratatui::buffer::Cell, src: &ratatui::buffer:
     if is_blank_cell(dst) && !is_blank_cell(src) {
         dst.set_symbol(src.symbol()).set_style(src.style());
     }
-}
-
-fn y_axis_label_index(value: f64, y_bounds: [f64; 2], y_axis_height: usize) -> Option<usize> {
-    if value <= y_bounds[0] || value >= y_bounds[1] || y_axis_height < 3 {
-        return None;
-    }
-
-    let ratio = (value - y_bounds[0]) / (y_bounds[1] - y_bounds[0]);
-    let index_from_bottom = (ratio * (y_axis_height - 1) as f64).round() as usize;
-    Some(index_from_bottom.min(y_axis_height - 2).max(1))
 }
 
 fn calculate_value_grid_ticks(y_bounds: [f64; 2], chart_height: u16) -> Vec<f64> {
@@ -1099,6 +1100,163 @@ fn build_autogrid_datasets(
 
 fn interpolate(start: f64, end: f64, index: usize, total: usize) -> f64 {
     start + (end - start) * index as f64 / total as f64
+}
+
+fn y_label_width(
+    axis_labels: &[Span<'_>],
+    autogrid_ticks: &[f64],
+    threshold_labels: &[(f64, Color)],
+) -> u16 {
+    let axis_width = axis_labels
+        .iter()
+        .map(|label| label.width() as u16)
+        .max()
+        .unwrap_or(0);
+    let grid_width = autogrid_ticks
+        .iter()
+        .map(|tick| format_si(*tick).len() as u16)
+        .max()
+        .unwrap_or(0);
+    let threshold_width = threshold_labels
+        .iter()
+        .map(|(tick, _)| format_si(*tick).len() as u16)
+        .max()
+        .unwrap_or(0);
+
+    axis_width.max(grid_width).max(threshold_width)
+}
+
+fn render_intermediate_y_labels(
+    frame: &mut Frame,
+    label_area: YLabelArea,
+    plot: PlotBounds,
+    y_bounds: [f64; 2],
+    autogrid_ticks: &[f64],
+    threshold_labels: &[(f64, Color)],
+    grid_color: Color,
+) {
+    if label_area.width == 0 {
+        return;
+    }
+
+    for tick in autogrid_ticks {
+        if let Some(y) = value_to_y_label_row(*tick, y_bounds, plot) {
+            write_right_aligned_label(
+                frame,
+                label_area.left,
+                y,
+                label_area.width,
+                &format_si(*tick),
+                grid_color,
+            );
+        }
+    }
+
+    for (tick, color) in threshold_labels {
+        if let Some(y) = value_to_y_label_row(*tick, y_bounds, plot) {
+            write_right_aligned_label(
+                frame,
+                label_area.left,
+                y,
+                label_area.width,
+                &format_si(*tick),
+                *color,
+            );
+        }
+    }
+}
+
+fn render_autogrid_time_labels(
+    frame: &mut Frame,
+    plot: PlotBounds,
+    x_bounds: [f64; 2],
+    ticks: &[f64],
+    color: Color,
+) {
+    let y = plot.bottom.saturating_add(1);
+    for tick in ticks {
+        if let Some(x) = value_to_plot_x(*tick, x_bounds, plot) {
+            write_centered_label(
+                frame,
+                x,
+                y,
+                plot.left,
+                plot.right,
+                &format_time(*tick),
+                color,
+            );
+        }
+    }
+}
+
+fn value_to_plot_y(value: f64, y_bounds: [f64; 2], plot: PlotBounds) -> Option<u16> {
+    if value <= y_bounds[0] || value >= y_bounds[1] || y_bounds[1] <= y_bounds[0] {
+        return None;
+    }
+
+    let height = plot.bottom.saturating_sub(plot.top) as f64;
+    let ratio = (value - y_bounds[0]) / (y_bounds[1] - y_bounds[0]);
+    let y_offset = (ratio * height).round() as u16;
+    Some(plot.bottom.saturating_sub(y_offset))
+}
+
+fn value_to_y_label_row(value: f64, y_bounds: [f64; 2], plot: PlotBounds) -> Option<u16> {
+    value_to_plot_y(value, y_bounds, plot)
+}
+
+fn value_to_plot_x(value: f64, x_bounds: [f64; 2], plot: PlotBounds) -> Option<u16> {
+    if value <= x_bounds[0] || value >= x_bounds[1] || x_bounds[1] <= x_bounds[0] {
+        return None;
+    }
+
+    let width = plot.right.saturating_sub(plot.left).saturating_sub(1) as f64;
+    let ratio = (value - x_bounds[0]) / (x_bounds[1] - x_bounds[0]);
+    Some(plot.left.saturating_add((ratio * width).round() as u16))
+}
+
+fn write_right_aligned_label(
+    frame: &mut Frame,
+    left: u16,
+    y: u16,
+    width: u16,
+    label: &str,
+    color: Color,
+) {
+    let label_width = label.chars().count() as u16;
+    let x = left.saturating_add(width.saturating_sub(label_width));
+    write_label(frame, x, y, label, color, false);
+}
+
+fn write_centered_label(
+    frame: &mut Frame,
+    center: u16,
+    y: u16,
+    min_x: u16,
+    max_x: u16,
+    label: &str,
+    color: Color,
+) {
+    let label_width = label.chars().count() as u16;
+    let half_width = label_width / 2;
+    let max_start = max_x.saturating_sub(label_width);
+    if max_start < min_x {
+        return;
+    }
+    let x = center.saturating_sub(half_width).clamp(min_x, max_start);
+    write_label(frame, x, y, label, color, true);
+}
+
+fn write_label(frame: &mut Frame, x: u16, y: u16, label: &str, color: Color, blank_only: bool) {
+    let style = Style::default().fg(color);
+    let buf = frame.buffer_mut();
+    for (offset, ch) in label.chars().enumerate() {
+        let Some(cell) = buf.cell_mut((x.saturating_add(offset as u16), y)) else {
+            continue;
+        };
+        if !blank_only || is_blank_cell(cell) {
+            cell.set_char(ch).set_style(style);
+        }
+    }
 }
 
 fn render_gauge(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
@@ -1632,12 +1790,49 @@ mod tests {
     }
 
     #[test]
-    fn test_y_axis_label_index_matches_chart_orientation() {
-        assert_eq!(y_axis_label_index(10.0, [0.0, 20.0], 11), Some(5));
-        assert_eq!(y_axis_label_index(5.0, [0.0, 20.0], 11), Some(3));
-        assert_eq!(y_axis_label_index(15.0, [0.0, 20.0], 11), Some(8));
-        assert_eq!(y_axis_label_index(0.0, [0.0, 20.0], 11), None);
-        assert_eq!(y_axis_label_index(20.0, [0.0, 20.0], 11), None);
+    fn test_value_to_plot_y_matches_grid_row() {
+        let plot = PlotBounds {
+            left: 0,
+            right: 20,
+            top: 10,
+            bottom: 20,
+        };
+
+        assert_eq!(value_to_plot_y(10.0, [0.0, 20.0], plot), Some(15));
+        assert_eq!(value_to_plot_y(5.0, [0.0, 20.0], plot), Some(17));
+        assert_eq!(value_to_plot_y(15.0, [0.0, 20.0], plot), Some(12));
+        assert_eq!(value_to_plot_y(0.0, [0.0, 20.0], plot), None);
+        assert_eq!(value_to_plot_y(20.0, [0.0, 20.0], plot), None);
+    }
+
+    #[test]
+    fn test_value_to_y_label_row_matches_grid_row() {
+        let plot = PlotBounds {
+            left: 0,
+            right: 20,
+            top: 10,
+            bottom: 20,
+        };
+
+        assert_eq!(value_to_y_label_row(10.0, [0.0, 20.0], plot), Some(15));
+        assert_eq!(value_to_y_label_row(5.0, [0.0, 20.0], plot), Some(17));
+        assert_eq!(value_to_y_label_row(15.0, [0.0, 20.0], plot), Some(12));
+        assert_eq!(value_to_y_label_row(0.0, [0.0, 20.0], plot), None);
+        assert_eq!(value_to_y_label_row(20.0, [0.0, 20.0], plot), None);
+    }
+
+    #[test]
+    fn test_value_to_plot_x_matches_grid_column() {
+        let plot = PlotBounds {
+            left: 10,
+            right: 21,
+            top: 0,
+            bottom: 10,
+        };
+
+        assert_eq!(value_to_plot_x(5.0, [0.0, 10.0], plot), Some(15));
+        assert_eq!(value_to_plot_x(0.0, [0.0, 10.0], plot), None);
+        assert_eq!(value_to_plot_x(10.0, [0.0, 10.0], plot), None);
     }
 
     #[test]

@@ -222,6 +222,8 @@ pub struct AppState {
     pub threshold_marker: String,
     /// Global runtime toggle for automatic grid rendering.
     pub autogrid_enabled: bool,
+    /// Color used for automatic grid lines and labels.
+    pub autogrid_color: Color,
 }
 
 impl AppState {
@@ -270,6 +272,7 @@ impl AppState {
             cursor_x: None,
             threshold_marker,
             autogrid_enabled: true,
+            autogrid_color: Color::DarkGray,
         }
     }
 
