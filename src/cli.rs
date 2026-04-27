@@ -49,6 +49,18 @@ pub struct Args {
     #[arg(long, value_name = "MARKER")]
     pub threshold_marker: Option<String>,
 
+    /// Directory for SVG/PNG exports.
+    #[arg(long, value_name = "DIR")]
+    pub export_dir: Option<PathBuf>,
+
+    /// Image format to export.
+    #[arg(long, value_enum, value_name = "FORMAT")]
+    pub export_format: Option<crate::export::ExportFormat>,
+
+    /// Maximum number of frames to keep in one recording.
+    #[arg(long, value_name = "COUNT")]
+    pub record_max_frames: Option<usize>,
+
     /// Configuration file path (e.g., ./grafatui.toml).
     #[arg(long, value_name = "FILE")]
     pub config: Option<PathBuf>,
