@@ -465,12 +465,9 @@ impl AppState {
                         panel_results.push(SeriesView {
                             name: legend_base,
                             value: latest_val,
-                            points: pts,
+                            points: downsample(pts, 200),
                             visible: true,
                         });
-                        if let Some(last) = panel_results.last_mut() {
-                            last.points = downsample(last.points.clone(), 200);
-                        }
                     }
                 }
                 Err(e) => {

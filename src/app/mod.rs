@@ -16,6 +16,7 @@
 
 mod data;
 mod event_loop;
+mod input;
 mod state;
 
 pub use data::{default_queries, parse_duration};
