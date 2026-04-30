@@ -27,9 +27,9 @@ type InflightQueries = Arc<Mutex<HashMap<String, Vec<QueryWaiter>>>>;
 
 /// A simple Prometheus HTTP client.
 #[derive(Debug, Clone)]
-pub struct PromClient {
+pub(crate) struct PromClient {
     /// Base URL of the Prometheus server.
-    pub base: String,
+    pub(crate) base: String,
     /// HTTP client.
     client: reqwest::Client,
     /// Query cache: expr -> (start, end, step, data)
@@ -39,7 +39,7 @@ pub struct PromClient {
 }
 
 impl PromClient {
-    pub fn new(base: String) -> Self {
+    pub(crate) fn new(base: String) -> Self {
         let http = Client::builder()
             .timeout(Duration::from_secs(10))
             .connect_timeout(Duration::from_secs(5))
@@ -61,7 +61,7 @@ impl PromClient {
         }
     }
 
-    pub fn build_query_range_url(
+    pub(crate) fn build_query_range_url(
         &self,
         expr: &str,
         start: i64,
@@ -80,7 +80,7 @@ impl PromClient {
         )
     }
 
-    pub async fn query_range(
+    pub(crate) async fn query_range(
         &self,
         expr: &str,
         start: i64,
@@ -195,23 +195,23 @@ impl PromClient {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct QueryRangeResponse {
-    pub status: String,
-    pub data: QueryRangeData,
+pub(crate) struct QueryRangeResponse {
+    pub(crate) status: String,
+    pub(crate) data: QueryRangeData,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct QueryRangeData {
+pub(crate) struct QueryRangeData {
     #[serde(rename = "resultType")]
     #[allow(dead_code)]
-    pub result_type: String,
-    pub result: Vec<Series>,
+    pub(crate) result_type: String,
+    pub(crate) result: Vec<Series>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct Series {
-    pub metric: std::collections::HashMap<String, String>,
-    pub values: Vec<(f64, String)>, // (ts, value)
+pub(crate) struct Series {
+    pub(crate) metric: std::collections::HashMap<String, String>,
+    pub(crate) values: Vec<(f64, String)>, // (ts, value)
 }
 
 #[cfg(test)]
