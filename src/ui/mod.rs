@@ -19,5 +19,5 @@ mod format;
 mod layout;
 mod panels;
 
-pub use draw::draw_ui;
-pub use layout::hit_test;
+pub(crate) use draw::draw_ui;
+pub(crate) use layout::hit_test;

@@ -22,7 +22,7 @@ use crossterm::event::{self, Event};
 use ratatui::Terminal;
 use std::time::Duration;
 
-pub async fn run_app<B: ratatui::backend::Backend>(
+pub(crate) async fn run_app<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     app: &mut AppState,
     _tick_rate: Duration,

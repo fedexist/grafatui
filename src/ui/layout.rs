@@ -189,7 +189,7 @@ pub(crate) fn calculate_two_column_layout_subset(
 /// # Returns
 ///
 /// An `Option` containing a tuple of `(panel_index, panel_rect)` if a panel was hit.
-pub fn hit_test(app: &AppState, area: Rect, x: u16, y: u16) -> Option<(usize, Rect)> {
+pub(crate) fn hit_test(app: &AppState, area: Rect, x: u16, y: u16) -> Option<(usize, Rect)> {
     // Replicate main layout
     let chunks = Layout::default()
         .direction(Direction::Vertical)
