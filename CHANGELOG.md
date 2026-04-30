@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.1.6] - 2026-04-30
+
+### ⛰️  Features
+
+- Implement panel navigation via PgUp/PgDn and refactor selection logic into dedicated methods ([e5c8546](https://github.com/fedexist/grafatui/commit/e5c854687d7afdcff52cdd1c32e766ed5d3900da))
+
+### 📚 Documentation
+
+- Update roadmap to v0.1.5 and promote threshold and field bounds features to completed status ([b2e6395](https://github.com/fedexist/grafatui/commit/b2e639564eea3cd936d6d404809d6cc3eefff70e))
+
+### ⚙️ Miscellaneous Tasks
+
+- Update release-assets.yml ([04d5cad](https://github.com/fedexist/grafatui/commit/04d5caddf51fab87d5703f2e6860bc82cc8556d6))
+
+
 ## [0.1.5] - 2026-04-24
 
 ### ⛰️  Features
