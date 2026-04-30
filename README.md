@@ -207,7 +207,7 @@ grafatui --config examples/demo/grafatui.toml
 | `[` / `]` | Pan left / right (time) |
 | `0` | Reset to live mode |
 | `↑` / `↓` or `k` / `j` | Select previous/next panel |
-| `PgUp` / `PgDn` | Scroll vertically |
+| `PgUp` / `PgDn` | Scroll vertically (normal) / select previous or next panel (fullscreen) |
 | `Home` / `End` | Jump to top / bottom |
 | `y` | Toggle Y-axis mode |
 | `g` | Toggle autogrid guide lines |
