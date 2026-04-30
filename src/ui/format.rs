@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-use crate::app::{PanelState, YAxisMode};
 use ratatui::style::Color;
 
 /// Maps a normalized value (0.0-1.0) to a heatmap color (blue -> green -> yellow -> red)
@@ -31,51 +30,6 @@ pub(crate) fn value_to_heatmap_color(normalized: f64) -> Color {
         // Red/Magenta for hot values
         Color::Red
     }
-}
-
-pub(crate) fn calculate_y_bounds(p: &PanelState) -> [f64; 2] {
-    let mut min = f64::MAX;
-    let mut max = f64::MIN;
-    let mut has_data = false;
-
-    for s in &p.series {
-        if !s.visible {
-            continue;
-        }
-        for &(_, v) in &s.points {
-            if !v.is_finite() {
-                continue;
-            }
-            if v < min {
-                min = v;
-            }
-            if v > max {
-                max = v;
-            }
-            has_data = true;
-        }
-    }
-
-    if !has_data {
-        return [0.0, 1.0];
-    }
-
-    if min == max {
-        min -= 1.0;
-        max += 1.0;
-    }
-
-    if p.y_axis_mode == YAxisMode::ZeroBased {
-        if min > 0.0 {
-            min = 0.0;
-        } else if max < 0.0 {
-            max = 0.0;
-        }
-    }
-
-    // Add some padding
-    let range = max - min;
-    [min - range * 0.05, max + range * 0.05]
 }
 
 pub(crate) fn format_si(val: f64) -> String {
@@ -183,89 +137,6 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{PanelState, SeriesView, YAxisMode};
-
-    fn create_test_panel() -> PanelState {
-        PanelState {
-            title: "test".to_string(),
-            exprs: vec![],
-            legends: vec![],
-            series: vec![],
-            last_error: None,
-            last_url: None,
-            last_samples: 0,
-            grid: None,
-            y_axis_mode: YAxisMode::Auto,
-            panel_type: crate::app::PanelType::Graph,
-            thresholds: None,
-            min: None,
-            max: None,
-            autogrid: None,
-        }
-    }
-
-    #[test]
-    fn test_calculate_y_bounds_basic() {
-        let mut p = create_test_panel();
-        p.series.push(SeriesView {
-            name: "test".to_string(),
-            value: None,
-            points: vec![(0.0, 10.0), (1.0, 20.0)],
-            visible: true,
-        });
-
-        let bounds = calculate_y_bounds(&p);
-        assert!(bounds[0] < 10.0);
-        assert!(bounds[1] > 20.0);
-    }
-
-    #[test]
-    fn test_calculate_y_bounds_nan() {
-        let mut p = create_test_panel();
-        p.series.push(SeriesView {
-            name: "test".to_string(),
-            value: None,
-            points: vec![(0.0, 10.0), (1.0, f64::NAN), (2.0, 20.0)],
-            visible: true,
-        });
-
-        let bounds = calculate_y_bounds(&p);
-        assert!(bounds[0] < 10.0); // Should ignore NAN
-        assert!(bounds[1] > 20.0);
-    }
-
-    #[test]
-    fn test_calculate_y_bounds_infinity() {
-        let mut p = create_test_panel();
-        p.series.push(SeriesView {
-            name: "test".to_string(),
-            value: None,
-            points: vec![(0.0, 10.0), (1.0, f64::INFINITY), (2.0, 20.0)],
-            visible: true,
-        });
-
-        let bounds = calculate_y_bounds(&p);
-        assert!(bounds[0] < 10.0); // Should ignore INFINITY
-        assert!(bounds[1] > 20.0);
-    }
-
-    #[test]
-    fn test_calculate_y_bounds_zero_based() {
-        let mut p = create_test_panel();
-        p.y_axis_mode = YAxisMode::ZeroBased;
-        p.series.push(SeriesView {
-            name: "test".to_string(),
-            value: None,
-            points: vec![(0.0, 10.0), (1.0, 20.0)],
-            visible: true,
-        });
-
-        let bounds = calculate_y_bounds(&p);
-        // Range is 0.0 to 20.0. Padding is 5% of 20.0 = 1.0.
-        // So min should be 0.0 - 1.0 = -1.0.
-        assert_eq!(bounds[0], -1.0);
-        assert!(bounds[1] > 20.0);
-    }
 
     #[test]
     fn test_format_axis_time_uses_time_for_short_ranges() {
