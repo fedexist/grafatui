@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### ⛰️  Features
 
 - Implement panel navigation via PgUp/PgDn and refactor selection logic into dedicated methods ([e5c8546](https://github.com/fedexist/grafatui/commit/e5c854687d7afdcff52cdd1c32e766ed5d3900da))
+- Implement adaptive time axis formatting based on range duration ([c189d77](https://github.com/fedexist/grafatui/commit/c189d77d8ab070354b750de6ace8eee9821d21bb))
+- Replace label rendering logic with improved centered placement calculation and add tests ([41aa507](https://github.com/fedexist/grafatui/commit/41aa507b7b492cf24a91b09bf2b0225e2bc85933))
+- Add configurable autogrid color and improve grid label rendering logic ([6b6987c](https://github.com/fedexist/grafatui/commit/6b6987c1e5404c07bf1ddd3a8d23c4094db371b0))
+- Implement per-panel autogrid toggle and global runtime override ([6d517d7](https://github.com/fedexist/grafatui/commit/6d517d760a15a5934bd821d189cb9b211ba125a6))
+
+### 🐛 Bug Fixes
+
+- Pin UI time bounds to last refresh and optimize render loop for event-driven updates ([d248341](https://github.com/fedexist/grafatui/commit/d2483415eacd555750875c52973da800157affb1))
+
+### 🚜 Refactor
+
+- Update release trigger to created and improve tag resolution logic for asset and homebrew updates ([2982af8](https://github.com/fedexist/grafatui/commit/2982af8268fc88a4d4f5020ea92cc31609f13fdd))
 
 ### 📚 Documentation
 
@@ -16,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### ⚙️ Miscellaneous Tasks
 
+- Trigger release workflow on published event and unify tag resolution using RELEASE_TAG env variable ([b057097](https://github.com/fedexist/grafatui/commit/b05709736eac31a0194da0797956d6a525de09bd))
 - Update release-assets.yml ([04d5cad](https://github.com/fedexist/grafatui/commit/04d5caddf51fab87d5703f2e6860bc82cc8556d6))
 
 
