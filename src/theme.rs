@@ -214,6 +214,10 @@ pub fn parse_grafana_color(c: &str) -> Color {
         "orange" | "dark-orange" => Color::Rgb(255, 165, 0),
         "light-orange" => Color::Rgb(255, 200, 100),
         "cyan" => Color::Cyan,
+        "gray" | "grey" => Color::Gray,
+        "dark-gray" | "dark-grey" => Color::DarkGray,
+        "white" => Color::White,
+        "black" => Color::Black,
         _ => Color::Reset,
     }
 }

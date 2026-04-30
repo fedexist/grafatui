@@ -142,6 +142,7 @@ grafatui [OPTIONS]
 | `--var <KEY=VALUE>` | Override dashboard variables | - |
 | `--theme <NAME>` | UI theme | `default` |
 | `--threshold-marker <MARKER>` | Marker for threshold lines (`dashed`, `dot`, `block`, `quadrant`, etc.) | `dashed` |
+| `--autogrid-color <COLOR>` | Color for autogrid lines and labels (`gray`, `dark-gray`, `#666666`, etc.) | `dark-gray` |
 | `--refresh-rate <MS>` | Data fetch interval (milliseconds) | `1000` |
 | `--config <FILE>` | Custom config file path | - |
 
@@ -157,6 +158,8 @@ refresh_rate = 1000
 time_range = "1h"
 theme = "dracula"
 threshold_marker = "dashed"
+autogrid = true
+autogrid_color = "dark-gray"
 grafana_json = "~/.config/grafatui/my-dashboard.json"
 ```
 
@@ -207,6 +210,7 @@ grafatui --config examples/demo/grafatui.toml
 | `PgUp` / `PgDn` | Scroll vertically (normal) / select previous or next panel (fullscreen) |
 | `Home` / `End` | Jump to top / bottom |
 | `y` | Toggle Y-axis mode |
+| `g` | Toggle autogrid guide lines |
 | `1`..`9` | Toggle series visibility |
 | `f` / `Enter` | Fullscreen mode |
 | `v` | Value inspection mode |
