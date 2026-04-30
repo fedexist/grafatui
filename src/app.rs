@@ -308,6 +308,22 @@ impl AppState {
         }
     }
 
+    /// Selects the previous panel, keeping the dashboard scrolled to it.
+    fn select_previous_panel(&mut self) {
+        if self.selected_panel > 0 {
+            self.selected_panel -= 1;
+            self.scroll_to_selected_panel();
+        }
+    }
+
+    /// Selects the next panel, keeping the dashboard scrolled to it.
+    fn select_next_panel(&mut self) {
+        if self.selected_panel < self.panels.len().saturating_sub(1) {
+            self.selected_panel += 1;
+            self.scroll_to_selected_panel();
+        }
+    }
+
     /// Pan right: shift the time window forward (toward "now").
     pub fn pan_right(&mut self) {
         // Shift by 25% of the current range
@@ -629,6 +645,37 @@ mod tests {
         app.move_cursor(-1);
         assert_eq!(app.cursor_x, Some(1_699_996_400.0));
     }
+
+    #[test]
+    fn test_select_panel_navigation_is_bounded() {
+        let prom = prom::PromClient::new("http://localhost:9090".to_string());
+        let mut app = AppState::new(
+            prom,
+            Duration::from_secs(3600),
+            Duration::from_secs(60),
+            Duration::from_millis(1000),
+            "Test".to_string(),
+            default_queries(vec![
+                "up".to_string(),
+                "process_cpu_seconds_total".to_string(),
+            ]),
+            0,
+            Theme::default(),
+            "dashed".to_string(),
+        );
+
+        app.select_previous_panel();
+        assert_eq!(app.selected_panel, 0);
+
+        app.select_next_panel();
+        assert_eq!(app.selected_panel, 1);
+
+        app.select_next_panel();
+        assert_eq!(app.selected_panel, 1);
+
+        app.select_previous_panel();
+        assert_eq!(app.selected_panel, 0);
+    }
 }
 
 pub fn default_queries(mut provided: Vec<String>) -> Vec<PanelState> {
@@ -761,6 +808,12 @@ where
                             KeyCode::Char('r') | KeyCode::Char('R') => {
                                 app.refresh().await?;
                             }
+                            KeyCode::PageUp => {
+                                app.select_previous_panel();
+                            }
+                            KeyCode::PageDown => {
+                                app.select_next_panel();
+                            }
                             // Allow some navigation/interaction in fullscreen too?
                             // For now, just basic ones.
                             KeyCode::Char('+') => {
@@ -839,18 +892,10 @@ where
                                 app.refresh().await?;
                             }
                             KeyCode::Up | KeyCode::Char('k') => {
-                                if app.selected_panel > 0 {
-                                    app.selected_panel -= 1;
-                                    // Auto-scroll to ensure selected panel is visible
-                                    app.scroll_to_selected_panel();
-                                }
+                                app.select_previous_panel();
                             }
                             KeyCode::Down | KeyCode::Char('j') => {
-                                if app.selected_panel < app.panels.len().saturating_sub(1) {
-                                    app.selected_panel += 1;
-                                    // Auto-scroll to ensure selected panel is visible
-                                    app.scroll_to_selected_panel();
-                                }
+                                app.select_next_panel();
                             }
                             KeyCode::PageUp => {
                                 app.vertical_scroll = app.vertical_scroll.saturating_sub(10);
