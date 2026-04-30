@@ -25,7 +25,7 @@ pub struct Args {
     #[arg(long, value_name = "FILE")]
     pub grafana_json: Option<PathBuf>,
 
-    /// UI tick rate in milliseconds (screen refresh cadence)
+    /// Legacy UI tick rate in milliseconds; redraws now happen on input and data refresh
     #[arg(long, default_value = "250")]
     pub tick_rate: u64,
 

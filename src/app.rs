@@ -23,7 +23,6 @@ use futures::StreamExt;
 use ratatui::{Terminal, style::Color};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use tokio::time::sleep;
 
 /// Represents the state of a single dashboard panel.
 #[derive(Debug, Clone)]
@@ -192,6 +191,8 @@ pub struct AppState {
     pub panels: Vec<PanelState>,
     /// Timestamp of the last successful refresh.
     pub last_refresh: Instant,
+    /// Query end timestamp used by the currently rendered data.
+    pub view_end_ts: i64,
     /// Vertical scroll offset.
     pub vertical_scroll: usize,
     /// Dashboard title.
@@ -251,6 +252,7 @@ impl AppState {
             refresh_every,
             panels,
             last_refresh: Instant::now() - refresh_every,
+            view_end_ts: chrono::Utc::now().timestamp(),
             vertical_scroll: 0,
             title,
             debug_bar: false,
@@ -343,10 +345,21 @@ impl AppState {
         self.time_offset.as_secs() == 0
     }
 
+    /// Returns the displayed time window bounds.
+    pub fn time_bounds(&self) -> (f64, f64) {
+        let end_ts = self.view_end_ts as f64;
+        (end_ts - self.range.as_secs_f64(), end_ts)
+    }
+
+    /// Moves the inspection cursor to the center of the displayed time window.
+    pub fn center_cursor(&mut self) {
+        let (start_ts, end_ts) = self.time_bounds();
+        self.cursor_x = Some((start_ts + end_ts) / 2.0);
+    }
+
     /// Move cursor left/right by one step.
     pub fn move_cursor(&mut self, direction: i32) {
-        let end_ts = (chrono::Utc::now().timestamp() - self.time_offset.as_secs() as i64) as f64;
-        let start_ts = end_ts - self.range.as_secs_f64();
+        let (start_ts, end_ts) = self.time_bounds();
 
         if let Some(current_x) = self.cursor_x {
             let step_secs = self.step.as_secs_f64();
@@ -380,6 +393,7 @@ impl AppState {
             p.last_error = err;
         }
 
+        self.view_end_ts = end_ts;
         self.last_refresh = Instant::now();
         Ok(())
     }
@@ -510,6 +524,20 @@ fn downsample(points: Vec<(f64, f64)>, max_points: usize) -> Vec<(f64, f64)> {
 mod tests {
     use super::*;
 
+    fn create_test_app() -> AppState {
+        AppState::new(
+            prom::PromClient::new("http://localhost:9090".to_string()),
+            Duration::from_secs(3600),
+            Duration::from_secs(60),
+            Duration::from_millis(1000),
+            "Test".to_string(),
+            vec![],
+            0,
+            Theme::default(),
+            "dashed".to_string(),
+        )
+    }
+
     #[test]
     fn test_expand_expr_rate_interval() {
         let vars = HashMap::new();
@@ -577,18 +605,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty_panels() {
-        let prom = prom::PromClient::new("http://localhost:9090".to_string());
-        let mut app = AppState::new(
-            prom,
-            Duration::from_secs(3600),
-            Duration::from_secs(60),
-            Duration::from_millis(1000),
-            "Test".to_string(),
-            vec![], // Empty panels
-            0,
-            Theme::default(),
-            "dashed".to_string(),
-        );
+        let mut app = create_test_app();
 
         // Should not panic on refresh
         assert!(app.refresh().await.is_ok());
@@ -599,6 +616,34 @@ mod tests {
 
         // Check cursor movement
         app.move_cursor(1);
+    }
+
+    #[test]
+    fn test_time_bounds_use_refreshed_window() {
+        let mut app = create_test_app();
+        app.view_end_ts = 1_700_000_000;
+
+        assert_eq!(app.time_bounds(), (1_699_996_400.0, 1_700_000_000.0));
+
+        app.time_offset = Duration::from_secs(300);
+        assert_eq!(app.time_bounds(), (1_699_996_400.0, 1_700_000_000.0));
+    }
+
+    #[test]
+    fn test_center_and_move_cursor_use_refreshed_window() {
+        let mut app = create_test_app();
+        app.view_end_ts = 1_700_000_000;
+
+        app.center_cursor();
+        assert_eq!(app.cursor_x, Some(1_699_998_200.0));
+
+        app.cursor_x = Some(1_700_000_000.0);
+        app.move_cursor(1);
+        assert_eq!(app.cursor_x, Some(1_700_000_000.0));
+
+        app.cursor_x = Some(1_699_996_400.0);
+        app.move_cursor(-1);
+        assert_eq!(app.cursor_x, Some(1_699_996_400.0));
     }
 
     #[test]
@@ -668,16 +713,20 @@ pub fn parse_duration(s: &str) -> Result<Duration> {
 pub async fn run_app<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     app: &mut AppState,
-    tick_rate: Duration,
+    _tick_rate: Duration,
 ) -> Result<()>
 where
     <B as ratatui::backend::Backend>::Error: Send + Sync + 'static,
 {
-    loop {
-        terminal.draw(|f| ui::draw_ui(f, app))?;
+    let mut needs_draw = true;
 
-        let timeout = tick_rate.saturating_sub(app.last_refresh.elapsed().min(tick_rate));
-        let should_refresh = app.last_refresh.elapsed() >= app.refresh_every;
+    loop {
+        if needs_draw {
+            terminal.draw(|f| ui::draw_ui(f, app))?;
+            needs_draw = false;
+        }
+
+        let timeout = app.refresh_every.saturating_sub(app.last_refresh.elapsed());
 
         if event::poll(timeout)? {
             match event::read()? {
@@ -753,12 +802,7 @@ where
                             }
                             KeyCode::Char('v') => {
                                 app.mode = AppMode::FullscreenInspect;
-                                // Initialize cursor
-                                let end_ts = (chrono::Utc::now().timestamp()
-                                    - app.time_offset.as_secs() as i64)
-                                    as f64;
-                                let start_ts = end_ts - app.range.as_secs_f64();
-                                app.cursor_x = Some((start_ts + end_ts) / 2.0);
+                                app.center_cursor();
                             }
                             KeyCode::Char('q') => return Ok(()),
                             KeyCode::Char('r') | KeyCode::Char('R') => {
@@ -841,11 +885,7 @@ where
                             }
                             KeyCode::Char('v') => {
                                 app.mode = AppMode::Inspect;
-                                let end_ts = (chrono::Utc::now().timestamp()
-                                    - app.time_offset.as_secs() as i64)
-                                    as f64;
-                                let start_ts = end_ts - app.range.as_secs_f64();
-                                app.cursor_x = Some((start_ts + end_ts) / 2.0);
+                                app.center_cursor();
                             }
                             KeyCode::Char('q') => return Ok(()),
                             KeyCode::Char('r') | KeyCode::Char('R') => {
@@ -974,10 +1014,7 @@ where
                                             (mouse.column.saturating_sub(panel_rect.x + 1)) as f64;
                                         let fraction = (relative_x / chart_width).clamp(0.0, 1.0);
 
-                                        let end_ts = (chrono::Utc::now().timestamp()
-                                            - app.time_offset.as_secs() as i64)
-                                            as f64;
-                                        let start_ts = end_ts - app.range.as_secs_f64();
+                                        let (start_ts, _) = app.time_bounds();
 
                                         app.cursor_x =
                                             Some(start_ts + fraction * app.range.as_secs_f64());
@@ -997,12 +1034,13 @@ where
                 },
                 _ => {}
             }
+
+            needs_draw = true;
         }
 
-        if should_refresh {
+        if app.last_refresh.elapsed() >= app.refresh_every {
             app.refresh().await?;
+            needs_draw = true;
         }
-
-        sleep(Duration::from_millis(10)).await;
     }
 }
