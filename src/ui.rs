@@ -712,9 +712,16 @@ fn render_graph_panel(
         );
     }
 
+    let time_range_secs = now - start;
     let x_labels = vec![
-        Span::styled(format_time(start), Style::default().fg(theme.text)),
-        Span::styled(format_time(now), Style::default().fg(theme.text)),
+        Span::styled(
+            format_axis_time(start, time_range_secs),
+            Style::default().fg(theme.text),
+        ),
+        Span::styled(
+            format_axis_time(now, time_range_secs),
+            Style::default().fg(theme.text),
+        ),
     ];
 
     let chart_bottom = chart_area.bottom().saturating_sub(2); // x-axis occupies last rows
@@ -865,6 +872,7 @@ fn render_graph_panel(
             plot_bounds,
             [start, now],
             &autogrid_time_ticks,
+            time_range_secs,
             app.autogrid_color,
         );
     }
@@ -1171,6 +1179,7 @@ fn render_autogrid_time_labels(
     plot: PlotBounds,
     x_bounds: [f64; 2],
     ticks: &[f64],
+    range_secs: f64,
     color: Color,
 ) {
     let y = plot.bottom.saturating_add(1);
@@ -1182,7 +1191,7 @@ fn render_autogrid_time_labels(
                 y,
                 plot.left,
                 plot.right,
-                &format_time(*tick),
+                &format_axis_time(*tick, range_secs),
                 color,
             );
         }
@@ -1643,6 +1652,33 @@ fn format_time(ts: f64) -> String {
     }
 }
 
+fn format_axis_time(ts: f64, range_secs: f64) -> String {
+    use chrono::{TimeZone, Timelike};
+
+    const DAY: f64 = 24.0 * 60.0 * 60.0;
+    if range_secs < DAY {
+        return format_time(ts);
+    }
+
+    let Some(dt) = chrono::Utc.timestamp_opt(ts as i64, 0).single() else {
+        return format!("{}", ts);
+    };
+
+    if range_secs < 7.0 * DAY {
+        if dt.hour() == 0 && dt.minute() == 0 && dt.second() == 0 {
+            dt.format("%b %d").to_string()
+        } else {
+            dt.format("%b %d %Hh").to_string()
+        }
+    } else if range_secs < 90.0 * DAY {
+        dt.format("%b %d").to_string()
+    } else if range_secs < 730.0 * DAY {
+        dt.format("%Y-%m").to_string()
+    } else {
+        dt.format("%Y").to_string()
+    }
+}
+
 /// Generate a color from a string using hash-based approach.
 /// Uses HSL color space to ensure visually distinct, vibrant colors.
 fn get_hash_color(name: &str) -> Color {
@@ -1932,6 +1968,61 @@ mod tests {
             ticks,
             vec![43_380.0, 43_440.0, 43_500.0, 43_560.0, 43_620.0]
         );
+    }
+
+    #[test]
+    fn test_format_axis_time_uses_time_for_short_ranges() {
+        use chrono::TimeZone;
+
+        let ts = chrono::Utc
+            .with_ymd_and_hms(2026, 4, 30, 12, 34, 56)
+            .single()
+            .unwrap()
+            .timestamp() as f64;
+
+        assert_eq!(format_axis_time(ts, 60.0 * 60.0), "12:34:56");
+    }
+
+    #[test]
+    fn test_format_axis_time_uses_date_for_multi_day_midnight_ticks() {
+        use chrono::TimeZone;
+
+        let ts = chrono::Utc
+            .with_ymd_and_hms(2026, 4, 30, 0, 0, 0)
+            .single()
+            .unwrap()
+            .timestamp() as f64;
+
+        assert_eq!(format_axis_time(ts, 2.0 * 24.0 * 60.0 * 60.0), "Apr 30");
+    }
+
+    #[test]
+    fn test_format_axis_time_keeps_hour_for_multi_day_non_midnight_ticks() {
+        use chrono::TimeZone;
+
+        let ts = chrono::Utc
+            .with_ymd_and_hms(2026, 4, 30, 12, 0, 0)
+            .single()
+            .unwrap()
+            .timestamp() as f64;
+
+        assert_eq!(format_axis_time(ts, 2.0 * 24.0 * 60.0 * 60.0), "Apr 30 12h");
+    }
+
+    #[test]
+    fn test_format_axis_time_scales_to_wider_ranges() {
+        use chrono::TimeZone;
+
+        let ts = chrono::Utc
+            .with_ymd_and_hms(2026, 4, 30, 12, 0, 0)
+            .single()
+            .unwrap()
+            .timestamp() as f64;
+        let day = 24.0 * 60.0 * 60.0;
+
+        assert_eq!(format_axis_time(ts, 14.0 * day), "Apr 30");
+        assert_eq!(format_axis_time(ts, 120.0 * day), "2026-04");
+        assert_eq!(format_axis_time(ts, 800.0 * day), "2026");
     }
 
     #[test]
