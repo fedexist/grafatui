@@ -20,38 +20,38 @@ use std::collections::HashMap;
 
 /// Result of importing a Grafana dashboard.
 #[derive(Debug, Clone, Default)]
-pub struct DashboardImport {
+pub(crate) struct DashboardImport {
     /// Dashboard title.
-    pub title: String,
+    pub(crate) title: String,
     /// List of panels extracted.
-    pub queries: Vec<QueryPanel>,
+    pub(crate) queries: Vec<QueryPanel>,
     /// Variables extracted from `templating.list`.
-    pub vars: HashMap<String, String>,
+    pub(crate) vars: HashMap<String, String>,
     /// Number of panels that were skipped (unsupported types).
-    pub skipped_panels: usize,
+    pub(crate) skipped_panels: usize,
 }
 
 /// A single panel extracted from Grafana.
 #[derive(Debug, Clone)]
-pub struct QueryPanel {
-    pub title: String,
-    pub exprs: Vec<String>,
-    pub legends: Vec<Option<String>>, // Parallel to exprs
-    pub grid: Option<GridPos>,
-    pub panel_type: crate::app::PanelType,
-    pub thresholds: Option<crate::app::Thresholds>,
-    pub min: Option<f64>,
-    pub max: Option<f64>,
-    pub autogrid: Option<bool>,
+pub(crate) struct QueryPanel {
+    pub(crate) title: String,
+    pub(crate) exprs: Vec<String>,
+    pub(crate) legends: Vec<Option<String>>, // Parallel to exprs
+    pub(crate) grid: Option<GridPos>,
+    pub(crate) panel_type: crate::app::PanelType,
+    pub(crate) thresholds: Option<crate::app::Thresholds>,
+    pub(crate) min: Option<f64>,
+    pub(crate) max: Option<f64>,
+    pub(crate) autogrid: Option<bool>,
 }
 
 /// Grid position extracted from Grafana.
 #[derive(Debug, Clone, Copy)]
-pub struct GridPos {
-    pub x: i32,
-    pub y: i32,
-    pub w: i32,
-    pub h: i32,
+pub(crate) struct GridPos {
+    pub(crate) x: i32,
+    pub(crate) y: i32,
+    pub(crate) w: i32,
+    pub(crate) h: i32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -148,7 +148,7 @@ struct RawGridPos {
     h: i32,
 }
 
-pub fn load_grafana_dashboard(path: &std::path::Path) -> Result<DashboardImport> {
+pub(crate) fn load_grafana_dashboard(path: &std::path::Path) -> Result<DashboardImport> {
     let data = std::fs::read_to_string(path)
         .with_context(|| format!("reading grafana dashboard: {}", path.display()))?;
     let raw: RawDashboard =

@@ -23,7 +23,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 
-pub fn draw_ui(frame: &mut Frame, app: &AppState) {
+pub(crate) fn draw_ui(frame: &mut Frame, app: &AppState) {
     let size = frame.area();
 
     // Layout: title bar, charts area, footer

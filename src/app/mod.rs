@@ -19,10 +19,10 @@ mod event_loop;
 mod input;
 mod state;
 
-pub use data::{default_queries, parse_duration};
-pub use event_loop::run_app;
+pub(crate) use data::{default_queries, parse_duration};
+pub(crate) use event_loop::run_app;
 #[allow(unused_imports)]
-pub use state::{
+pub(crate) use state::{
     AppMode, AppState, GridUnit, PanelState, PanelType, SeriesView, ThresholdMode, ThresholdStep,
     Thresholds, YAxisMode,
 };

@@ -65,7 +65,7 @@ pub(crate) fn downsample(points: Vec<(f64, f64)>, max_points: usize) -> Vec<(f64
         .collect()
 }
 
-pub fn default_queries(mut provided: Vec<String>) -> Vec<PanelState> {
+pub(crate) fn default_queries(mut provided: Vec<String>) -> Vec<PanelState> {
     if provided.is_empty() {
         provided = vec![
             r#"sum(rate(http_requests_total{job!="prometheus"}[5m]))"#.to_string(),
@@ -94,7 +94,7 @@ pub fn default_queries(mut provided: Vec<String>) -> Vec<PanelState> {
         .collect()
 }
 
-pub fn parse_duration(s: &str) -> Result<Duration> {
+pub(crate) fn parse_duration(s: &str) -> Result<Duration> {
     Ok(humantime::parse_duration(s)?)
 }
 

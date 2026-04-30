@@ -22,21 +22,21 @@ use std::fs;
 use std::path::PathBuf;
 
 #[derive(Debug, Deserialize, Default, Clone)]
-pub struct Config {
-    pub prometheus_url: Option<String>,
-    pub refresh_rate: Option<u64>,
-    pub time_range: Option<String>,
-    pub step: Option<String>,
-    pub theme: Option<String>,
-    pub grafana_json: Option<PathBuf>,
-    pub threshold_marker: Option<String>,
-    pub autogrid: Option<bool>,
-    pub autogrid_color: Option<String>,
-    pub vars: Option<HashMap<String, String>>,
+pub(crate) struct Config {
+    pub(crate) prometheus_url: Option<String>,
+    pub(crate) refresh_rate: Option<u64>,
+    pub(crate) time_range: Option<String>,
+    pub(crate) step: Option<String>,
+    pub(crate) theme: Option<String>,
+    pub(crate) grafana_json: Option<PathBuf>,
+    pub(crate) threshold_marker: Option<String>,
+    pub(crate) autogrid: Option<bool>,
+    pub(crate) autogrid_color: Option<String>,
+    pub(crate) vars: Option<HashMap<String, String>>,
 }
 
 impl Config {
-    pub fn load(cli_path: Option<PathBuf>) -> Result<Self> {
+    pub(crate) fn load(cli_path: Option<PathBuf>) -> Result<Self> {
         let config_path = cli_path
             .map(|p| expand_path(&p))
             .or_else(Self::get_config_path);
@@ -72,7 +72,7 @@ impl Config {
 }
 
 /// Expands a path starting with `~` to the user's home directory.
-pub fn expand_path(path: &std::path::Path) -> PathBuf {
+pub(crate) fn expand_path(path: &std::path::Path) -> PathBuf {
     let path_str = path.to_string_lossy();
     if path_str.starts_with("~") {
         if let Some(dirs) = directories::UserDirs::new() {

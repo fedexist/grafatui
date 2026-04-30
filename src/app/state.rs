@@ -25,40 +25,40 @@ use std::time::{Duration, Instant};
 
 /// Represents the state of a single dashboard panel.
 #[derive(Debug, Clone)]
-pub struct PanelState {
+pub(crate) struct PanelState {
     /// Panel title.
-    pub title: String,
+    pub(crate) title: String,
     /// PromQL expressions to query.
-    pub exprs: Vec<String>,
+    pub(crate) exprs: Vec<String>,
     /// Optional legend formats (e.g. "{{instance}}"). Parallel to exprs.
-    pub legends: Vec<Option<String>>,
+    pub(crate) legends: Vec<Option<String>>,
     /// Current time-series data for this panel.
-    pub series: Vec<SeriesView>,
+    pub(crate) series: Vec<SeriesView>,
     /// Last error message, if any.
-    pub last_error: Option<String>,
+    pub(crate) last_error: Option<String>,
     /// Last query URL used (for debugging).
-    pub last_url: Option<String>,
+    pub(crate) last_url: Option<String>,
     /// Total number of samples in the current view.
-    pub last_samples: usize,
+    pub(crate) last_samples: usize,
     /// Grid layout position (if imported from Grafana).
-    pub grid: Option<GridUnit>,
+    pub(crate) grid: Option<GridUnit>,
     /// Y-axis scaling mode.
-    pub y_axis_mode: YAxisMode,
+    pub(crate) y_axis_mode: YAxisMode,
     /// Visualization type.
-    pub panel_type: PanelType,
+    pub(crate) panel_type: PanelType,
     /// Threshold configuration.
-    pub thresholds: Option<Thresholds>,
+    pub(crate) thresholds: Option<Thresholds>,
     /// Optional minimum value for gauge and thresholds.
-    pub min: Option<f64>,
+    pub(crate) min: Option<f64>,
     /// Optional maximum value for gauge and thresholds.
-    pub max: Option<f64>,
+    pub(crate) max: Option<f64>,
     /// Whether to render automatic grid lines for this panel.
-    pub autogrid: Option<bool>,
+    pub(crate) autogrid: Option<bool>,
 }
 
 /// Visualization types supported by Grafatui.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum PanelType {
+pub(crate) enum PanelType {
     Graph,
     Gauge,
     BarGauge,
@@ -70,7 +70,7 @@ pub enum PanelType {
 
 /// Modes for Y-axis scaling.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum YAxisMode {
+pub(crate) enum YAxisMode {
     /// Auto-scale based on min/max of data.
     Auto,
     /// Always include zero.
@@ -79,47 +79,47 @@ pub enum YAxisMode {
 
 /// Represents a single time-series line in a chart.
 #[derive(Debug, Clone)]
-pub struct SeriesView {
+pub(crate) struct SeriesView {
     /// Stable name of the series (used for coloring).
-    pub name: String,
+    pub(crate) name: String,
     /// Latest value of the series (used for display).
-    pub value: Option<f64>,
+    pub(crate) value: Option<f64>,
     /// Data points (timestamp, value).
-    pub points: Vec<(f64, f64)>,
+    pub(crate) points: Vec<(f64, f64)>,
     /// Whether the series is visible in the chart.
-    pub visible: bool,
+    pub(crate) visible: bool,
 }
 
 /// Grid positioning unit (Grafana style).
 #[derive(Debug, Clone, Copy)]
-pub struct GridUnit {
-    pub x: i32,
-    pub y: i32,
-    pub w: i32,
-    pub h: i32,
+pub(crate) struct GridUnit {
+    pub(crate) x: i32,
+    pub(crate) y: i32,
+    pub(crate) w: i32,
+    pub(crate) h: i32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ThresholdMode {
+pub(crate) enum ThresholdMode {
     Absolute,
     Percentage,
 }
 
 #[derive(Debug, Clone)]
-pub struct ThresholdStep {
-    pub value: Option<f64>,
-    pub color: Color,
+pub(crate) struct ThresholdStep {
+    pub(crate) value: Option<f64>,
+    pub(crate) color: Color,
 }
 
 #[derive(Debug, Clone)]
-pub struct Thresholds {
-    pub mode: ThresholdMode,
-    pub steps: Vec<ThresholdStep>,
-    pub style: Option<String>,
+pub(crate) struct Thresholds {
+    pub(crate) mode: ThresholdMode,
+    pub(crate) steps: Vec<ThresholdStep>,
+    pub(crate) style: Option<String>,
 }
 
 impl PanelState {
-    pub fn get_color_for_value(&self, val: f64) -> Option<Color> {
+    pub(crate) fn get_color_for_value(&self, val: f64) -> Option<Color> {
         let thresholds = self.thresholds.as_ref()?;
 
         let mut matched_color = None;
@@ -169,7 +169,7 @@ impl PanelState {
 
 /// Application mode.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum AppMode {
+pub(crate) enum AppMode {
     Normal,
     Search,
     Fullscreen,
@@ -179,51 +179,51 @@ pub enum AppMode {
 
 /// Global application state.
 #[derive(Debug)]
-pub struct AppState {
+pub(crate) struct AppState {
     /// Prometheus client for making requests.
-    pub prometheus: prom::PromClient,
+    pub(crate) prometheus: prom::PromClient,
     /// Current time range window.
-    pub range: Duration,
+    pub(crate) range: Duration,
     /// Query step resolution.
-    pub step: Duration,
+    pub(crate) step: Duration,
     /// How often to refresh data.
-    pub refresh_every: Duration,
+    pub(crate) refresh_every: Duration,
     /// List of panels.
-    pub panels: Vec<PanelState>,
+    pub(crate) panels: Vec<PanelState>,
     /// Timestamp of the last successful refresh.
-    pub last_refresh: Instant,
+    pub(crate) last_refresh: Instant,
     /// Query end timestamp used by the currently rendered data.
-    pub view_end_ts: i64,
+    pub(crate) view_end_ts: i64,
     /// Vertical scroll offset.
-    pub vertical_scroll: usize,
+    pub(crate) vertical_scroll: usize,
     /// Dashboard title.
-    pub title: String,
+    pub(crate) title: String,
     /// Whether to show the debug bar.
-    pub debug_bar: bool,
+    pub(crate) debug_bar: bool,
     /// Template variables (key -> value).
-    pub vars: HashMap<String, String>,
+    pub(crate) vars: HashMap<String, String>,
     /// Count of panels skipped during import.
-    pub skipped_panels: usize,
+    pub(crate) skipped_panels: usize,
     /// Index of the currently selected panel.
-    pub selected_panel: usize,
+    pub(crate) selected_panel: usize,
     /// UI Theme.
-    pub theme: Theme,
+    pub(crate) theme: Theme,
     /// Time offset from "now" for panning backward in time (0 = live mode).
-    pub time_offset: Duration,
+    pub(crate) time_offset: Duration,
     /// Current application mode.
-    pub mode: AppMode,
+    pub(crate) mode: AppMode,
     /// Search query string.
-    pub search_query: String,
+    pub(crate) search_query: String,
     /// Filtered panel indices based on search query.
-    pub search_results: Vec<usize>,
+    pub(crate) search_results: Vec<usize>,
     /// Cursor X position (timestamp) for inspection.
-    pub cursor_x: Option<f64>,
+    pub(crate) cursor_x: Option<f64>,
     /// Global marker set for rendering thresholds
-    pub threshold_marker: String,
+    pub(crate) threshold_marker: String,
     /// Global runtime toggle for automatic grid rendering.
-    pub autogrid_enabled: bool,
+    pub(crate) autogrid_enabled: bool,
     /// Color used for automatic grid lines and labels.
-    pub autogrid_color: Color,
+    pub(crate) autogrid_color: Color,
 }
 
 impl AppState {
@@ -240,7 +240,7 @@ impl AppState {
     /// * `skipped_panels` - The count of panels that were skipped during import.
     /// * `theme` - The UI theme to use.
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub(crate) fn new(
         prometheus: prom::PromClient,
         range: Duration,
         step: Duration,
@@ -278,7 +278,7 @@ impl AppState {
     }
 
     /// Zoom in: halve the time range.
-    pub fn zoom_in(&mut self) {
+    pub(crate) fn zoom_in(&mut self) {
         self.range /= 2;
         if self.range < Duration::from_secs(10) {
             self.range = Duration::from_secs(10);
@@ -286,20 +286,20 @@ impl AppState {
     }
 
     /// Zoom out: double the time range.
-    pub fn zoom_out(&mut self) {
+    pub(crate) fn zoom_out(&mut self) {
         self.range *= 2;
         self.range = self.range.min(Duration::from_secs(7 * 24 * 3600));
     }
 
     /// Pan left: shift the time window backward.
-    pub fn pan_left(&mut self) {
+    pub(crate) fn pan_left(&mut self) {
         // Shift by 25% of the current range
         let shift = self.range / 4;
         self.time_offset = self.time_offset.saturating_add(shift);
     }
 
     /// Automatically scroll to ensure the selected panel is visible.
-    pub fn scroll_to_selected_panel(&mut self) {
+    pub(crate) fn scroll_to_selected_panel(&mut self) {
         if let Some(panel) = self.panels.get(self.selected_panel) {
             if let Some(grid) = panel.grid {
                 let py = grid.y;
@@ -333,7 +333,7 @@ impl AppState {
     }
 
     /// Pan right: shift the time window forward (toward "now").
-    pub fn pan_right(&mut self) {
+    pub(crate) fn pan_right(&mut self) {
         // Shift by 25% of the current range
         let shift = self.range / 4;
         if self.time_offset > shift {
@@ -344,29 +344,29 @@ impl AppState {
     }
 
     /// Reset to live mode (time_offset = 0).
-    pub fn reset_to_live(&mut self) {
+    pub(crate) fn reset_to_live(&mut self) {
         self.time_offset = Duration::from_secs(0);
     }
 
     /// Check if currently in live mode.
-    pub fn is_live(&self) -> bool {
+    pub(crate) fn is_live(&self) -> bool {
         self.time_offset.as_secs() == 0
     }
 
     /// Returns the displayed time window bounds.
-    pub fn time_bounds(&self) -> (f64, f64) {
+    pub(crate) fn time_bounds(&self) -> (f64, f64) {
         let end_ts = self.view_end_ts as f64;
         (end_ts - self.range.as_secs_f64(), end_ts)
     }
 
     /// Moves the inspection cursor to the center of the displayed time window.
-    pub fn center_cursor(&mut self) {
+    pub(crate) fn center_cursor(&mut self) {
         let (start_ts, end_ts) = self.time_bounds();
         self.cursor_x = Some((start_ts + end_ts) / 2.0);
     }
 
     /// Move cursor left/right by one step.
-    pub fn move_cursor(&mut self, direction: i32) {
+    pub(crate) fn move_cursor(&mut self, direction: i32) {
         let (start_ts, end_ts) = self.time_bounds();
 
         if let Some(current_x) = self.cursor_x {
@@ -378,7 +378,7 @@ impl AppState {
         }
     }
 
-    pub async fn refresh(&mut self) -> Result<()> {
+    pub(crate) async fn refresh(&mut self) -> Result<()> {
         let prometheus = &self.prometheus;
         let range = self.range;
         let step = self.step;
