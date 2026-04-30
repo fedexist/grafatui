@@ -53,6 +53,8 @@ pub struct PanelState {
     pub min: Option<f64>,
     /// Optional maximum value for gauge and thresholds.
     pub max: Option<f64>,
+    /// Whether to render automatic grid lines for this panel.
+    pub autogrid: Option<bool>,
 }
 
 /// Visualization types supported by Grafatui.
@@ -219,6 +221,10 @@ pub struct AppState {
     pub cursor_x: Option<f64>,
     /// Global marker set for rendering thresholds
     pub threshold_marker: String,
+    /// Global runtime toggle for automatic grid rendering.
+    pub autogrid_enabled: bool,
+    /// Color used for automatic grid lines and labels.
+    pub autogrid_color: Color,
 }
 
 impl AppState {
@@ -234,6 +240,7 @@ impl AppState {
     /// * `panels` - The list of panels to display.
     /// * `skipped_panels` - The count of panels that were skipped during import.
     /// * `theme` - The UI theme to use.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         prometheus: prom::PromClient,
         range: Duration,
@@ -266,12 +273,14 @@ impl AppState {
             search_results: Vec::new(),
             cursor_x: None,
             threshold_marker,
+            autogrid_enabled: true,
+            autogrid_color: Color::DarkGray,
         }
     }
 
     /// Zoom in: halve the time range.
     pub fn zoom_in(&mut self) {
-        self.range = self.range / 2;
+        self.range /= 2;
         if self.range < Duration::from_secs(10) {
             self.range = Duration::from_secs(10);
         }
@@ -279,7 +288,7 @@ impl AppState {
 
     /// Zoom out: double the time range.
     pub fn zoom_out(&mut self) {
-        self.range = self.range * 2;
+        self.range *= 2;
         self.range = self.range.min(Duration::from_secs(7 * 24 * 3600));
     }
 
@@ -520,6 +529,367 @@ fn downsample(points: Vec<(f64, f64)>, max_points: usize) -> Vec<(f64, f64)> {
         .collect()
 }
 
+pub fn default_queries(mut provided: Vec<String>) -> Vec<PanelState> {
+    if provided.is_empty() {
+        provided = vec![
+            r#"sum(rate(http_requests_total{job!="prometheus"}[5m]))"#.to_string(),
+            r#"sum by (instance) (process_cpu_seconds_total)"#.to_string(),
+            r#"up"#.to_string(),
+        ];
+    }
+    provided
+        .into_iter()
+        .map(|q| PanelState {
+            title: q.clone(),
+            exprs: vec![q],
+            legends: vec![None],
+            series: vec![],
+            last_error: None,
+            last_url: None,
+            last_samples: 0,
+            grid: None,
+            y_axis_mode: YAxisMode::Auto,
+            panel_type: PanelType::Graph,
+            thresholds: None,
+            min: None,
+            max: None,
+            autogrid: None,
+        })
+        .collect()
+}
+
+pub fn parse_duration(s: &str) -> Result<Duration> {
+    Ok(humantime::parse_duration(s)?)
+}
+
+pub async fn run_app<B: ratatui::backend::Backend>(
+    terminal: &mut Terminal<B>,
+    app: &mut AppState,
+    _tick_rate: Duration,
+) -> Result<()>
+where
+    <B as ratatui::backend::Backend>::Error: Send + Sync + 'static,
+{
+    let mut needs_draw = true;
+
+    loop {
+        if needs_draw {
+            terminal.draw(|f| ui::draw_ui(f, app))?;
+            needs_draw = false;
+        }
+
+        let timeout = app.refresh_every.saturating_sub(app.last_refresh.elapsed());
+
+        if event::poll(timeout)? {
+            match event::read()? {
+                Event::Key(key) => {
+                    if app.mode == AppMode::Search {
+                        match key.code {
+                            KeyCode::Esc => {
+                                app.mode = AppMode::Normal;
+                                app.search_query.clear();
+                                app.search_results.clear();
+                            }
+                            KeyCode::Enter => {
+                                if let Some(&idx) = app.search_results.first() {
+                                    app.selected_panel = idx;
+                                    app.mode = AppMode::Fullscreen; // Go to Fullscreen on selection
+                                    app.search_query.clear();
+                                    app.search_results.clear();
+                                }
+                            }
+                            KeyCode::Backspace => {
+                                app.search_query.pop();
+                                if app.search_query.is_empty() {
+                                    app.search_results.clear();
+                                } else {
+                                    app.search_results = app
+                                        .panels
+                                        .iter()
+                                        .enumerate()
+                                        .filter(|(_, p)| {
+                                            p.title
+                                                .to_lowercase()
+                                                .contains(&app.search_query.to_lowercase())
+                                        })
+                                        .map(|(i, _)| i)
+                                        .collect();
+                                }
+                            }
+                            KeyCode::Char(c) => {
+                                app.search_query.push(c);
+                                app.search_results = app
+                                    .panels
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(_, p)| {
+                                        p.title
+                                            .to_lowercase()
+                                            .contains(&app.search_query.to_lowercase())
+                                    })
+                                    .map(|(i, _)| i)
+                                    .collect();
+                            }
+                            _ => {}
+                        }
+                    } else if app.mode == AppMode::Inspect {
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Char('v') => {
+                                app.mode = AppMode::Normal;
+                                app.cursor_x = None;
+                            }
+                            KeyCode::Left => {
+                                app.move_cursor(-1);
+                            }
+                            KeyCode::Right => {
+                                app.move_cursor(1);
+                            }
+                            KeyCode::Char('q') => return Ok(()),
+                            _ => {}
+                        }
+                    } else if app.mode == AppMode::Fullscreen {
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Char('f') | KeyCode::Enter => {
+                                app.mode = AppMode::Normal;
+                            }
+                            KeyCode::Char('v') => {
+                                app.mode = AppMode::FullscreenInspect;
+                                app.center_cursor();
+                            }
+                            KeyCode::Char('q') => return Ok(()),
+                            KeyCode::Char('r') | KeyCode::Char('R') => {
+                                app.refresh().await?;
+                            }
+                            KeyCode::PageUp => {
+                                app.select_previous_panel();
+                            }
+                            KeyCode::PageDown => {
+                                app.select_next_panel();
+                            }
+                            // Allow some navigation/interaction in fullscreen too?
+                            // For now, just basic ones.
+                            KeyCode::Char('+') => {
+                                app.zoom_out();
+                                app.refresh().await?;
+                            }
+                            KeyCode::Char('-') => {
+                                app.zoom_in();
+                                app.refresh().await?;
+                            }
+                            KeyCode::Char('[') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.pan_left();
+                                app.refresh().await?;
+                            }
+                            KeyCode::Left if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.pan_left();
+                                app.refresh().await?;
+                            }
+                            KeyCode::Char(']') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.pan_right();
+                                app.refresh().await?;
+                            }
+                            KeyCode::Right if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.pan_right();
+                                app.refresh().await?;
+                            }
+                            KeyCode::Char('0') => {
+                                app.reset_to_live();
+                                app.refresh().await?;
+                            }
+                            KeyCode::Char('y') => {
+                                if let Some(panel) = app.panels.get_mut(app.selected_panel) {
+                                    panel.y_axis_mode = match panel.y_axis_mode {
+                                        YAxisMode::Auto => YAxisMode::ZeroBased,
+                                        YAxisMode::ZeroBased => YAxisMode::Auto,
+                                    };
+                                }
+                            }
+                            KeyCode::Char('g') => {
+                                app.autogrid_enabled = !app.autogrid_enabled;
+                            }
+                            _ => {}
+                        }
+                    } else if app.mode == AppMode::FullscreenInspect {
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Char('v') => {
+                                app.mode = AppMode::Fullscreen;
+                                app.cursor_x = None;
+                            }
+                            KeyCode::Char('g') => {
+                                app.autogrid_enabled = !app.autogrid_enabled;
+                            }
+                            KeyCode::Left => {
+                                app.move_cursor(-1);
+                            }
+                            KeyCode::Right => {
+                                app.move_cursor(1);
+                            }
+                            KeyCode::Char('q') => return Ok(()),
+                            _ => {}
+                        }
+                    } else {
+                        // Normal Mode
+                        match key.code {
+                            KeyCode::Char('f') => {
+                                app.mode = AppMode::Fullscreen;
+                            }
+                            KeyCode::Char('v') => {
+                                app.mode = AppMode::Inspect;
+                                app.center_cursor();
+                            }
+                            KeyCode::Char('q') => return Ok(()),
+                            KeyCode::Char('r') | KeyCode::Char('R') => {
+                                app.refresh().await?;
+                            }
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                app.select_previous_panel();
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                app.select_next_panel();
+                            }
+                            KeyCode::PageUp => {
+                                app.vertical_scroll = app.vertical_scroll.saturating_sub(10);
+                            }
+                            KeyCode::PageDown => {
+                                app.vertical_scroll = app.vertical_scroll.saturating_add(10);
+                            }
+                            KeyCode::Char(c) if c.is_ascii_digit() => {
+                                if let Some(digit) = c.to_digit(10) {
+                                    if let Some(panel) = app.panels.get_mut(app.selected_panel) {
+                                        if digit == 0 {
+                                            // Show all
+                                            for s in &mut panel.series {
+                                                s.visible = true;
+                                            }
+                                        } else {
+                                            // Toggle specific series (1-based index)
+                                            let idx = (digit - 1) as usize;
+                                            if let Some(series) = panel.series.get_mut(idx) {
+                                                series.visible = !series.visible;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            KeyCode::Char('y') => {
+                                if let Some(panel) = app.panels.get_mut(app.selected_panel) {
+                                    panel.y_axis_mode = match panel.y_axis_mode {
+                                        YAxisMode::Auto => YAxisMode::ZeroBased,
+                                        YAxisMode::ZeroBased => YAxisMode::Auto,
+                                    };
+                                }
+                            }
+                            KeyCode::Char('g') => {
+                                app.autogrid_enabled = !app.autogrid_enabled;
+                            }
+                            KeyCode::Home => {
+                                app.vertical_scroll = 0;
+                            }
+                            KeyCode::End => {
+                                app.vertical_scroll = usize::MAX; // Will be clamped by rendering logic usually, or we should track max height
+                            }
+                            KeyCode::Char('+') => {
+                                app.zoom_out();
+                                app.refresh().await?;
+                            }
+                            KeyCode::Char('-') => {
+                                app.zoom_in();
+                                app.refresh().await?;
+                            }
+                            KeyCode::Char('[') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.pan_left();
+                                app.refresh().await?;
+                            }
+                            KeyCode::Left if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.pan_left();
+                                app.refresh().await?;
+                            }
+                            KeyCode::Char(']') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.pan_right();
+                                app.refresh().await?;
+                            }
+                            KeyCode::Right if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.pan_right();
+                                app.refresh().await?;
+                            }
+                            KeyCode::Char('0') => {
+                                app.reset_to_live();
+                                app.refresh().await?;
+                            }
+                            KeyCode::Char('?') => {
+                                app.debug_bar = !app.debug_bar;
+                            }
+                            KeyCode::Char('/') => {
+                                app.mode = AppMode::Search;
+                                app.search_query.clear();
+                                app.search_results.clear();
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Event::Mouse(mouse) => match mouse.kind {
+                    crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left)
+                    | crossterm::event::MouseEventKind::Drag(crossterm::event::MouseButton::Left) =>
+                    {
+                        let size = terminal.size()?;
+                        let rect = ratatui::layout::Rect::new(0, 0, size.width, size.height);
+                        if let Some((idx, panel_rect)) =
+                            ui::hit_test(app, rect, mouse.column, mouse.row)
+                        {
+                            app.selected_panel = idx;
+
+                            // If in Fullscreen or FullscreenInspect, we are already focused on this panel (effectively)
+                            // If in Normal/Inspect, we switch to Inspect mode if not already
+
+                            match app.mode {
+                                AppMode::Normal | AppMode::Inspect => {
+                                    // In normal mode, mouse clicks only select the panel
+                                    // Cursor mode must be activated with 'v' key
+                                    // Don't transition to Inspect mode
+                                }
+                                AppMode::Fullscreen | AppMode::FullscreenInspect => {
+                                    // In fullscreen, mouse clicks enable cursor
+                                    app.mode = AppMode::FullscreenInspect;
+
+                                    // Calculate cursor_x based on click position within panel_rect
+                                    let chart_width = panel_rect.width.saturating_sub(2) as f64;
+                                    if chart_width > 0.0 {
+                                        let relative_x =
+                                            (mouse.column.saturating_sub(panel_rect.x + 1)) as f64;
+                                        let fraction = (relative_x / chart_width).clamp(0.0, 1.0);
+
+                                        let (start_ts, _) = app.time_bounds();
+
+                                        app.cursor_x =
+                                            Some(start_ts + fraction * app.range.as_secs_f64());
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    crossterm::event::MouseEventKind::ScrollDown => {
+                        app.vertical_scroll = app.vertical_scroll.saturating_add(1);
+                    }
+                    crossterm::event::MouseEventKind::ScrollUp => {
+                        app.vertical_scroll = app.vertical_scroll.saturating_sub(1);
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+
+            needs_draw = true;
+        }
+
+        if app.last_refresh.elapsed() >= app.refresh_every {
+            app.refresh().await?;
+            needs_draw = true;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -675,372 +1045,5 @@ mod tests {
 
         app.select_previous_panel();
         assert_eq!(app.selected_panel, 0);
-    }
-}
-
-pub fn default_queries(mut provided: Vec<String>) -> Vec<PanelState> {
-    if provided.is_empty() {
-        provided = vec![
-            r#"sum(rate(http_requests_total{job!="prometheus"}[5m]))"#.to_string(),
-            r#"sum by (instance) (process_cpu_seconds_total)"#.to_string(),
-            r#"up"#.to_string(),
-        ];
-    }
-    provided
-        .into_iter()
-        .map(|q| PanelState {
-            title: q.clone(),
-            exprs: vec![q],
-            legends: vec![None],
-            series: vec![],
-            last_error: None,
-            last_url: None,
-            last_samples: 0,
-            grid: None,
-            y_axis_mode: YAxisMode::Auto,
-            panel_type: PanelType::Graph,
-            thresholds: None,
-            min: None,
-            max: None,
-        })
-        .collect()
-}
-
-pub fn parse_duration(s: &str) -> Result<Duration> {
-    Ok(humantime::parse_duration(s)?)
-}
-
-pub async fn run_app<B: ratatui::backend::Backend>(
-    terminal: &mut Terminal<B>,
-    app: &mut AppState,
-    _tick_rate: Duration,
-) -> Result<()>
-where
-    <B as ratatui::backend::Backend>::Error: Send + Sync + 'static,
-{
-    let mut needs_draw = true;
-
-    loop {
-        if needs_draw {
-            terminal.draw(|f| ui::draw_ui(f, app))?;
-            needs_draw = false;
-        }
-
-        let timeout = app.refresh_every.saturating_sub(app.last_refresh.elapsed());
-
-        if event::poll(timeout)? {
-            match event::read()? {
-                Event::Key(key) => {
-                    if app.mode == AppMode::Search {
-                        match key.code {
-                            KeyCode::Esc => {
-                                app.mode = AppMode::Normal;
-                                app.search_query.clear();
-                                app.search_results.clear();
-                            }
-                            KeyCode::Enter => {
-                                if let Some(&idx) = app.search_results.first() {
-                                    app.selected_panel = idx;
-                                    app.mode = AppMode::Fullscreen; // Go to Fullscreen on selection
-                                    app.search_query.clear();
-                                    app.search_results.clear();
-                                }
-                            }
-                            KeyCode::Backspace => {
-                                app.search_query.pop();
-                                if app.search_query.is_empty() {
-                                    app.search_results.clear();
-                                } else {
-                                    app.search_results = app
-                                        .panels
-                                        .iter()
-                                        .enumerate()
-                                        .filter(|(_, p)| {
-                                            p.title
-                                                .to_lowercase()
-                                                .contains(&app.search_query.to_lowercase())
-                                        })
-                                        .map(|(i, _)| i)
-                                        .collect();
-                                }
-                            }
-                            KeyCode::Char(c) => {
-                                app.search_query.push(c);
-                                app.search_results = app
-                                    .panels
-                                    .iter()
-                                    .enumerate()
-                                    .filter(|(_, p)| {
-                                        p.title
-                                            .to_lowercase()
-                                            .contains(&app.search_query.to_lowercase())
-                                    })
-                                    .map(|(i, _)| i)
-                                    .collect();
-                            }
-                            _ => {}
-                        }
-                    } else if app.mode == AppMode::Inspect {
-                        match key.code {
-                            KeyCode::Esc | KeyCode::Char('v') => {
-                                app.mode = AppMode::Normal;
-                                app.cursor_x = None;
-                            }
-                            KeyCode::Left => {
-                                app.move_cursor(-1);
-                            }
-                            KeyCode::Right => {
-                                app.move_cursor(1);
-                            }
-                            KeyCode::Char('q') => return Ok(()),
-                            _ => {}
-                        }
-                    } else if app.mode == AppMode::Fullscreen {
-                        match key.code {
-                            KeyCode::Esc | KeyCode::Char('f') | KeyCode::Enter => {
-                                app.mode = AppMode::Normal;
-                            }
-                            KeyCode::Char('v') => {
-                                app.mode = AppMode::FullscreenInspect;
-                                app.center_cursor();
-                            }
-                            KeyCode::Char('q') => return Ok(()),
-                            KeyCode::Char('r') | KeyCode::Char('R') => {
-                                app.refresh().await?;
-                            }
-                            KeyCode::PageUp => {
-                                app.select_previous_panel();
-                            }
-                            KeyCode::PageDown => {
-                                app.select_next_panel();
-                            }
-                            // Allow some navigation/interaction in fullscreen too?
-                            // For now, just basic ones.
-                            KeyCode::Char('+') => {
-                                app.zoom_out();
-                                app.refresh().await?;
-                            }
-                            KeyCode::Char('-') => {
-                                app.zoom_in();
-                                app.refresh().await?;
-                            }
-                            KeyCode::Char('[') => {
-                                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                                    app.pan_left();
-                                    app.refresh().await?;
-                                }
-                            }
-                            KeyCode::Left => {
-                                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                                    app.pan_left();
-                                    app.refresh().await?;
-                                }
-                            }
-                            KeyCode::Char(']') => {
-                                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                                    app.pan_right();
-                                    app.refresh().await?;
-                                }
-                            }
-                            KeyCode::Right => {
-                                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                                    app.pan_right();
-                                    app.refresh().await?;
-                                }
-                            }
-                            KeyCode::Char('0') => {
-                                app.reset_to_live();
-                                app.refresh().await?;
-                            }
-                            KeyCode::Char('y') => {
-                                if let Some(panel) = app.panels.get_mut(app.selected_panel) {
-                                    panel.y_axis_mode = match panel.y_axis_mode {
-                                        YAxisMode::Auto => YAxisMode::ZeroBased,
-                                        YAxisMode::ZeroBased => YAxisMode::Auto,
-                                    };
-                                }
-                            }
-                            _ => {}
-                        }
-                    } else if app.mode == AppMode::FullscreenInspect {
-                        match key.code {
-                            KeyCode::Esc | KeyCode::Char('v') => {
-                                app.mode = AppMode::Fullscreen;
-                                app.cursor_x = None;
-                            }
-                            KeyCode::Left => {
-                                app.move_cursor(-1);
-                            }
-                            KeyCode::Right => {
-                                app.move_cursor(1);
-                            }
-                            KeyCode::Char('q') => return Ok(()),
-                            _ => {}
-                        }
-                    } else {
-                        // Normal Mode
-                        match key.code {
-                            KeyCode::Char('f') => {
-                                app.mode = AppMode::Fullscreen;
-                            }
-                            KeyCode::Char('v') => {
-                                app.mode = AppMode::Inspect;
-                                app.center_cursor();
-                            }
-                            KeyCode::Char('q') => return Ok(()),
-                            KeyCode::Char('r') | KeyCode::Char('R') => {
-                                app.refresh().await?;
-                            }
-                            KeyCode::Up | KeyCode::Char('k') => {
-                                app.select_previous_panel();
-                            }
-                            KeyCode::Down | KeyCode::Char('j') => {
-                                app.select_next_panel();
-                            }
-                            KeyCode::PageUp => {
-                                app.vertical_scroll = app.vertical_scroll.saturating_sub(10);
-                            }
-                            KeyCode::PageDown => {
-                                app.vertical_scroll = app.vertical_scroll.saturating_add(10);
-                            }
-                            KeyCode::Char(c) if c.is_digit(10) => {
-                                if let Some(digit) = c.to_digit(10) {
-                                    if let Some(panel) = app.panels.get_mut(app.selected_panel) {
-                                        if digit == 0 {
-                                            // Show all
-                                            for s in &mut panel.series {
-                                                s.visible = true;
-                                            }
-                                        } else {
-                                            // Toggle specific series (1-based index)
-                                            let idx = (digit - 1) as usize;
-                                            if let Some(series) = panel.series.get_mut(idx) {
-                                                series.visible = !series.visible;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            KeyCode::Char('y') => {
-                                if let Some(panel) = app.panels.get_mut(app.selected_panel) {
-                                    panel.y_axis_mode = match panel.y_axis_mode {
-                                        YAxisMode::Auto => YAxisMode::ZeroBased,
-                                        YAxisMode::ZeroBased => YAxisMode::Auto,
-                                    };
-                                }
-                            }
-                            KeyCode::Home => {
-                                app.vertical_scroll = 0;
-                            }
-                            KeyCode::End => {
-                                app.vertical_scroll = usize::MAX; // Will be clamped by rendering logic usually, or we should track max height
-                            }
-                            KeyCode::Char('+') => {
-                                app.zoom_out();
-                                app.refresh().await?;
-                            }
-                            KeyCode::Char('-') => {
-                                app.zoom_in();
-                                app.refresh().await?;
-                            }
-                            KeyCode::Char('[') => {
-                                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                                    app.pan_left();
-                                    app.refresh().await?;
-                                }
-                            }
-                            KeyCode::Left => {
-                                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                                    app.pan_left();
-                                    app.refresh().await?;
-                                }
-                            }
-                            KeyCode::Char(']') => {
-                                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                                    app.pan_right();
-                                    app.refresh().await?;
-                                }
-                            }
-                            KeyCode::Right => {
-                                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                                    app.pan_right();
-                                    app.refresh().await?;
-                                }
-                            }
-                            KeyCode::Char('0') => {
-                                app.reset_to_live();
-                                app.refresh().await?;
-                            }
-                            KeyCode::Char('?') => {
-                                app.debug_bar = !app.debug_bar;
-                            }
-                            KeyCode::Char('/') => {
-                                app.mode = AppMode::Search;
-                                app.search_query.clear();
-                                app.search_results.clear();
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                Event::Mouse(mouse) => match mouse.kind {
-                    crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left)
-                    | crossterm::event::MouseEventKind::Drag(crossterm::event::MouseButton::Left) =>
-                    {
-                        let size = terminal.size()?;
-                        let rect = ratatui::layout::Rect::new(0, 0, size.width, size.height);
-                        if let Some((idx, panel_rect)) =
-                            ui::hit_test(app, rect, mouse.column, mouse.row)
-                        {
-                            app.selected_panel = idx;
-
-                            // If in Fullscreen or FullscreenInspect, we are already focused on this panel (effectively)
-                            // If in Normal/Inspect, we switch to Inspect mode if not already
-
-                            match app.mode {
-                                AppMode::Normal | AppMode::Inspect => {
-                                    // In normal mode, mouse clicks only select the panel
-                                    // Cursor mode must be activated with 'v' key
-                                    // Don't transition to Inspect mode
-                                }
-                                AppMode::Fullscreen | AppMode::FullscreenInspect => {
-                                    // In fullscreen, mouse clicks enable cursor
-                                    app.mode = AppMode::FullscreenInspect;
-
-                                    // Calculate cursor_x based on click position within panel_rect
-                                    let chart_width = panel_rect.width.saturating_sub(2) as f64;
-                                    if chart_width > 0.0 {
-                                        let relative_x =
-                                            (mouse.column.saturating_sub(panel_rect.x + 1)) as f64;
-                                        let fraction = (relative_x / chart_width).clamp(0.0, 1.0);
-
-                                        let (start_ts, _) = app.time_bounds();
-
-                                        app.cursor_x =
-                                            Some(start_ts + fraction * app.range.as_secs_f64());
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    crossterm::event::MouseEventKind::ScrollDown => {
-                        app.vertical_scroll = app.vertical_scroll.saturating_add(1);
-                    }
-                    crossterm::event::MouseEventKind::ScrollUp => {
-                        app.vertical_scroll = app.vertical_scroll.saturating_sub(1);
-                    }
-                    _ => {}
-                },
-                _ => {}
-            }
-
-            needs_draw = true;
-        }
-
-        if app.last_refresh.elapsed() >= app.refresh_every {
-            app.refresh().await?;
-            needs_draw = true;
-        }
     }
 }
