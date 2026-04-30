@@ -30,6 +30,8 @@ pub struct Config {
     pub theme: Option<String>,
     pub grafana_json: Option<PathBuf>,
     pub threshold_marker: Option<String>,
+    pub autogrid: Option<bool>,
+    pub autogrid_color: Option<String>,
     pub vars: Option<HashMap<String, String>>,
 }
 
@@ -96,6 +98,8 @@ mod tests {
             prometheus_url = "http://localhost:9090"
             refresh_rate = 5000
             theme = "dracula"
+            autogrid = false
+            autogrid_color = "gray"
         "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(
@@ -104,6 +108,8 @@ mod tests {
         );
         assert_eq!(config.refresh_rate, Some(5000));
         assert_eq!(config.theme, Some("dracula".to_string()));
+        assert_eq!(config.autogrid, Some(false));
+        assert_eq!(config.autogrid_color, Some("gray".to_string()));
     }
 
     #[test]
