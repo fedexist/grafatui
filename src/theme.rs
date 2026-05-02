@@ -17,18 +17,18 @@
 use ratatui::style::Color;
 
 #[derive(Debug, Clone)]
-pub struct Theme {
+pub(crate) struct Theme {
     #[allow(dead_code)]
-    pub background: Color,
-    pub text: Color,
-    pub title: Color,
-    pub border: Color,
-    pub border_selected: Color,
+    pub(crate) background: Color,
+    pub(crate) text: Color,
+    pub(crate) title: Color,
+    pub(crate) border: Color,
+    pub(crate) border_selected: Color,
     #[allow(dead_code)]
-    pub legend_text: Color,
+    pub(crate) legend_text: Color,
     #[allow(dead_code)]
-    pub legend_dim: Color,
-    pub palette: Vec<Color>,
+    pub(crate) legend_dim: Color,
+    pub(crate) palette: Vec<Color>,
 }
 
 impl Default for Theme {
@@ -60,7 +60,7 @@ impl Default for Theme {
 }
 
 impl Theme {
-    pub fn from_str(name: &str) -> Self {
+    pub(crate) fn from_str(name: &str) -> Self {
         match name.to_lowercase().as_str() {
             "dracula" => Self {
                 background: Color::Rgb(40, 42, 54),
@@ -192,7 +192,7 @@ impl Theme {
     }
 }
 
-pub fn parse_grafana_color(c: &str) -> Color {
+pub(crate) fn parse_grafana_color(c: &str) -> Color {
     if c.starts_with('#') && c.len() >= 7 {
         let r = u8::from_str_radix(&c[1..3], 16).unwrap_or(0);
         let g = u8::from_str_radix(&c[3..5], 16).unwrap_or(0);
@@ -214,6 +214,10 @@ pub fn parse_grafana_color(c: &str) -> Color {
         "orange" | "dark-orange" => Color::Rgb(255, 165, 0),
         "light-orange" => Color::Rgb(255, 200, 100),
         "cyan" => Color::Cyan,
+        "gray" | "grey" => Color::Gray,
+        "dark-gray" | "dark-grey" => Color::DarkGray,
+        "white" => Color::White,
+        "black" => Color::Black,
         _ => Color::Reset,
     }
 }

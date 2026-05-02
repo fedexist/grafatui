@@ -103,6 +103,13 @@ async fn main() -> Result<()> {
         .record_max_frames
         .or(config.record_max_frames)
         .unwrap_or(300);
+    let autogrid_enabled = config.autogrid.unwrap_or(true);
+    let autogrid_color = args
+        .autogrid_color
+        .or(config.autogrid_color)
+        .map(|color| theme::parse_grafana_color(&color))
+        .filter(|color| *color != ratatui::style::Color::Reset)
+        .unwrap_or(ratatui::style::Color::DarkGray);
 
     let mut vars: HashMap<String, String> = HashMap::new();
 
@@ -142,6 +149,7 @@ async fn main() -> Result<()> {
                 thresholds: q.thresholds,
                 min: q.min,
                 max: q.max,
+                autogrid: q.autogrid,
             })
             .collect();
         (format!("{} (imported)", d.title), ps, d.skipped_panels)
@@ -190,6 +198,8 @@ async fn main() -> Result<()> {
             record_max_frames,
         },
     );
+    state.autogrid_enabled = autogrid_enabled;
+    state.autogrid_color = autogrid_color;
     state.vars = vars; // <— pass variables into the app
     state.refresh().await?;
 

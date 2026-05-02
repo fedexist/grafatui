@@ -8,69 +8,73 @@ use std::path::PathBuf;
     version,
     about = "Grafana-like Prometheus charts in your terminal"
 )]
-pub struct Args {
+pub(crate) struct Args {
     /// Prometheus URL (e.g., http://localhost:9090)
     #[arg(long)]
-    pub prometheus_url: Option<String>,
+    pub(crate) prometheus_url: Option<String>,
 
     /// Time range to query (e.g., 5m, 1h, 3d) (default: 5m)
     #[arg(long, value_name = "DURATION")]
-    pub range: Option<String>,
+    pub(crate) range: Option<String>,
 
     /// Query step resolution (e.g., 5s, 30s, 1m) (default: 5s)
     #[arg(long, value_name = "DURATION")]
-    pub step: Option<String>,
+    pub(crate) step: Option<String>,
 
     /// Grafana dashboard JSON file to import (e.g., ./dashboard.json)
     #[arg(long, value_name = "FILE")]
-    pub grafana_json: Option<PathBuf>,
+    pub(crate) grafana_json: Option<PathBuf>,
 
-    /// UI tick rate in milliseconds (screen refresh cadence)
+    /// Legacy UI tick rate in milliseconds; redraws now happen on input and data refresh
     #[arg(long, default_value = "250")]
-    pub tick_rate: u64,
+    pub(crate) tick_rate: u64,
 
     /// Data refresh rate in milliseconds (Prometheus fetch interval) (default: 1000)
     #[arg(long, value_name = "MS")]
-    pub refresh_rate: Option<u64>,
+    pub(crate) refresh_rate: Option<u64>,
 
     /// Additional PromQL queries to append as panels
     #[arg(long, value_name = "EXPR")]
-    pub query: Vec<String>,
+    pub(crate) query: Vec<String>,
 
     /// Template variables to override (e.g., --var instance=server1)
     #[arg(long, value_parser = parse_key_val::<String, String>, value_name = "KEY=VALUE")]
-    pub var: Vec<(String, String)>,
+    pub(crate) var: Vec<(String, String)>,
 
     /// Color theme (default, dracula, monokai, solarized-dark, solarized-light, gruvbox, tokyo-night, catppuccin)
     #[arg(long, value_name = "NAME")]
-    pub theme: Option<String>,
+    pub(crate) theme: Option<String>,
 
     /// Marker symbol to use for threshold lines (dashed, dot, braille, block, bar, quadrant, sextant, octant)
     #[arg(long, value_name = "MARKER")]
-    pub threshold_marker: Option<String>,
+    pub(crate) threshold_marker: Option<String>,
+
+    /// Color to use for automatic grid lines and labels (e.g., gray, dark-gray, #666666).
+    #[arg(long, value_name = "COLOR")]
+    pub(crate) autogrid_color: Option<String>,
 
     /// Directory for SVG/PNG exports.
     #[arg(long, value_name = "DIR")]
-    pub export_dir: Option<PathBuf>,
+    pub(crate) export_dir: Option<PathBuf>,
 
     /// Image format to export.
     #[arg(long, value_enum, value_name = "FORMAT")]
-    pub export_format: Option<crate::export::ExportFormat>,
+    pub(crate) export_format: Option<crate::export::ExportFormat>,
 
     /// Maximum number of frames to keep in one recording.
     #[arg(long, value_name = "COUNT")]
-    pub record_max_frames: Option<usize>,
+    pub(crate) record_max_frames: Option<usize>,
 
     /// Configuration file path (e.g., ./grafatui.toml).
     #[arg(long, value_name = "FILE")]
-    pub config: Option<PathBuf>,
+    pub(crate) config: Option<PathBuf>,
 
     #[command(subcommand)]
-    pub command: Option<Commands>,
+    pub(crate) command: Option<Commands>,
 }
 
 #[derive(Debug, clap::Subcommand, Clone)]
-pub enum Commands {
+pub(crate) enum Commands {
     /// Generate shell completions
     Completions {
         /// Shell to generate completions for
@@ -81,7 +85,7 @@ pub enum Commands {
 }
 
 /// Helper to parse key=value pairs for CLI arguments.
-pub fn parse_key_val<T, U>(
+pub(crate) fn parse_key_val<T, U>(
     s: &str,
 ) -> Result<(T, U), Box<dyn std::error::Error + Send + Sync + 'static>>
 where
