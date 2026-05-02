@@ -51,7 +51,7 @@ This demo showcases all 7 visualization types (graph, stat, gauge, bar gauge, ta
 ### Grafana Dashboard Import
 - **Import existing dashboards** from JSON files
 - **Supported panels**: graph, timeseries, gauge, bargauge, table, stat, heatmap
-- **Template variables** with CLI overrides
+- **Template variables** with built-in PromQL time variables, dynamic Prometheus query variables, and CLI overrides
 - **Legend formatting** (`{{label}}` syntax)
 - **Grid layouts** using `gridPos`
 - **Thresholds** dynamically applied to metrics and graph limits
@@ -179,6 +179,8 @@ grafatui --prometheus-url http://prod-prom:9090 --grafana-json ./node-exporter.j
 ```bash
 grafatui --grafana-json ./dash.json --var job=node --var instance=server-01
 ```
+
+Grafana query variables such as `label_values(up, instance)` and `query_result(...)` are resolved from Prometheus before panel queries run. Built-in PromQL variables including `$__interval`, `$__interval_ms`, `$__range`, `$__range_s`, `$__range_ms`, and `$__rate_interval` are expanded automatically.
 
 **Use a theme:**
 ```bash
