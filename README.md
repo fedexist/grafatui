@@ -65,7 +65,7 @@ This demo showcases all 7 visualization types (graph, stat, gauge, bar gauge, ta
 - **Fullscreen mode**: Focus on a single panel
 - **Value inspection**: Cursor-based point-in-time data exploration
 - **Series toggling**: Show/hide individual metrics
-- **Image export**: Save the current dashboard as SVG/PNG, or record changed states as a frame bundle
+- **Image export**: Save the current dashboard as SVG/PNG, or record changed states as a timestamped frame bundle
 
 ### Customization
 - **8 themes**: default, dracula, monokai, solarized (dark/light), gruvbox, tokyo-night, catppuccin
@@ -152,6 +152,8 @@ grafatui [OPTIONS]
 
 Run `grafatui --help` for the full list of options.
 
+Exports use the visible dashboard layout and support SVG, PNG, or both formats. Recordings are changed-frame bundles under `--export-dir`: `Ctrl+E` starts a recording directory, writes only frames whose rendered dashboard changed, and adds a `manifest.json` with version, viewport, timing, format, and frame file metadata when stopped.
+
 ### Configuration File
 
 Create a `grafatui.toml` in `~/.config/grafatui/` (or use `--config`):
@@ -222,7 +224,7 @@ grafatui --config examples/demo/grafatui.toml
 | `f` / `Enter` | Fullscreen mode |
 | `v` | Value inspection mode |
 | `e` | Export current view |
-| `Ctrl+E` | Start/stop recording changed views |
+| `Ctrl+E` | Start/stop changed-frame recording bundle |
 | `/` | Search panels |
 | `←` / `→` | Move cursor (inspect mode) |
 | `?` | Toggle debug info |
