@@ -27,8 +27,21 @@ pub(crate) struct DashboardImport {
     pub(crate) queries: Vec<QueryPanel>,
     /// Variables extracted from `templating.list`.
     pub(crate) vars: HashMap<String, String>,
+    /// Dynamic query variables extracted from `templating.list`.
+    pub(crate) query_vars: Vec<TemplateQueryVar>,
     /// Number of panels that were skipped (unsupported types).
     pub(crate) skipped_panels: usize,
+}
+
+/// A Prometheus-backed Grafana template variable.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct TemplateQueryVar {
+    /// Variable name used in PromQL expressions.
+    pub(crate) name: String,
+    /// Prometheus variable query expression.
+    pub(crate) query: String,
+    /// Optional Grafana regex extractor.
+    pub(crate) regex: Option<String>,
 }
 
 /// A single panel extracted from Grafana.
@@ -69,11 +82,22 @@ struct RawTemplating {
 #[derive(Debug, Deserialize)]
 struct RawVar {
     name: String,
+    #[serde(rename = "type")]
+    var_type: Option<String>,
+    query: Option<RawVarQuery>,
+    definition: Option<String>,
+    regex: Option<String>,
     current: Option<RawVarCurrent>,
     /// The value to use when "All" is selected. Used to replace $__all in queries.
     #[serde(rename = "allValue")]
     all_value: Option<String>,
-    // We could parse 'query' or 'type' if needed, but for now we just want defaults
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum RawVarQuery {
+    String(String),
+    Object { query: Option<String> },
 }
 
 #[derive(Debug, Deserialize)]
@@ -155,6 +179,7 @@ pub(crate) fn load_grafana_dashboard(path: &std::path::Path) -> Result<Dashboard
         serde_json::from_str(&data).with_context(|| "parsing grafana dashboard JSON")?;
 
     let mut vars = HashMap::new();
+    let mut query_vars = Vec::new();
     if let Some(templating) = raw.templating {
         if let Some(list) = templating.list {
             for v in list {
@@ -191,8 +216,19 @@ pub(crate) fn load_grafana_dashboard(path: &std::path::Path) -> Result<Dashboard
                     }
 
                     if !s.is_empty() {
-                        vars.insert(v.name, s);
+                        vars.insert(v.name.clone(), s);
                     }
+                }
+
+                if v.var_type.as_deref() == Some("query")
+                    && !v.current_is_all()
+                    && let Some(query) = v.query_string()
+                {
+                    query_vars.push(TemplateQueryVar {
+                        name: v.name,
+                        query,
+                        regex: v.regex.filter(|regex| !regex.trim().is_empty()),
+                    });
                 }
             }
         }
@@ -202,6 +238,7 @@ pub(crate) fn load_grafana_dashboard(path: &std::path::Path) -> Result<Dashboard
         title: raw.title.unwrap_or_default(),
         queries: vec![],
         vars,
+        query_vars,
         skipped_panels: 0,
     };
 
@@ -209,6 +246,40 @@ pub(crate) fn load_grafana_dashboard(path: &std::path::Path) -> Result<Dashboard
         collect_panels(&mut out, panels)?;
     }
     Ok(out)
+}
+
+impl RawVar {
+    fn query_string(&self) -> Option<String> {
+        let query = self
+            .query
+            .as_ref()
+            .and_then(|query| match query {
+                RawVarQuery::String(query) => Some(query.as_str()),
+                RawVarQuery::Object { query } => query.as_deref(),
+            })
+            .or(self.definition.as_deref())?;
+
+        let query = query.trim();
+        (!query.is_empty()).then(|| query.to_string())
+    }
+
+    fn current_is_all(&self) -> bool {
+        self.current.as_ref().is_some_and(|current| {
+            value_is_all(current.value.as_ref()) || value_is_all(current.text.as_ref())
+        })
+    }
+}
+
+fn value_is_all(value: Option<&serde_json::Value>) -> bool {
+    match value {
+        Some(serde_json::Value::String(value)) => {
+            value == "$__all" || value.eq_ignore_ascii_case("all")
+        }
+        Some(serde_json::Value::Array(values)) => {
+            values.iter().any(|value| value_is_all(Some(value)))
+        }
+        _ => false,
+    }
 }
 
 fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()> {
@@ -396,5 +467,50 @@ mod tests {
 
         assert_eq!(dashboard.queries[0].autogrid, Some(false));
         assert_eq!(dashboard.queries[1].autogrid, None);
+    }
+
+    #[test]
+    fn test_parse_query_variables() {
+        let json = r#"
+        {
+            "title": "Query Vars",
+            "templating": {
+                "list": [
+                    {
+                        "name": "instance",
+                        "query": "label_values(up, instance)",
+                        "type": "query",
+                        "regex": "/(.+)/",
+                        "includeAll": false,
+                        "current": { "text": "node-1", "value": "node-1" }
+                    },
+                    {
+                        "name": "model",
+                        "query": { "query": "label_values(model_name)" },
+                        "type": "query",
+                        "current": { "text": "llama", "value": "llama" }
+                    },
+                    {
+                        "name": "all_instance",
+                        "query": "label_values(up, instance)",
+                        "type": "query",
+                        "allValue": ".*",
+                        "current": { "text": "All", "value": "$__all" }
+                    }
+                ]
+            }
+        }
+        "#;
+        let path = std::env::temp_dir().join("grafatui-query-vars-test.json");
+        std::fs::write(&path, json).unwrap();
+
+        let dashboard = load_grafana_dashboard(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        assert_eq!(dashboard.query_vars.len(), 2);
+        assert_eq!(dashboard.query_vars[0].query, "label_values(up, instance)");
+        assert_eq!(dashboard.query_vars[0].regex.as_deref(), Some("/(.+)/"));
+        assert_eq!(dashboard.query_vars[1].query, "label_values(model_name)");
+        assert_eq!(dashboard.vars.get("all_instance"), Some(&".*".to_string()));
     }
 }

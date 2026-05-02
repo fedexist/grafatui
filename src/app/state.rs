@@ -15,6 +15,8 @@
  */
 
 use crate::app::data::{downsample, expand_expr, format_legend};
+use crate::app::variables::refresh_query_variables;
+use crate::grafana::TemplateQueryVar;
 use crate::prom;
 use crate::theme::Theme;
 use anyhow::Result;
@@ -202,6 +204,8 @@ pub(crate) struct AppState {
     pub(crate) debug_bar: bool,
     /// Template variables (key -> value).
     pub(crate) vars: HashMap<String, String>,
+    /// Prometheus-backed template variables imported from Grafana.
+    pub(crate) query_vars: Vec<TemplateQueryVar>,
     /// Count of panels skipped during import.
     pub(crate) skipped_panels: usize,
     /// Index of the currently selected panel.
@@ -263,6 +267,7 @@ impl AppState {
             title,
             debug_bar: false,
             vars: HashMap::new(),
+            query_vars: Vec::new(),
             skipped_panels,
             selected_panel: 0,
             theme,
@@ -379,13 +384,24 @@ impl AppState {
     }
 
     pub(crate) async fn refresh(&mut self) -> Result<()> {
-        let prometheus = &self.prometheus;
         let range = self.range;
         let step = self.step;
-        let vars = &self.vars;
 
         // Calculate end timestamp: "now" minus time_offset
         let end_ts = chrono::Utc::now().timestamp() - self.time_offset.as_secs() as i64;
+
+        let _ = refresh_query_variables(
+            &self.prometheus,
+            &self.query_vars,
+            range,
+            step,
+            end_ts,
+            &mut self.vars,
+        )
+        .await;
+
+        let prometheus = &self.prometheus;
+        let vars = &self.vars;
 
         // Create a stream of futures for fetching panel data
         let mut futures = futures::stream::iter(self.panels.iter_mut())
@@ -424,7 +440,7 @@ impl AppState {
         let mut error = None;
 
         for (i, expr) in p.exprs.iter().enumerate() {
-            let expr_expanded = expand_expr(expr, step, vars);
+            let expr_expanded = expand_expr(expr, range, step, vars);
             let legend_fmt = p.legends.get(i).and_then(|x| x.as_ref());
 
             // Calculate start/end for URL display purposes

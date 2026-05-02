@@ -17,6 +17,7 @@
 use anyhow::{Result, anyhow};
 use reqwest::Client;
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -163,6 +164,78 @@ impl PromClient {
     }
 
     async fn perform_request(&self, url: &str) -> Result<Vec<Series>> {
+        let text = self.get_text(url).await?;
+
+        let body: PromResponse<QueryRangeData> = serde_json::from_str(&text)
+            .map_err(|e| anyhow!("parsing json: {} (body: {})", e, text))?;
+
+        if body.status != "success" {
+            return Err(anyhow!(
+                "prometheus error status: {} — body: {}",
+                body.status,
+                text
+            ));
+        }
+
+        Ok(body.data.result)
+    }
+
+    pub(crate) async fn label_values(&self, label: &str) -> Result<Vec<String>> {
+        let url = format!(
+            "{}/api/v1/label/{}/values",
+            self.base.trim_end_matches('/'),
+            urlencoding::encode(label)
+        );
+        let body: PromResponse<Vec<String>> = self.get_json(&url).await?;
+        ensure_success(&body.status)?;
+        Ok(body.data)
+    }
+
+    pub(crate) async fn series_label_values(
+        &self,
+        metric: &str,
+        label: &str,
+        start: i64,
+        end: i64,
+    ) -> Result<Vec<String>> {
+        let url = format!(
+            "{}/api/v1/series?match[]={}&start={}&end={}",
+            self.base.trim_end_matches('/'),
+            urlencoding::encode(metric),
+            start,
+            end
+        );
+        let body: PromResponse<Vec<HashMap<String, String>>> = self.get_json(&url).await?;
+        ensure_success(&body.status)?;
+        Ok(body
+            .data
+            .into_iter()
+            .filter_map(|series| series.get(label).cloned())
+            .collect())
+    }
+
+    pub(crate) async fn query_instant_result_strings(
+        &self,
+        expr: &str,
+        time: i64,
+    ) -> Result<Vec<String>> {
+        let url = format!(
+            "{}/api/v1/query?query={}&time={}",
+            self.base.trim_end_matches('/'),
+            urlencoding::encode(expr),
+            time
+        );
+        let body: PromResponse<QueryInstantData> = self.get_json(&url).await?;
+        ensure_success(&body.status)?;
+        Ok(body.data.result_strings())
+    }
+
+    async fn get_json<T: DeserializeOwned>(&self, url: &str) -> Result<T> {
+        let text = self.get_text(url).await?;
+        serde_json::from_str(&text).map_err(|e| anyhow!("parsing json: {} (body: {})", e, text))
+    }
+
+    async fn get_text(&self, url: &str) -> Result<String> {
         let resp = self
             .client
             .get(url)
@@ -179,25 +252,22 @@ impl PromClient {
             return Err(anyhow!("prometheus {}: {}", status, text));
         }
 
-        let body: QueryRangeResponse = serde_json::from_str(&text)
-            .map_err(|e| anyhow!("parsing json: {} (body: {})", e, text))?;
+        Ok(text)
+    }
+}
 
-        if body.status != "success" {
-            return Err(anyhow!(
-                "prometheus error status: {} — body: {}",
-                body.status,
-                text
-            ));
-        }
-
-        Ok(body.data.result)
+fn ensure_success(status: &str) -> Result<()> {
+    if status == "success" {
+        Ok(())
+    } else {
+        Err(anyhow!("prometheus error status: {}", status))
     }
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub(crate) struct QueryRangeResponse {
-    pub(crate) status: String,
-    pub(crate) data: QueryRangeData,
+struct PromResponse<T> {
+    status: String,
+    data: T,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -212,6 +282,64 @@ pub(crate) struct QueryRangeData {
 pub(crate) struct Series {
     pub(crate) metric: std::collections::HashMap<String, String>,
     pub(crate) values: Vec<(f64, String)>, // (ts, value)
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct QueryInstantData {
+    #[serde(rename = "resultType")]
+    result_type: String,
+    result: serde_json::Value,
+}
+
+impl QueryInstantData {
+    fn result_strings(self) -> Vec<String> {
+        match self.result_type.as_str() {
+            "vector" => vector_result_strings(&self.result),
+            "scalar" | "string" => scalar_result_string(&self.result).into_iter().collect(),
+            _ => Vec::new(),
+        }
+    }
+}
+
+fn vector_result_strings(result: &serde_json::Value) -> Vec<String> {
+    result
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|sample| {
+            let metric = sample.get("metric")?.as_object()?;
+            let value = sample
+                .get("value")
+                .and_then(|value| value.as_array())
+                .and_then(|value| value.get(1))
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
+            let mut labels: Vec<_> = metric
+                .iter()
+                .filter_map(|(label, value)| value.as_str().map(|value| (label, value)))
+                .collect();
+            labels.sort_by(|a, b| a.0.cmp(b.0));
+            let labels = labels
+                .into_iter()
+                .map(|(label, value)| format!("{}=\"{}\"", label, value))
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            if labels.is_empty() {
+                Some(value.to_string())
+            } else {
+                Some(format!("{{{}}} {}", labels, value))
+            }
+        })
+        .collect()
+}
+
+fn scalar_result_string(result: &serde_json::Value) -> Option<String> {
+    result
+        .as_array()
+        .and_then(|value| value.get(1))
+        .and_then(|value| value.as_str())
+        .map(ToString::to_string)
 }
 
 #[cfg(test)]
@@ -256,11 +384,33 @@ mod tests {
         }
         "#;
 
-        let resp: QueryRangeResponse = serde_json::from_str(json).unwrap();
+        let resp: PromResponse<QueryRangeData> = serde_json::from_str(json).unwrap();
         assert_eq!(resp.status, "success");
         assert_eq!(resp.data.result_type, "matrix");
         assert_eq!(resp.data.result.len(), 1);
         assert_eq!(resp.data.result[0].metric.get("job").unwrap(), "prometheus");
         assert_eq!(resp.data.result[0].values.len(), 2);
+    }
+
+    #[test]
+    fn test_query_instant_vector_result_strings() {
+        let json = r#"
+        {
+            "resultType": "vector",
+            "result": [
+                {
+                    "metric": { "instance": "node-1", "job": "node" },
+                    "value": [1435781451.781, "1"]
+                }
+            ]
+        }
+        "#;
+
+        let data: QueryInstantData = serde_json::from_str(json).unwrap();
+
+        assert_eq!(
+            data.result_strings(),
+            vec![r#"{instance="node-1", job="node"} 1"#]
+        );
     }
 }
