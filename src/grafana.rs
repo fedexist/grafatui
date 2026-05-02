@@ -20,37 +20,38 @@ use std::collections::HashMap;
 
 /// Result of importing a Grafana dashboard.
 #[derive(Debug, Clone, Default)]
-pub struct DashboardImport {
+pub(crate) struct DashboardImport {
     /// Dashboard title.
-    pub title: String,
+    pub(crate) title: String,
     /// List of panels extracted.
-    pub queries: Vec<QueryPanel>,
+    pub(crate) queries: Vec<QueryPanel>,
     /// Variables extracted from `templating.list`.
-    pub vars: HashMap<String, String>,
+    pub(crate) vars: HashMap<String, String>,
     /// Number of panels that were skipped (unsupported types).
-    pub skipped_panels: usize,
+    pub(crate) skipped_panels: usize,
 }
 
 /// A single panel extracted from Grafana.
 #[derive(Debug, Clone)]
-pub struct QueryPanel {
-    pub title: String,
-    pub exprs: Vec<String>,
-    pub legends: Vec<Option<String>>, // Parallel to exprs
-    pub grid: Option<GridPos>,
-    pub panel_type: crate::app::PanelType,
-    pub thresholds: Option<crate::app::Thresholds>,
-    pub min: Option<f64>,
-    pub max: Option<f64>,
+pub(crate) struct QueryPanel {
+    pub(crate) title: String,
+    pub(crate) exprs: Vec<String>,
+    pub(crate) legends: Vec<Option<String>>, // Parallel to exprs
+    pub(crate) grid: Option<GridPos>,
+    pub(crate) panel_type: crate::app::PanelType,
+    pub(crate) thresholds: Option<crate::app::Thresholds>,
+    pub(crate) min: Option<f64>,
+    pub(crate) max: Option<f64>,
+    pub(crate) autogrid: Option<bool>,
 }
 
 /// Grid position extracted from Grafana.
 #[derive(Debug, Clone, Copy)]
-pub struct GridPos {
-    pub x: i32,
-    pub y: i32,
-    pub w: i32,
-    pub h: i32,
+pub(crate) struct GridPos {
+    pub(crate) x: i32,
+    pub(crate) y: i32,
+    pub(crate) w: i32,
+    pub(crate) h: i32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -109,6 +110,8 @@ struct RawFieldConfigDefaults {
 
 #[derive(Debug, Deserialize)]
 struct RawCustom {
+    #[serde(rename = "axisGridShow")]
+    axis_grid_show: Option<bool>,
     #[serde(rename = "thresholdsStyle")]
     thresholds_style: Option<RawThresholdsStyle>,
 }
@@ -145,7 +148,7 @@ struct RawGridPos {
     h: i32,
 }
 
-pub fn load_grafana_dashboard(path: &std::path::Path) -> Result<DashboardImport> {
+pub(crate) fn load_grafana_dashboard(path: &std::path::Path) -> Result<DashboardImport> {
     let data = std::fs::read_to_string(path)
         .with_context(|| format!("reading grafana dashboard: {}", path.display()))?;
     let raw: RawDashboard =
@@ -239,11 +242,16 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
             let mut thresholds = None;
             let mut min = None;
             let mut max = None;
+            let mut autogrid = None;
 
             if let Some(fc) = p.field_config {
                 if let Some(defaults) = fc.defaults {
                     min = defaults.min;
                     max = defaults.max;
+                    autogrid = defaults
+                        .custom
+                        .as_ref()
+                        .and_then(|custom| custom.axis_grid_show);
 
                     if let Some(th) = defaults.thresholds {
                         let mode = match th.mode.as_deref() {
@@ -303,6 +311,7 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
                     thresholds,
                     min,
                     max,
+                    autogrid,
                 });
             }
         } else if !kind.is_empty() && kind != "row" {
@@ -351,5 +360,41 @@ mod tests {
             .and_then(|c| c.value.as_ref())
             .or(v.current.as_ref().and_then(|c| c.text.as_ref()));
         assert_eq!(val.unwrap().as_str(), Some("node-exporter"));
+    }
+
+    #[test]
+    fn test_parse_axis_grid_show() {
+        let json = r#"
+        {
+            "title": "Grid Test",
+            "panels": [
+                {
+                    "type": "timeseries",
+                    "title": "Grid Off",
+                    "targets": [{ "expr": "up" }],
+                    "fieldConfig": {
+                        "defaults": {
+                            "custom": {
+                                "axisGridShow": false
+                            }
+                        }
+                    }
+                },
+                {
+                    "type": "timeseries",
+                    "title": "Grid Default",
+                    "targets": [{ "expr": "up" }]
+                }
+            ]
+        }
+        "#;
+        let path = std::env::temp_dir().join("grafatui-axis-grid-test.json");
+        std::fs::write(&path, json).unwrap();
+
+        let dashboard = load_grafana_dashboard(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        assert_eq!(dashboard.queries[0].autogrid, Some(false));
+        assert_eq!(dashboard.queries[1].autogrid, None);
     }
 }

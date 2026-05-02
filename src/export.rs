@@ -21,7 +21,7 @@ const LEGEND_HEIGHT: f64 = 28.0;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
-pub enum ExportFormat {
+pub(crate) enum ExportFormat {
     #[default]
     Svg,
     Png,
@@ -29,10 +29,10 @@ pub enum ExportFormat {
 }
 
 #[derive(Debug, Clone)]
-pub struct ExportOptions {
-    pub dir: PathBuf,
-    pub format: ExportFormat,
-    pub record_max_frames: usize,
+pub(crate) struct ExportOptions {
+    pub(crate) dir: PathBuf,
+    pub(crate) format: ExportFormat,
+    pub(crate) record_max_frames: usize,
 }
 
 impl Default for ExportOptions {
@@ -46,19 +46,19 @@ impl Default for ExportOptions {
 }
 
 #[derive(Debug)]
-pub struct RecordingState {
-    pub dir: PathBuf,
-    pub frame_count: usize,
-    pub max_frames: usize,
-    pub last_svg: Option<String>,
-    pub frames: Vec<RecordingFrame>,
-    pub started_at: String,
+pub(crate) struct RecordingState {
+    pub(crate) dir: PathBuf,
+    pub(crate) frame_count: usize,
+    pub(crate) max_frames: usize,
+    pub(crate) last_svg: Option<String>,
+    pub(crate) frames: Vec<RecordingFrame>,
+    pub(crate) started_at: String,
 }
 
 #[derive(Debug, Serialize)]
-pub struct RecordingFrame {
-    pub index: usize,
-    pub files: Vec<String>,
+pub(crate) struct RecordingFrame {
+    pub(crate) index: usize,
+    pub(crate) files: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -93,7 +93,7 @@ impl PlotRect {
     }
 }
 
-pub fn export_current(app: &mut AppState, viewport: Rect) -> Result<Vec<PathBuf>> {
+pub(crate) fn export_current(app: &mut AppState, viewport: Rect) -> Result<Vec<PathBuf>> {
     let svg = render_svg(app, viewport);
     let stem = format!("grafatui-{}", timestamp());
     let paths = write_outputs(&svg, &app.export.dir, &stem, app.export.format)?;
@@ -101,7 +101,7 @@ pub fn export_current(app: &mut AppState, viewport: Rect) -> Result<Vec<PathBuf>
     Ok(paths)
 }
 
-pub fn toggle_recording(app: &mut AppState, viewport: Rect) -> Result<()> {
+pub(crate) fn toggle_recording(app: &mut AppState, viewport: Rect) -> Result<()> {
     if app.recording.is_some() {
         stop_recording(app)
     } else {
@@ -109,7 +109,7 @@ pub fn toggle_recording(app: &mut AppState, viewport: Rect) -> Result<()> {
     }
 }
 
-pub fn capture_recording_frame(app: &mut AppState, viewport: Rect) -> Result<()> {
+pub(crate) fn capture_recording_frame(app: &mut AppState, viewport: Rect) -> Result<()> {
     let Some(recording) = app.recording.as_ref() else {
         return Ok(());
     };
@@ -192,7 +192,7 @@ fn stop_recording(app: &mut AppState) -> Result<()> {
     Ok(())
 }
 
-pub fn render_svg(app: &AppState, viewport: Rect) -> String {
+pub(crate) fn render_svg(app: &AppState, viewport: Rect) -> String {
     let width = f64::from(viewport.width).max(1.0) * CELL_WIDTH;
     let height = f64::from(viewport.height).max(1.0) * CELL_HEIGHT;
     let bg = color_hex(app.theme.background, "#111111");
@@ -906,6 +906,7 @@ mod tests {
             thresholds: None,
             min: None,
             max: None,
+            autogrid: None,
         }
     }
 

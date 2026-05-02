@@ -146,6 +146,7 @@ grafatui [OPTIONS]
 | `--export-dir <DIR>` | Directory for SVG/PNG exports and recordings | `./grafatui-exports` |
 | `--export-format <FORMAT>` | Export format (`svg`, `png`, `both`) | `svg` |
 | `--record-max-frames <COUNT>` | Maximum frames per recording | `300` |
+| `--autogrid-color <COLOR>` | Color for autogrid lines and labels (`gray`, `dark-gray`, `#666666`, etc.) | `dark-gray` |
 | `--refresh-rate <MS>` | Data fetch interval (milliseconds) | `1000` |
 | `--config <FILE>` | Custom config file path | - |
 
@@ -164,6 +165,8 @@ threshold_marker = "dashed"
 export_dir = "./grafatui-exports"
 export_format = "svg"
 record_max_frames = 300
+autogrid = true
+autogrid_color = "dark-gray"
 grafana_json = "~/.config/grafatui/my-dashboard.json"
 ```
 
@@ -211,9 +214,10 @@ grafatui --config examples/demo/grafatui.toml
 | `[` / `]` | Pan left / right (time) |
 | `0` | Reset to live mode |
 | `↑` / `↓` or `k` / `j` | Select previous/next panel |
-| `PgUp` / `PgDn` | Scroll vertically |
+| `PgUp` / `PgDn` | Scroll vertically (normal) / select previous or next panel (fullscreen) |
 | `Home` / `End` | Jump to top / bottom |
 | `y` | Toggle Y-axis mode |
+| `g` | Toggle autogrid guide lines |
 | `1`..`9` | Toggle series visibility |
 | `f` / `Enter` | Fullscreen mode |
 | `v` | Value inspection mode |
