@@ -177,6 +177,33 @@ pub(crate) fn calculate_two_column_layout_subset(
     results
 }
 
+pub(crate) fn visible_panel_rects(area: Rect, app: &AppState) -> Vec<(Rect, usize)> {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(5),
+            Constraint::Length(2),
+        ])
+        .split(area);
+
+    let charts_area = chunks[1];
+    let inner_area = charts_area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+
+    if app.mode == AppMode::Fullscreen || app.mode == AppMode::FullscreenInspect {
+        return vec![(inner_area, app.selected_panel)];
+    }
+
+    if app.panels.iter().any(|p| p.grid.is_some()) {
+        calculate_grid_layout(inner_area, app)
+    } else {
+        calculate_two_column_layout(inner_area, app)
+    }
+}
+
 /// Determines which panel is located at the given coordinates.
 ///
 /// # Arguments
@@ -190,7 +217,6 @@ pub(crate) fn calculate_two_column_layout_subset(
 ///
 /// An `Option` containing a tuple of `(panel_index, panel_rect)` if a panel was hit.
 pub(crate) fn hit_test(app: &AppState, area: Rect, x: u16, y: u16) -> Option<(usize, Rect)> {
-    // Replicate main layout
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -210,18 +236,7 @@ pub(crate) fn hit_test(app: &AppState, area: Rect, x: u16, y: u16) -> Option<(us
         return None;
     }
 
-    if app.mode == AppMode::Fullscreen || app.mode == AppMode::FullscreenInspect {
-        return Some((app.selected_panel, inner_area));
-    }
-
-    let has_grid = app.panels.iter().any(|p| p.grid.is_some());
-    let panel_rects = if has_grid {
-        calculate_grid_layout(inner_area, app)
-    } else {
-        calculate_two_column_layout(inner_area, app)
-    };
-
-    for (rect, idx) in panel_rects {
+    for (rect, idx) in visible_panel_rects(area, app) {
         if rect.contains(ratatui::layout::Position { x, y }) {
             return Some((idx, rect));
         }

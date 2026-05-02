@@ -65,6 +65,7 @@ This demo showcases all 7 visualization types (graph, stat, gauge, bar gauge, ta
 - **Fullscreen mode**: Focus on a single panel
 - **Value inspection**: Cursor-based point-in-time data exploration
 - **Series toggling**: Show/hide individual metrics
+- **Image export**: Save the current dashboard as SVG/PNG, or record changed states as a timestamped frame bundle
 
 ### Customization
 - **8 themes**: default, dracula, monokai, solarized (dark/light), gruvbox, tokyo-night, catppuccin
@@ -142,11 +143,16 @@ grafatui [OPTIONS]
 | `--var <KEY=VALUE>` | Override dashboard variables | - |
 | `--theme <NAME>` | UI theme | `default` |
 | `--threshold-marker <MARKER>` | Marker for threshold lines (`dashed`, `dot`, `block`, `quadrant`, etc.) | `dashed` |
+| `--export-dir <DIR>` | Directory for SVG/PNG exports and recordings | `./grafatui-exports` |
+| `--export-format <FORMAT>` | Export format (`svg`, `png`, `both`) | `svg` |
+| `--record-max-frames <COUNT>` | Maximum frames per recording | `300` |
 | `--autogrid-color <COLOR>` | Color for autogrid lines and labels (`gray`, `dark-gray`, `#666666`, etc.) | `dark-gray` |
 | `--refresh-rate <MS>` | Data fetch interval (milliseconds) | `1000` |
 | `--config <FILE>` | Custom config file path | - |
 
 Run `grafatui --help` for the full list of options.
+
+Exports use the visible dashboard layout and support SVG, PNG, or both formats. Recordings are changed-frame bundles under `--export-dir`: `Ctrl+E` starts a recording directory, writes only frames whose rendered dashboard changed, and adds a `manifest.json` with version, viewport, timing, format, and frame file metadata when stopped.
 
 ### Configuration File
 
@@ -158,6 +164,9 @@ refresh_rate = 1000
 time_range = "1h"
 theme = "dracula"
 threshold_marker = "dashed"
+export_dir = "./grafatui-exports"
+export_format = "svg"
+record_max_frames = 300
 autogrid = true
 autogrid_color = "dark-gray"
 grafana_json = "~/.config/grafatui/my-dashboard.json"
@@ -214,6 +223,8 @@ grafatui --config examples/demo/grafatui.toml
 | `1`..`9` | Toggle series visibility |
 | `f` / `Enter` | Fullscreen mode |
 | `v` | Value inspection mode |
+| `e` | Export current view |
+| `Ctrl+E` | Start/stop changed-frame recording bundle |
 | `/` | Search panels |
 | `←` / `→` | Move cursor (inspect mode) |
 | `?` | Toggle debug info |

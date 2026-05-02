@@ -340,6 +340,7 @@ fn toggle_series_visibility(app: &mut AppState, c: char) {
 mod tests {
     use super::*;
     use crate::app::{PanelState, PanelType, SeriesView};
+    use crate::export::ExportOptions;
     use crate::prom;
     use crate::theme::Theme;
     use std::time::Duration;
@@ -359,6 +360,7 @@ mod tests {
             0,
             Theme::default(),
             "dashed".to_string(),
+            ExportOptions::default(),
         )
     }
 

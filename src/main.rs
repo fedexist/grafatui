@@ -16,6 +16,7 @@
 
 mod app;
 mod config;
+mod export;
 mod grafana;
 mod prom;
 mod theme;
@@ -89,6 +90,19 @@ async fn main() -> Result<()> {
 
     let refresh_rate = args.refresh_rate.or(config.refresh_rate).unwrap_or(1000);
     let refresh_every = Duration::from_millis(refresh_rate);
+    let export_dir = args
+        .export_dir
+        .or(config.export_dir)
+        .map(|p| config::expand_path(&p))
+        .unwrap_or_else(|| std::path::PathBuf::from("./grafatui-exports"));
+    let export_format = args
+        .export_format
+        .or(config.export_format)
+        .unwrap_or_default();
+    let record_max_frames = args
+        .record_max_frames
+        .or(config.record_max_frames)
+        .unwrap_or(300);
     let autogrid_enabled = config.autogrid.unwrap_or(true);
     let autogrid_color = args
         .autogrid_color
@@ -178,6 +192,11 @@ async fn main() -> Result<()> {
         skipped_panels,
         theme,
         marker_name,
+        export::ExportOptions {
+            dir: export_dir,
+            format: export_format,
+            record_max_frames,
+        },
     );
     state.autogrid_enabled = autogrid_enabled;
     state.autogrid_color = autogrid_color;

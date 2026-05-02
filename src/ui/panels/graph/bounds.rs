@@ -16,7 +16,7 @@
 
 use crate::app::{PanelState, YAxisMode};
 
-pub(super) fn calculate_y_bounds(p: &PanelState) -> [f64; 2] {
+pub(crate) fn calculate_y_bounds(p: &PanelState) -> [f64; 2] {
     let mut min = f64::MAX;
     let mut max = f64::MIN;
     let mut has_data = false;
