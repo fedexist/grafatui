@@ -20,6 +20,6 @@ mod layout;
 mod panels;
 
 pub(crate) use draw::draw_ui;
-pub(crate) use format::{format_si, format_time, get_hash_color};
+pub(crate) use format::{format_si, format_time, get_hash_color, value_to_heatmap_color};
 pub(crate) use layout::{hit_test, visible_panel_rects};
 pub(crate) use panels::calculate_y_bounds;
