@@ -21,7 +21,7 @@ mod prom;
 mod theme;
 mod ui;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -98,6 +98,7 @@ async fn main() -> Result<()> {
         .unwrap_or(ratatui::style::Color::DarkGray);
 
     let mut vars: HashMap<String, String> = HashMap::new();
+    let mut query_vars = Vec::new();
 
     let prom = prom::PromClient::new(prometheus_url);
 
@@ -112,6 +113,7 @@ async fn main() -> Result<()> {
         for (k, v) in d.vars {
             vars.insert(k, v);
         }
+        query_vars = d.query_vars;
 
         let ps = d
             .queries
@@ -144,16 +146,20 @@ async fn main() -> Result<()> {
     };
 
     // Merge config vars (if any)
+    let mut pinned_vars = HashSet::new();
     if let Some(config_vars) = config.vars {
         for (k, v) in config_vars {
+            pinned_vars.insert(k.clone());
             vars.insert(k, v);
         }
     }
 
     // CLI vars override dashboard defaults and config vars
     for (k, v) in &args.var {
+        pinned_vars.insert(k.clone());
         vars.insert(k.clone(), v.clone());
     }
+    query_vars.retain(|var| !pinned_vars.contains(&var.name));
 
     // Determine theme
     let theme_name = args
@@ -182,6 +188,7 @@ async fn main() -> Result<()> {
     state.autogrid_enabled = autogrid_enabled;
     state.autogrid_color = autogrid_color;
     state.vars = vars; // <— pass variables into the app
+    state.query_vars = query_vars;
     state.refresh().await?;
 
     // Terminal setup

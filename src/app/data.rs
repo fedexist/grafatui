@@ -19,12 +19,31 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::time::Duration;
 
-pub(crate) fn expand_expr(expr: &str, step: Duration, vars: &HashMap<String, String>) -> String {
+const PANEL_RESOLUTION_POINTS: u32 = 200;
+
+pub(crate) fn expand_expr(
+    expr: &str,
+    range: Duration,
+    step: Duration,
+    vars: &HashMap<String, String>,
+) -> String {
     let mut s = expr.to_string();
+
+    let interval = interval_duration(range, step);
+    s = replace_builtin(&s, "__interval_ms", &interval.as_millis().to_string());
+    s = replace_builtin(&s, "__interval", &format_prom_duration(interval));
+    s = replace_builtin(&s, "__range_ms", &range.as_millis().to_string());
+    s = replace_builtin(&s, "__range_s", &range.as_secs().to_string());
+    s = replace_builtin(&s, "__range", &format_prom_duration(range));
 
     let interval_secs = std::cmp::max(step.as_secs() * 4, 60);
     let interval_param = format!("{}s", interval_secs);
-    s = s.replace("$__rate_interval", &interval_param);
+    s = replace_builtin(
+        &s,
+        "__rate_interval_ms",
+        &(interval_secs * 1000).to_string(),
+    );
+    s = replace_builtin(&s, "__rate_interval", &interval_param);
 
     for (k, v) in vars {
         s = s.replace(&format!("${{{}}}", k), v);
@@ -32,6 +51,38 @@ pub(crate) fn expand_expr(expr: &str, step: Duration, vars: &HashMap<String, Str
     }
 
     s
+}
+
+fn replace_builtin(expr: &str, name: &str, value: &str) -> String {
+    expr.replace(&format!("${{{}}}", name), value)
+        .replace(&format!("${}", name), value)
+}
+
+fn interval_duration(range: Duration, step: Duration) -> Duration {
+    let resolution = range / PANEL_RESOLUTION_POINTS;
+    let interval = resolution.max(step);
+    interval.max(Duration::from_secs(1))
+}
+
+fn format_prom_duration(duration: Duration) -> String {
+    let secs = duration.as_secs();
+    if secs == 0 {
+        return format!("{}ms", duration.as_millis().max(1));
+    }
+
+    const DAY: u64 = 24 * 60 * 60;
+    const HOUR: u64 = 60 * 60;
+    const MINUTE: u64 = 60;
+
+    if secs % DAY == 0 {
+        format!("{}d", secs / DAY)
+    } else if secs % HOUR == 0 {
+        format!("{}h", secs / HOUR)
+    } else if secs % MINUTE == 0 {
+        format!("{}m", secs / MINUTE)
+    } else {
+        format!("{}s", secs)
+    }
 }
 
 pub(crate) fn format_legend(fmt: &str, metric: &HashMap<String, String>) -> String {
@@ -109,12 +160,12 @@ mod tests {
         let vars = HashMap::new();
         let step = Duration::from_secs(15);
         let expr = "rate(http_requests_total[$__rate_interval])";
-        let expanded = expand_expr(expr, step, &vars);
+        let expanded = expand_expr(expr, Duration::from_secs(300), step, &vars);
         assert_eq!(expanded, "rate(http_requests_total[60s])");
 
         let step = Duration::from_secs(30);
         let expr = "rate(http_requests_total[$__rate_interval])";
-        let expanded = expand_expr(expr, step, &vars);
+        let expanded = expand_expr(expr, Duration::from_secs(300), step, &vars);
         assert_eq!(expanded, "rate(http_requests_total[120s])");
     }
 
@@ -127,20 +178,34 @@ mod tests {
         let step = Duration::from_secs(15);
 
         let expr = "up{job=\"$job\"}";
-        let expanded = expand_expr(expr, step, &vars);
+        let expanded = expand_expr(expr, Duration::from_secs(300), step, &vars);
         assert_eq!(expanded, "up{job=\"node-exporter\"}");
 
         let expr = "up{instance=\"${instance}\"}";
-        let expanded = expand_expr(expr, step, &vars);
+        let expanded = expand_expr(expr, Duration::from_secs(300), step, &vars);
         assert_eq!(expanded, "up{instance=\"localhost:9100\"}");
 
         let expr =
             "rate(http_requests_total{job=\"$job\", instance=\"$instance\"}[$__rate_interval])";
-        let expanded = expand_expr(expr, step, &vars);
+        let expanded = expand_expr(expr, Duration::from_secs(300), step, &vars);
         assert_eq!(
             expanded,
             "rate(http_requests_total{job=\"node-exporter\", instance=\"localhost:9100\"}[60s])"
         );
+    }
+
+    #[test]
+    fn test_expand_expr_builtin_intervals_and_range() {
+        let vars = HashMap::new();
+        let range = Duration::from_secs(24 * 60 * 60);
+        let step = Duration::from_secs(60);
+        let expr = "rate(http_requests_total[$__interval]) offset $__range";
+        let expanded = expand_expr(expr, range, step, &vars);
+        assert_eq!(expanded, "rate(http_requests_total[432s]) offset 1d");
+
+        let expr = "sum_over_time(up[${__range_s}s]) / $__interval_ms / $__range_ms";
+        let expanded = expand_expr(expr, range, step, &vars);
+        assert_eq!(expanded, "sum_over_time(up[86400s]) / 432000 / 86400000");
     }
 
     #[test]
