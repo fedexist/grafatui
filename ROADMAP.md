@@ -52,8 +52,8 @@ For a field-by-field breakdown of Grafana JSON compatibility, see [GRAFANA_COMPA
 | **Value mappings** | Map numeric values to text labels (`fieldConfig.defaults.mappings`) | 🟡 | 📋 |
 | **Reduce options** | Support `calcs` other than "last" for stat/gauge panels | 🟡 | 📋 |
 | **Legend configuration** | Respect `options.legend` display mode, placement, and calcs | 🟡 | 📋 |
-| **Additional PromQL variables** | `$__interval`, `$__range`, `$__range_s` | 🟢 | 📋 |
-| **Dynamic template variables** | Query Prometheus for variable values (`type: "query"`) | 🟡 | 📋 |
+| **Additional PromQL variables** | `$__interval`, `$__interval_ms`, `$__range`, `$__range_s`, `$__range_ms` | ✅ | ✅ |
+| **Dynamic template variables** | Query Prometheus for variable values (`type: "query"`) | ✅ | ✅ |
 | **Draw styles** | Respect `bars`, `points`, `line` from `fieldConfig.defaults.custom.drawStyle` | 🟡 | 📋 |
 | **Stacking** | Stacked area/bar charts from `fieldConfig.defaults.custom.stacking` | 🟡 | 📋 |
 

@@ -111,11 +111,11 @@ This document provides a comprehensive feature-parity table between the [Grafana
 | Variable | Status | Notes |
 |---|---|---|
 | `$__rate_interval` | ✅ Supported | Computed as `max(step × 4, 60s)` |
-| `$__interval` | ❌ Not Implemented | |
-| `$__interval_ms` | ❌ Not Implemented | |
-| `$__range` | ❌ Not Implemented | |
-| `$__range_s` | ❌ Not Implemented | |
-| `$__range_ms` | ❌ Not Implemented | |
+| `$__interval` | ✅ Supported | Computed from the current range and panel resolution, bounded by `--step` |
+| `$__interval_ms` | ✅ Supported | Millisecond form of `$__interval` |
+| `$__range` | ✅ Supported | Current dashboard time range |
+| `$__range_s` | ✅ Supported | Current dashboard time range in seconds |
+| `$__range_ms` | ✅ Supported | Current dashboard time range in milliseconds |
 
 ---
 
@@ -128,14 +128,14 @@ This document provides a comprehensive feature-parity table between the [Grafana
 | `templating.list[].current.value` | ✅ Supported | Used as default value |
 | `templating.list[].current.text` | 🔶 Partial | Used as fallback if `value` is missing |
 | `templating.list[].allValue` | ✅ Supported | Used when value is `$__all`, falls back to `.*` |
-| `templating.list[].type` | ❌ Not Implemented | All variables treated as simple values |
-| `templating.list[].query` | ❌ Not Implemented | No dynamic variable queries |
+| `templating.list[].type` | 🔶 Partial | `query` variables are resolved for Prometheus |
+| `templating.list[].query` | 🔶 Partial | Supports Prometheus `label_values(...)` and `query_result(...)` |
 | `templating.list[].datasource` | ❌ Not Implemented | |
-| `templating.list[].regex` | ❌ Not Implemented | |
+| `templating.list[].regex` | 🔶 Partial | Applied to dynamic query variable results |
 | `templating.list[].sort` | ❌ Not Implemented | |
 | `templating.list[].multi` | ❌ Not Implemented | Multi-value selection not supported |
 | `templating.list[].includeAll` | ❌ Not Implemented | |
-| `templating.list[].refresh` | ❌ Not Implemented | Variables are static after import |
+| `templating.list[].refresh` | 🔶 Partial | Dynamic variables refresh before panel queries |
 | `templating.list[].options` | ❌ Not Implemented | No dropdown/picker UI |
 | `templating.list[].hide` | ❌ Not Implemented | |
 | CLI `--var KEY=VALUE` override | ✅ Supported | Overrides dashboard defaults from command line |
