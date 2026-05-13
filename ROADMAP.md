@@ -1,8 +1,14 @@
 # Grafatui Roadmap
 
-Grafatui is a terminal-based Grafana-like UI for Prometheus. This roadmap outlines what's been built, what's coming next, and longer-term goals. It's intended to help contributors find impactful areas to work on and to set expectations for users.
+Grafatui is a terminal-based Grafana-like UI for Prometheus. The roadmap is
+oriented around two priorities:
 
-> **Current version**: 0.1.5 · **Status**: Active development, pre-1.0
+1. **Grafana parity** - imported dashboards should preserve as much meaning as a
+   terminal UI can reasonably express.
+2. **User-visible product value** - parity work should make real dashboards
+   easier to read, debug, and share.
+
+> **Current version**: 0.1.7 · **Status**: Active development, pre-1.0
 
 **Legend**:
 - 🟢 Low complexity · 🟡 Medium complexity · 🔴 High complexity
@@ -14,171 +20,278 @@ Grafatui is a terminal-based Grafana-like UI for Prometheus. This roadmap outlin
 
 These features are shipped and available today:
 
-| Feature | Details |
-|---|---|
-| **6 panel types** | `graph`, `timeseries`, `stat`, `gauge`, `bargauge`, `table`, `heatmap` |
-| **Grafana JSON import** | Load dashboards from exported JSON files |
-| **24-column grid layout** | Faithful reproduction of Grafana's `gridPos` positioning |
-| **Template variables** | `$var` / `${var}` substitution with CLI and config overrides |
-| **Legend formatting** | `{{label}}` syntax from Grafana |
-| **8 color themes** | default, dracula, monokai, solarized (dark/light), gruvbox, tokyo-night, catppuccin |
-| **Time controls** | Zoom in/out, pan left/right, live mode toggle |
-| **Panel navigation** | Arrow keys, vim-style `j`/`k`, fullscreen, inspect mode |
-| **Panel search** | `/` to fuzzy-search panels by name |
-| **Mouse support** | Click to select, scroll, drag cursor in fullscreen |
-| **Value inspection** | Cursor-based point-in-time data exploration |
-| **Series toggling** | Show/hide individual series with `1`–`9` |
-| **Smart caching** | Request deduplication and caching for identical queries |
-| **Downsampling** | Max-pooling to ~200 points to preserve peaks |
-| **Config file** | TOML-based persistent configuration |
-| **`$__rate_interval`** | Automatic computation as `max(step × 4, 60s)` |
-| **Thresholds** | `fieldConfig.defaults.thresholds` for graph limit lines and dynamic Stat/Gauge/BarGauge coloring |
-| **Threshold marker styles** | Configurable marker styles including dashed line, braille, block, quadrant, sextant, and octant modes |
-| **Field min/max bounds** | `fieldConfig.defaults.min` / `max` for gauge scaling and percentage threshold interpolation |
-| **Export to SVG/PNG** | Native SVG dashboard snapshots, PNG rasterization, and recording frame bundles |
-| **Shell completions** | Bash, Zsh, Fish, PowerShell, Elvish |
-| **Cross-platform binaries** | Linux (x86_64, aarch64), macOS (x86_64, aarch64), Windows (x86_64) |
-| **Package formats** | `.deb`, `.rpm`, Homebrew formula |
+| Area | Feature | Details |
+|---|---|---|
+| Panels | **7 panel type aliases** | `graph`, `timeseries`, `stat`, `gauge`, `bargauge`, `table`, `heatmap` |
+| Import | **Grafana JSON import** | Load exported dashboards from local JSON files |
+| Import | **24-column grid layout** | Faithful reproduction of Grafana's `gridPos` positioning |
+| Variables | **Template variables** | `$var` / `${var}` substitution with CLI and config overrides |
+| Variables | **Dynamic Prometheus variables** | Query-backed variables using `label_values(...)` and `query_result(...)` |
+| Variables | **PromQL built-ins** | `$__interval`, `$__interval_ms`, `$__range`, `$__range_s`, `$__range_ms`, `$__rate_interval` |
+| Queries | **Multiple targets per panel** | Multiple PromQL expressions render as separate series |
+| Queries | **Legend formatting** | `{{label}}` syntax from Grafana |
+| UI | **8 color themes** | default, dracula, monokai, solarized dark/light, gruvbox, tokyo-night, catppuccin |
+| UI | **Time controls** | Zoom in/out, pan left/right, live mode toggle |
+| UI | **Panel navigation** | Arrow keys, vim-style `j`/`k`, PgUp/PgDn, fullscreen, inspect mode |
+| UI | **Panel search** | `/` to fuzzy-search panels by name |
+| UI | **Mouse support** | Click to select, scroll, drag cursor in fullscreen inspect mode |
+| UI | **Value inspection** | Cursor-based point-in-time data exploration |
+| UI | **Series toggling** | Show/hide individual series with `1`-`9` |
+| Rendering | **Smart caching** | Request deduplication and caching for identical queries |
+| Rendering | **Downsampling** | Max-pooling to preserve peaks while fitting the terminal |
+| Rendering | **Adaptive time labels** | Date/time axis labels adjust to the selected range |
+| Rendering | **Autogrid** | Global and per-panel guide lines, including configurable color |
+| Field config | **Thresholds** | `fieldConfig.defaults.thresholds` for graph limit lines and Stat/Gauge/BarGauge coloring |
+| Field config | **Threshold marker styles** | Dashed line, dot, braille, block, quadrant, sextant, octant, and related modes |
+| Field config | **Field min/max bounds** | `fieldConfig.defaults.min` / `max` for gauge scaling and percentage thresholds |
+| Export | **SVG/PNG snapshots** | Export the visible dashboard to SVG, PNG, or both |
+| Export | **Recording frame bundles** | Changed-frame recordings with manifest metadata and frame caps |
+| Config | **Config file** | TOML-based persistent configuration |
+| Distribution | **Shell completions and man page** | Bash, Zsh, Fish, PowerShell, Elvish, plus generated man page |
+| Distribution | **Cross-platform binaries** | Linux, macOS, and Windows release assets |
+| Distribution | **Package formats** | `.deb`, `.rpm`, Homebrew formula support |
 
-For a field-by-field breakdown of Grafana JSON compatibility, see [GRAFANA_COMPATIBILITY.md](GRAFANA_COMPATIBILITY.md).
+For a field-by-field breakdown of Grafana JSON compatibility, see
+[GRAFANA_COMPATIBILITY.md](GRAFANA_COMPATIBILITY.md). That document should be
+refreshed alongside roadmap work because several v0.1.x parity features have
+landed since its original snapshot.
 
 ---
 
-## Up Next — Grafana JSON Compatibility
+## Roadmap Principles
 
-| Feature | Description | Complexity | Status |
+Roadmap items are prioritized by:
+
+1. **Grafana parity impact** - Does this make imported Grafana dashboards behave
+   more like users expect?
+2. **User-visible value** - Does this make dashboards more readable, trustworthy,
+   or useful in a terminal?
+3. **Trust in import results** - Does this reduce silent degradation when a
+   dashboard contains unsupported fields?
+4. **Implementation complexity** - Can the feature be shipped safely in a small,
+   reviewable step?
+
+The intent is to make parity work feel practical rather than academic. For
+example, unit support is not just `fieldConfig.defaults.unit`; it is the
+difference between readable latency/cache panels and raw float noise.
+
+---
+
+## Compatibility Ladder
+
+This is the main backlog, ordered by Grafana parity domain.
+
+### 1. Import Diagnostics & Trust
+
+| Feature | Grafana field / behavior | User value | Complexity | Status |
+|---|---|---|---|---|
+| **Compatibility matrix refresh** | Documentation generated from current code | Keeps users and contributors aligned with reality | 🟢 | 🔜 |
+| **Unsupported panel warnings** | Unsupported `panels[].type` and skipped targets | Makes import degradation visible instead of silent | 🟢 | 🔜 |
+| **Import validation** | `schemaVersion`, panel shape, target shape, required fields | Lets users check dashboards before launching the TUI | 🟢 | 🔜 |
+| **Better JSON/import errors** | Parse errors with path/context where possible | Faster debugging for broken exports | 🟢 | 📋 |
+| **Variable substitution diagnostics** | Missing variables, unsupported format modifiers | Explains empty panels caused by unresolved variables | 🟢 | 📋 |
+
+### 2. Field Config Parity
+
+| Feature | Grafana field / behavior | User value | Complexity | Status |
+|---|---|---|---|---|
+| **Unit formatting** | `fieldConfig.defaults.unit` | Bytes, seconds, percentages, rates, and counts display naturally | 🟡 | 🔜 |
+| **Decimal precision** | `fieldConfig.defaults.decimals` | Panel values stop showing distracting precision | 🟢 | 🔜 |
+| **No-value fallback** | `fieldConfig.defaults.noValue` | Empty/null stat and table cells show intentional text | 🟢 | 🔜 |
+| **Value mappings** | `fieldConfig.defaults.mappings` | Status codes and enum-like values become readable labels | 🟡 | 🔜 |
+| **Display names** | `fieldConfig.defaults.displayName` | Series and table labels match Grafana naming | 🟢 | 📋 |
+| **Color mode subset** | `fieldConfig.defaults.color` | Honors configured color intent where terminal rendering permits | 🟡 | 📋 |
+| **Field overrides subset** | `fieldConfig.overrides` | Per-series units/names/colors for common matcher types | 🔴 | 💡 |
+
+### 3. Panel Options Parity
+
+| Feature | Grafana field / behavior | User value | Complexity | Status |
+|---|---|---|---|---|
+| **Reduce options** | `options.reduceOptions.calcs` | Stat/Gauge/BarGauge can use last, min, max, mean, total | 🟡 | 🔜 |
+| **Legend display mode** | `options.legend.displayMode` | Hide/list/table modes map to compact TUI equivalents | 🟡 | 📋 |
+| **Legend placement** | `options.legend.placement` | Bottom/right placement influences terminal layout where useful | 🟡 | 📋 |
+| **Legend calculations** | `options.legend.calcs` | Min/max/avg/current values appear beside series names | 🟡 | 📋 |
+| **Text/graph/color modes** | Stat and gauge display options | Imported summary panels better match Grafana intent | 🟡 | 📋 |
+| **Tooltip behavior mapping** | `options.tooltip` | Documented mapping to inspect mode, with useful defaults | 🟢 | 📋 |
+
+### 4. Target & Query Parity
+
+| Feature | Grafana field / behavior | User value | Complexity | Status |
+|---|---|---|---|---|
+| **Hidden targets** | `targets[].hide` | Helper queries do not clutter imported panels | 🟢 | 🔜 |
+| **Instant queries** | `targets[].instant` / Prometheus `query` | Stat/table panels can use point-in-time queries | 🟡 | 🔜 |
+| **Target interval** | `targets[].interval` / `intervalFactor` | Panel-specific resolution is respected | 🟡 | 📋 |
+| **Target ref IDs** | `targets[].refId` | Better diagnostics and future transformation support | 🟢 | 📋 |
+| **Format handling** | `targets[].format` | Tables and heatmaps can choose more appropriate handling | 🟡 | 📋 |
+| **Exemplar awareness** | `targets[].exemplar` | Document ignored behavior or expose limited metadata later | 🔴 | 💡 |
+
+### 5. Template Variable Parity
+
+| Feature | Grafana field / behavior | User value | Complexity | Status |
+|---|---|---|---|---|
+| **Multi-value variables** | `templating.list[].multi` | Imported dashboards can query multiple instances/jobs | 🟡 | 📋 |
+| **Include-all variables** | `templating.list[].includeAll` | Grafana "All" semantics work more predictably | 🟡 | 📋 |
+| **Variable option sorting** | `templating.list[].sort` | Deterministic variable values from Prometheus | 🟢 | 📋 |
+| **Variable picker UI** | `templating.list[].options` | Users can switch variable values without restarting | 🟡 | 📋 |
+| **Format modifiers** | `${var:regex}`, `${var:pipe}`, `${var:csv}` | Common Grafana PromQL templates import correctly | 🟡 | 📋 |
+| **Datasource-aware variables** | `templating.list[].datasource` | Foundation for multi-source dashboards | 🔴 | 💡 |
+
+### 6. Graph & Timeseries Parity
+
+| Feature | Grafana field / behavior | User value | Complexity | Status |
+|---|---|---|---|---|
+| **Draw styles** | `fieldConfig.defaults.custom.drawStyle` | Line, bars, and points map to distinct terminal renderings | 🟡 | 📋 |
+| **Stacking** | `fieldConfig.defaults.custom.stacking` | Stacked area/bar intent is visible in dense dashboards | 🟡 | 📋 |
+| **Axis labels** | `fieldConfig.defaults.custom.axisLabel` | Imported axis meaning is visible where space allows | 🟢 | 📋 |
+| **Axis placement** | `fieldConfig.defaults.custom.axisPlacement` | Left/right/hidden axis settings map to TUI behavior | 🟡 | 📋 |
+| **Scale distribution** | `fieldConfig.defaults.custom.scaleDistribution` | Linear/log choices are respected or explicitly warned | 🟡 | 💡 |
+
+### 7. Panel Type Parity
+
+| Feature | Grafana panel type | User value | Complexity | Status |
+|---|---|---|---|---|
+| **Row headers** | `row` | Dashboard sections stay recognizable | 🟢 | 📋 |
+| **Collapsed rows** | `row.collapsed` | Large dashboards can start folded | 🟡 | 📋 |
+| **Text panel** | `text` | Notes/runbook snippets survive import | 🟢 | 📋 |
+| **Histogram panel** | `histogram` | Histogram dashboards import with fewer skips | 🟡 | 💡 |
+| **Pie chart fallback** | `piechart` | Small category summaries can render as bars/table | 🟡 | 💡 |
+| **Logs panel path** | `logs` | Opens the route toward Loki/log exploration | 🔴 | 💡 |
+| **State timeline/status history** | `state-timeline`, `status-history` | Better status dashboards | 🔴 | 💡 |
+
+### 8. Datasource & Import Parity
+
+| Feature | Grafana field / behavior | User value | Complexity | Status |
+|---|---|---|---|---|
+| **Grafana API dashboard loading** | Load dashboards by UID from Grafana | Avoids manual JSON export flow | 🟡 | 📋 |
+| **Multiple Prometheus sources** | `datasource` references and source switching | Supports cluster/environment dashboards | 🟡 | 📋 |
+| **Mixed datasource warnings** | Mixed panels and unsupported datasources | Makes unsupported imports clear | 🟢 | 📋 |
+| **Loki support** | Logs datasource and logs panel | Useful terminal observability companion | 🔴 | 💡 |
+| **InfluxDB support** | Influx datasource | Broadens dashboard compatibility | 🔴 | 💡 |
+
+---
+
+## Milestone Slices
+
+The compatibility ladder defines the backlog. Milestones turn it into shippable
+increments.
+
+### v0.2 - Grafana Import Fidelity
+
+Goal: imported dashboards should be more readable and less silently degraded.
+
+| Item | Why it belongs here | Complexity | Status |
 |---|---|---|---|
-| **Unit formatting** | Display values as bytes, percent, duration, etc. (`fieldConfig.defaults.unit`) | 🟡 | 🔜 |
-| **Unsupported panel warnings** | Surface clear warnings for panel types that can't be rendered | 🟢 | 🔜 |
-| **Value mappings** | Map numeric values to text labels (`fieldConfig.defaults.mappings`) | 🟡 | 📋 |
-| **Reduce options** | Support `calcs` other than "last" for stat/gauge panels | 🟡 | 📋 |
-| **Legend configuration** | Respect `options.legend` display mode, placement, and calcs | 🟡 | 📋 |
-| **Additional PromQL variables** | `$__interval`, `$__interval_ms`, `$__range`, `$__range_s`, `$__range_ms` | ✅ | ✅ |
-| **Dynamic template variables** | Query Prometheus for variable values (`type: "query"`) | ✅ | ✅ |
-| **Draw styles** | Respect `bars`, `points`, `line` from `fieldConfig.defaults.custom.drawStyle` | 🟡 | 📋 |
-| **Stacking** | Stacked area/bar charts from `fieldConfig.defaults.custom.stacking` | 🟡 | 📋 |
+| Compatibility matrix refresh | Establish the current truth before adding more parity | 🟢 | 🔜 |
+| Unit formatting | Biggest readability win for real dashboards | 🟡 | 🔜 |
+| Decimal precision and no-value fallback | Small field-config wins that pair naturally with units | 🟢 | 🔜 |
+| Value mappings | Makes status/stat panels useful instead of numeric-only | 🟡 | 🔜 |
+| Hidden targets | Prevents helper queries from appearing as normal series | 🟢 | 🔜 |
+| Unsupported panel warnings | Builds trust in imported results | 🟢 | 🔜 |
+| `--validate` import diagnostics | Gives users a non-interactive dashboard check | 🟢 | 🔜 |
 
----
+### v0.3 - Panel Semantics
 
-## Import & Debugging
+Goal: stat, gauge, table, and legend behavior should match common Grafana
+expectations.
 
-| Feature | Description | Complexity | Status |
+| Item | Why it belongs here | Complexity | Status |
 |---|---|---|---|
-| **Import validation** | `--validate` flag to check JSON before loading | 🟢 | 🔜 |
-| **Better parse errors** | Line numbers and context when JSON parsing fails | 🟢 | 📋 |
-| **Variable substitution debugging** | Show which variables failed to resolve | 🟢 | 📋 |
+| Reduce options | Summary panels need more than "last" | 🟡 | 📋 |
+| Instant query support | Many summary/table panels are intended as instant queries | 🟡 | 📋 |
+| Display names | Imported labels become clearer without changing queries | 🟢 | 📋 |
+| Legend display modes and placement | Dense dashboards need predictable legend behavior | 🟡 | 📋 |
+| Legend calculations | Adds useful table-like summaries without a new panel type | 🟡 | 📋 |
+| Target interval support | Respects panel-specific query resolution | 🟡 | 📋 |
 
----
+### v0.4 - Graph & Timeseries Fidelity
 
-## Navigation & UX
+Goal: graph and timeseries panels should preserve more visual intent within TUI
+constraints.
 
-| Feature | Description | Complexity | Status |
+| Item | Why it belongs here | Complexity | Status |
 |---|---|---|---|
-| **Fuzzy finder** | `Ctrl+P` style quick switcher for dashboards/panels | 🟢 | 🔜 |
-| **Bookmarks** | Save dashboard + time range combos | 🟢 | 📋 |
-| **Panel history** | Recently viewed panels for quick access | 🟢 | 📋 |
-| **Split view** | Compare two panels side-by-side | 🟡 | 💡 |
+| Draw styles | Bars/points/lines should be distinguishable | 🟡 | 📋 |
+| Stacking | Common Grafana area/bar semantics | 🟡 | 📋 |
+| Axis labels and placement | Preserves context for imported charts | 🟡 | 📋 |
+| Scale distribution handling | Honor or warn on log/non-linear scales | 🟡 | 💡 |
+| Row headers and collapsed rows | Keeps large dashboard structure intact | 🟡 | 📋 |
 
----
+### v0.5 - Exploration Workflow
 
-## Data Export & Sharing
+Goal: after import fidelity improves, make Grafatui a stronger daily terminal
+tool for investigating Prometheus data.
 
-| Feature | Description | Complexity | Status |
+| Item | User value | Complexity | Status |
 |---|---|---|---|
-| **Export to CSV** | Dump metric data to file | 🟢 | 🔜 |
-| **Copy to clipboard** | Copy panel data for reports | 🟢 | 📋 |
-| **Share snapshot** | Generate portable single-file/share-link snapshots | 🟡 | 💡 |
+| Dashboard/panel quick switcher | Jump around large dashboard sets quickly | 🟢 | 📋 |
+| Panel history | Return to recently inspected panels | 🟢 | 📋 |
+| Ad-hoc PromQL query mode | Scratch queries without editing JSON | 🟡 | 📋 |
+| Label explorer | Discover metrics and labels from the terminal | 🟡 | 📋 |
+| File watch mode | Auto-reload dashboards/config while iterating | 🟢 | 📋 |
+| Session restore | Resume last dashboard/time range | 🟢 | 📋 |
+| Bookmarks | Save dashboard + time range combinations | 🟢 | 📋 |
 
----
+### Later - Live Sources, Sharing, and Operations
 
-## Query & Exploration
+These are valuable, but they should not outrank core Grafana import fidelity.
 
-| Feature | Description | Complexity | Status |
+| Item | User value | Complexity | Status |
 |---|---|---|---|
-| **Ad-hoc query mode** | Scratch panel for one-off PromQL queries | 🟡 | 📋 |
-| **Label explorer** | Browse available labels and values | 🟡 | 📋 |
-| **PromQL autocomplete** | Suggest metrics, labels, functions | 🔴 | 💡 |
+| Grafana API dashboard browser | Pull dashboards live from Grafana | 🟡 | 📋 |
+| Multiple Prometheus sources | Switch clusters/environments | 🟡 | 📋 |
+| CSV export | Export panel data for reports or debugging | 🟢 | 📋 |
+| Copy to clipboard | Copy panel data or values quickly | 🟢 | 📋 |
+| Share snapshot | Portable rendered dashboard snapshot | 🟡 | 💡 |
+| Split view | Compare two panels side-by-side | 🟡 | 💡 |
+| PromQL autocomplete | Suggest metrics, labels, and functions | 🔴 | 💡 |
+| Alert rule viewer | Inspect Prometheus/Alertmanager state | 🟡 | 📋 |
+| Alert silence creation | Operational action from the terminal | 🟡 | 💡 |
+| Desktop notifications | Notify when thresholds are crossed | 🟡 | 💡 |
+| Dashboard editor mode | Edit queries inline | 🟡 | 💡 |
+| Dashboard creation wizard | Build dashboards from the TUI | 🔴 | 💡 |
+| SSH tunnel mode | Connect to remote Prometheus more easily | 🟡 | 💡 |
+| Colorblind palettes | Improve accessibility | 🟢 | 📋 |
+| Custom keybindings | User-remappable shortcuts | 🟡 | 📋 |
+| Panel annotations | Deployment markers/events on graphs | 🟡 | 💡 |
 
 ---
 
-## Multi-Source Support
+## Best Next Steps
 
-| Feature | Description | Complexity | Status |
-|---|---|---|---|
-| **Grafana API connection** | Pull dashboards live from a Grafana server | 🟡 | 📋 |
-| **Multiple Prometheus sources** | Switch between clusters/environments | 🟡 | 📋 |
-| **InfluxDB / Loki support** | Expand beyond Prometheus | 🔴 | 💡 |
+Recommended order for the next focused development cycle:
 
----
+1. **Refresh compatibility truth**
+   - Update `GRAFANA_COMPATIBILITY.md` to match v0.1.7.
+   - Add tests or fixtures for fields already supported but documented as
+     missing.
 
-## Alerting & Notifications
+2. **Implement the field display layer**
+   - Add a shared display configuration model for unit, decimals, no-value, and
+     value mappings.
+   - Use it across Stat, Gauge, BarGauge, Table, Graph labels, legends, and
+     exports.
 
-| Feature | Description | Complexity | Status |
-|---|---|---|---|
-| **Alert rule viewer** | Dedicated panel for Prometheus/Alertmanager alerts | 🟡 | 📋 |
-| **Alert silence creation** | Quick-silence alerts from TUI | 🟡 | 💡 |
-| **Desktop notifications** | Push notifications when thresholds are crossed | 🟡 | 💡 |
+3. **Make unsupported imports visible**
+   - Track skipped panel types, hidden/unsupported target behavior, and ignored
+     high-impact fields.
+   - Surface a concise warning in the TUI and a fuller report via `--validate`.
 
----
-
-## Dashboard Editing
-
-| Feature | Description | Complexity | Status |
-|---|---|---|---|
-| **Editor mode** | Edit panel queries inline with nano/vim-style controls | 🟡 | 💡 |
-| **Dashboard creation wizard** | Step-by-step TUI flow to create new dashboards | 🔴 | 💡 |
-
----
-
-## Operational Features
-
-| Feature | Description | Complexity | Status |
-|---|---|---|---|
-| **File watch mode** | Auto-reload on config/JSON file changes | 🟢 | 📋 |
-| **Session restore** | Remember last dashboard and time range | 🟢 | 📋 |
-| **SSH tunnel mode** | Built-in port forwarding for remote Prometheus | 🟡 | 💡 |
-
----
-
-## Accessibility & Customization
-
-| Feature | Description | Complexity | Status |
-|---|---|---|---|
-| **Colorblind palettes** | Alternative color schemes | 🟢 | 📋 |
-| **Custom keybindings** | User-remappable shortcuts | 🟡 | 📋 |
-| **Panel annotations** | Show deployment markers/events on graphs | 🟡 | 💡 |
-
----
-
-## Priorities at a Glance
-
-### 🔜 Up Next
-High-value items actively being considered for the next release(s):
-- **Unit formatting** - Display values in human-readable units
-- **Import validation & panel warnings** - Better error experience
-- **Export to CSV** - Simple, high-value data export
-- **Fuzzy finder** - Quality-of-life navigation improvement
-
-### 📋 Near-term
-Planned features that will meaningfully improve the user experience:
-- Value mappings, reduce options, legend configuration
-- Additional PromQL variables (`$__interval`, `$__range`)
-- Dynamic template variables from Prometheus
-- File watch mode, session restore, bookmarks
-- Colorblind palettes, custom keybindings
-
-### 💡 Longer-term
-Ambitious features under exploration:
-- Grafana API live connection
-- InfluxDB/Loki support
-- PromQL autocomplete
-- Dashboard editor mode
-- Desktop notifications
+4. **Ship v0.2 as "Grafana Import Fidelity"**
+   - Keep the release tightly scoped.
+   - Prefer common Grafana dashboard correctness over new non-parity features.
 
 ---
 
 ## How to Contribute
 
-If you'd like to help, the best starting points are items marked 🔜 and 🟢. These tend to be self-contained and well-defined.
+If you'd like to help, the best starting points are items marked 🔜 and 🟢.
+Roadmap items are especially useful when PRs include:
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines, and [GRAFANA_COMPATIBILITY.md](GRAFANA_COMPATIBILITY.md) for the full Grafana JSON feature-parity breakdown.
+- A small Grafana JSON fixture that demonstrates the supported field.
+- Unit tests for parsing and display behavior.
+- A short note in `GRAFANA_COMPATIBILITY.md` explaining the TUI mapping or
+  limitation.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines, and
+[GRAFANA_COMPATIBILITY.md](GRAFANA_COMPATIBILITY.md) for the full Grafana JSON
+feature-parity breakdown.
