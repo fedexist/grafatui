@@ -2,6 +2,10 @@
 
 This document provides a comprehensive feature-parity table between the [Grafana Dashboard JSON Model](https://grafana.com/docs/grafana/latest/dashboards/build-dashboards/json-model/) and what Grafatui currently supports.
 
+> **Snapshot**: Grafatui v0.1.7. The roadmap prioritizes Grafana parity first,
+> then user-visible product value. See [ROADMAP.md](ROADMAP.md) for milestone
+> slices built from this compatibility ladder.
+
 **Legend**:
 - ✅ **Supported** — Fully implemented and working
 - 🔶 **Partial** — Partially implemented or with limitations
@@ -111,6 +115,7 @@ This document provides a comprehensive feature-parity table between the [Grafana
 | Variable | Status | Notes |
 |---|---|---|
 | `$__rate_interval` | ✅ Supported | Computed as `max(step × 4, 60s)` |
+| `$__rate_interval_ms` | ✅ Supported | Millisecond form of `$__rate_interval` |
 | `$__interval` | ✅ Supported | Computed from the current range and panel resolution, bounded by `--step` |
 | `$__interval_ms` | ✅ Supported | Millisecond form of `$__interval` |
 | `$__range` | ✅ Supported | Current dashboard time range |
@@ -130,6 +135,7 @@ This document provides a comprehensive feature-parity table between the [Grafana
 | `templating.list[].allValue` | ✅ Supported | Used when value is `$__all`, falls back to `.*` |
 | `templating.list[].type` | 🔶 Partial | `query` variables are resolved for Prometheus |
 | `templating.list[].query` | 🔶 Partial | Supports Prometheus `label_values(...)` and `query_result(...)` |
+| `templating.list[].definition` | 🔶 Partial | Used as a fallback query expression for dynamic query variables |
 | `templating.list[].datasource` | ❌ Not Implemented | |
 | `templating.list[].regex` | 🔶 Partial | Applied to dynamic query variable results |
 | `templating.list[].sort` | ❌ Not Implemented | |
@@ -158,13 +164,15 @@ This document provides a comprehensive feature-parity table between the [Grafana
 
 ## Field Configuration (`fieldConfig`)
 
-> **⚠️ This entire section is currently NOT implemented.** This is the area most commonly expected by users coming from Grafana.
+`fieldConfig` is partially implemented. Thresholds, min/max bounds, threshold
+style, and per-panel autogrid settings are parsed; display formatting and field
+overrides remain the highest-priority gaps.
 
 | JSON Field | Status | Notes |
 |---|---|---|
-| `fieldConfig` | ❌ Not Implemented | Top-level field config object is ignored |
-| `fieldConfig.defaults` | ❌ Not Implemented | |
-| `fieldConfig.defaults.unit` | ❌ Not Implemented | Values displayed as raw numbers with SI suffixes |
+| `fieldConfig` | 🔶 Partial | Parsed for supported defaults/custom fields below |
+| `fieldConfig.defaults` | 🔶 Partial | Parsed for min/max, thresholds, and selected custom fields |
+| `fieldConfig.defaults.unit` | ❌ Not Implemented | Values use Grafatui's SI formatter instead |
 | `fieldConfig.defaults.min` | ✅ Supported | Used for interpolating percentage thresholds and Gauge limits |
 | `fieldConfig.defaults.max` | ✅ Supported | Used for scaling gauges and threshold boundaries |
 | `fieldConfig.defaults.decimals` | ❌ Not Implemented | Always uses 2 decimal places |
@@ -172,7 +180,7 @@ This document provides a comprehensive feature-parity table between the [Grafana
 | `fieldConfig.defaults.mappings` | ❌ Not Implemented | Value mappings not supported |
 | `fieldConfig.defaults.noValue` | ❌ Not Implemented | |
 | `fieldConfig.defaults.displayName` | ❌ Not Implemented | |
-| `fieldConfig.defaults.custom` | 🟡 Partially Supported | Used for thresholds style and axis grid visibility |
+| `fieldConfig.defaults.custom` | 🔶 Partial | Used for threshold style and axis grid visibility |
 | `fieldConfig.defaults.custom.drawStyle` | ❌ Not Implemented | Always drawn as lines |
 | `fieldConfig.defaults.custom.lineWidth` | ❌ Not Implemented | TUI limitation |
 | `fieldConfig.defaults.custom.fillOpacity` | ⛔ Not Applicable | TUI limitation |
@@ -181,6 +189,7 @@ This document provides a comprehensive feature-parity table between the [Grafana
 | `fieldConfig.defaults.custom.axisPlacement` | ❌ Not Implemented | |
 | `fieldConfig.defaults.custom.axisLabel` | ❌ Not Implemented | |
 | `fieldConfig.defaults.custom.axisGridShow` | ✅ Supported | Controls per-panel autogrid guide lines for graph/time-series panels |
+| `fieldConfig.defaults.custom.thresholdsStyle` | 🔶 Partial | `mode` is parsed for threshold rendering; glyph style is also controlled by Grafatui's marker setting |
 | `fieldConfig.defaults.custom.scaleDistribution` | ❌ Not Implemented | Always linear |
 | `fieldConfig.overrides` | ❌ Not Implemented | |
 
@@ -198,7 +207,9 @@ This document provides a comprehensive feature-parity table between the [Grafana
 
 ## Panel Options (`options`)
 
-> **⚠️ This entire section is currently NOT implemented.**
+Panel-specific `options` are not parsed yet. Grafatui currently applies its own
+compact TUI defaults for legends, stat sparklines, gauges, and inspect-mode
+tooltips.
 
 | JSON Field | Status | Notes |
 |---|---|---|
@@ -253,8 +264,8 @@ This document provides a comprehensive feature-parity table between the [Grafana
 | Feature | Status | Notes |
 |---|---|---|
 | Prometheus (`query_range`) | ✅ Supported | Primary and only supported datasource |
-| Prometheus (`query` instant) | ❌ Not Implemented | |
-| Prometheus labels API | ❌ Not Implemented | (for dynamic variable population) |
+| Prometheus (`query` instant) | 🔶 Partial | Used for dynamic template variable `query_result(...)`; panel targets still use `query_range` |
+| Prometheus labels API | ✅ Supported | Used for dynamic variable `label_values(...)` |
 | Mixed datasource | ❌ Not Implemented | |
 | InfluxDB | ❌ Not Implemented | |
 | Loki | ❌ Not Implemented | |
@@ -268,20 +279,20 @@ This document provides a comprehensive feature-parity table between the [Grafana
 | Category | Supported | Partial | Not Implemented | Not Applicable |
 |---|---|---|---|---|
 | Dashboard Properties | 1 | 0 | 10 | 4 |
-| Panel Types | 6 | 1 | 14 | 4 |
-| Panel Common Fields | 5 | 0 | 6 | 2 |
-| Targets / Queries | 3 | 0 | 9 | 1 |
-| PromQL Variables | 1 | 0 | 5 | 0 |
-| Templating | 6 | 1 | 11 | 0 |
-| Variable Substitution | 4 | 0 | 4 | 0 |
-| Field Config | 0 | 0 | 14 | 2 |
-| Thresholds | 0 | 0 | 5 | 0 |
-| Panel Options | 0 | 0 | 12 | 0 |
+| Panel Types | 7 | 1 | 14 | 5 |
+| Panel Common Fields | 8 | 0 | 6 | 2 |
+| Targets / Queries | 3 | 0 | 8 | 1 |
+| PromQL Variables | 7 | 0 | 0 | 0 |
+| Templating | 6 | 6 | 6 | 0 |
+| Variable Substitution | 3 | 0 | 5 | 0 |
+| Field Config | 3 | 4 | 13 | 2 |
+| Thresholds | 5 | 0 | 0 | 0 |
+| Panel Options | 0 | 0 | 14 | 0 |
 | Annotations | 0 | 0 | 2 | 0 |
 | Data Links / Transforms | 0 | 0 | 2 | 1 |
 | Alert Rules | 0 | 0 | 3 | 0 |
-| Datasources | 1 | 0 | 5 | 0 |
-| **Total** | **27** | **2** | **102** | **14** |
+| Datasources | 2 | 1 | 5 | 0 |
+| **Total** | **45** | **12** | **88** | **15** |
 
 ---
 
@@ -289,11 +300,11 @@ This document provides a comprehensive feature-parity table between the [Grafana
 
 Based on user feedback, the following missing features are most commonly expected:
 
-1. **Thresholds** (`fieldConfig.defaults.thresholds`) — Color-changing values based on threshold steps
-2. **Unit formatting** (`fieldConfig.defaults.unit`) — Display values as bytes, percent, duration, etc.
-3. **Min/Max for gauges** (`fieldConfig.defaults.min/max`) — Proper gauge scaling
-4. **Value mappings** (`fieldConfig.defaults.mappings`) — Map numeric values to text labels
-5. **Dynamic template variables** (`templating.list[].type: "query"`) — Auto-populate variables from Prometheus
+1. **Unit formatting** (`fieldConfig.defaults.unit`) — Display values as bytes, percent, duration, etc.
+2. **Value mappings** (`fieldConfig.defaults.mappings`) — Map numeric values to text labels
+3. **Reduce options** (`options.reduceOptions`) — Use min/max/mean/total instead of always using the latest value
+4. **Import diagnostics** — Warn clearly about skipped panel types and ignored high-impact fields
+5. **Instant query panel targets** (`targets[].instant`) — Support point-in-time queries for stat/table-style panels
 6. **Additional panel types** — `text`, `piechart`, `histogram`, `logs`
 
 ---
@@ -311,11 +322,13 @@ Grafatui provides several TUI-native capabilities that don't map directly to Gra
 | **Inspect mode** | `v` enables cursor-based point-in-time inspection |
 | **Y-axis toggle** | `y` switches between auto-scale and zero-based |
 | **Series toggling** | `1`–`9` to show/hide individual series |
+| **Autogrid toggle** | `g` toggles automatic guide lines |
 | **Mouse support** | Click to select, scroll to navigate, drag cursor in fullscreen |
 | **Smart caching** | Request deduplication and caching for identical queries |
 | **Client-side downsampling** | Max-pooling to ~200 points to preserve peaks |
+| **SVG/PNG export and recordings** | Save dashboard snapshots or changed-frame recording bundles |
 | **TOML configuration** | Persistent config file for all CLI options |
 
 ---
 
-*This document was generated from the Grafatui source code at v0.1.4. If you notice any inaccuracies, please open an issue or PR.*
+*This document was reviewed against the Grafatui source code at v0.1.7. If you notice any inaccuracies, please open an issue or PR.*
