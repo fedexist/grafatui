@@ -16,6 +16,7 @@
 
 use crate::app::data::{downsample, expand_expr, format_legend};
 use crate::app::variables::refresh_query_variables;
+use crate::export::{ExportOptions, RecordingState};
 use crate::grafana::TemplateQueryVar;
 use crate::prom;
 use crate::theme::Theme;
@@ -228,6 +229,12 @@ pub(crate) struct AppState {
     pub(crate) autogrid_enabled: bool,
     /// Color used for automatic grid lines and labels.
     pub(crate) autogrid_color: Color,
+    /// Image export and recording configuration.
+    pub(crate) export: ExportOptions,
+    /// Active frame recording state, if recording is enabled.
+    pub(crate) recording: Option<RecordingState>,
+    /// Last export or recording status message.
+    pub(crate) export_status: Option<String>,
 }
 
 impl AppState {
@@ -254,6 +261,7 @@ impl AppState {
         skipped_panels: usize,
         theme: Theme,
         threshold_marker: String,
+        export: ExportOptions,
     ) -> Self {
         Self {
             prometheus,
@@ -279,6 +287,9 @@ impl AppState {
             threshold_marker,
             autogrid_enabled: true,
             autogrid_color: Color::DarkGray,
+            export,
+            recording: None,
+            export_status: None,
         }
     }
 
@@ -510,6 +521,7 @@ mod tests {
             0,
             Theme::default(),
             "dashed".to_string(),
+            ExportOptions::default(),
         )
     }
 
@@ -569,6 +581,7 @@ mod tests {
             0,
             Theme::default(),
             "dashed".to_string(),
+            ExportOptions::default(),
         );
 
         app.select_previous_panel();

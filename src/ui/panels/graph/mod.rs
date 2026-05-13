@@ -21,7 +21,6 @@ mod overlay;
 mod thresholds;
 
 use autogrid::{build_autogrid_datasets, calculate_time_grid_ticks, calculate_value_grid_ticks};
-use bounds::calculate_y_bounds;
 use labels::{
     PlotBounds, YLabelArea, render_autogrid_time_labels, render_intermediate_y_labels,
     y_label_width,
@@ -36,6 +35,8 @@ use ratatui::{
     widgets::{Axis, Chart, Dataset, GraphType, Paragraph, Wrap},
 };
 use std::collections::HashMap;
+
+pub(crate) use bounds::calculate_y_bounds;
 
 pub(super) fn render_graph_panel(
     frame: &mut Frame,

@@ -108,8 +108,9 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &AppState) {
     };
 
     let summary = format!(
-        "Mode: {} | Prom: {} | range={} step={:?} refresh={} | grid={} | panels={} (skipped {}) errors={} | keys: ↑/↓ scroll, r refresh, +/- range, q quit, ? debug:{}",
+        "Mode: {}{} | Prom: {} | range={} step={:?} refresh={} | grid={} | panels={} (skipped {}) errors={} | keys: ↑/↓ scroll, r refresh, e export, Ctrl+E record, +/- range, q quit, ? debug:{}",
         mode_display,
+        if app.recording.is_some() { " REC" } else { "" },
         app.prometheus.base,
         format_duration(app.range),
         app.step,
@@ -122,6 +123,9 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &AppState) {
     );
 
     let mut detail = String::new();
+    if let Some(status) = &app.export_status {
+        detail = status.clone();
+    }
     if app.debug_bar {
         // Choose a debug panel: if we have grid, pick the top-left grid panel; otherwise pick the first panel
         let debug_panel: Option<&PanelState> = if app.panels.iter().any(|p| p.grid.is_some()) {

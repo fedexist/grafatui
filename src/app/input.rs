@@ -24,6 +24,8 @@ use ratatui::layout::{Rect, Size};
 pub(super) enum InputAction {
     Redraw,
     Quit,
+    ExportCurrent,
+    ToggleRecording,
 }
 
 enum SharedKeyResult {
@@ -33,6 +35,14 @@ enum SharedKeyResult {
 }
 
 pub(super) async fn handle_key(key: KeyEvent, app: &mut AppState) -> Result<InputAction> {
+    if key.code == KeyCode::Char('e') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        return Ok(InputAction::ToggleRecording);
+    }
+
+    if key.code == KeyCode::Char('e') && key.modifiers.is_empty() && app.mode != AppMode::Search {
+        return Ok(InputAction::ExportCurrent);
+    }
+
     let action = match app.mode {
         AppMode::Search => handle_search_key(key, app),
         AppMode::Inspect => handle_inspect_key(key, app),
@@ -340,12 +350,17 @@ fn toggle_series_visibility(app: &mut AppState, c: char) {
 mod tests {
     use super::*;
     use crate::app::{PanelState, PanelType, SeriesView};
+    use crate::export::ExportOptions;
     use crate::prom;
     use crate::theme::Theme;
     use std::time::Duration;
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn ctrl_key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::CONTROL)
     }
 
     fn test_app() -> AppState {
@@ -359,6 +374,7 @@ mod tests {
             0,
             Theme::default(),
             "dashed".to_string(),
+            ExportOptions::default(),
         )
     }
 
@@ -403,6 +419,35 @@ mod tests {
 
         handle_key(key(KeyCode::Char('k')), &mut app).await.unwrap();
         assert_eq!(app.selected_panel, 0);
+    }
+
+    #[tokio::test]
+    async fn export_shortcuts_return_export_actions() {
+        let mut app = test_app();
+
+        let action = handle_key(key(KeyCode::Char('e')), &mut app).await.unwrap();
+        assert_eq!(action, InputAction::ExportCurrent);
+
+        let action = handle_key(ctrl_key(KeyCode::Char('e')), &mut app)
+            .await
+            .unwrap();
+        assert_eq!(action, InputAction::ToggleRecording);
+    }
+
+    #[tokio::test]
+    async fn search_mode_e_keeps_typing_but_ctrl_e_toggles_recording() {
+        let mut app = test_app();
+        app.mode = AppMode::Search;
+
+        let action = handle_key(key(KeyCode::Char('e')), &mut app).await.unwrap();
+        assert_eq!(action, InputAction::Redraw);
+        assert_eq!(app.search_query, "e");
+
+        let action = handle_key(ctrl_key(KeyCode::Char('e')), &mut app)
+            .await
+            .unwrap();
+        assert_eq!(action, InputAction::ToggleRecording);
+        assert_eq!(app.search_query, "e");
     }
 
     #[tokio::test]
