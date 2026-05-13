@@ -152,7 +152,7 @@ grafatui [OPTIONS]
 
 Run `grafatui --help` for the full list of options.
 
-Exports use the visible dashboard layout and support SVG, PNG, or both formats. Recordings are changed-frame bundles under `--export-dir`: `Ctrl+E` starts a recording directory, writes only frames whose rendered dashboard changed, and adds a `manifest.json` with version, viewport, timing, format, and frame file metadata when stopped.
+Exports use the visible dashboard layout and support SVG, PNG, or both formats. Recordings are changed-frame bundles under `--export-dir`: `Ctrl+E` starts a recording directory, writes only frames whose rendered dashboard changed, and adds a `manifest.json` with version, viewport, timing, format, frame counts, max frames, completion reason, and frame file metadata when stopped.
 
 ### Configuration File
 

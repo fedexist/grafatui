@@ -81,6 +81,14 @@ pub(crate) struct RecordingViewport {
     height: u16,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum RecordingCompletionReason {
+    Stopped,
+    Quit,
+    Capped,
+}
+
 #[derive(Debug, Serialize)]
 struct RecordingManifest {
     version: u8,
@@ -89,6 +97,9 @@ struct RecordingManifest {
     format: ExportFormat,
     viewport: RecordingViewport,
     changed_only: bool,
+    frame_count: usize,
+    max_frames: usize,
+    completed_reason: RecordingCompletionReason,
     frames: Vec<RecordingFrame>,
 }
 
@@ -126,7 +137,7 @@ pub(crate) fn export_current(app: &mut AppState, viewport: Rect) -> Result<Vec<P
 
 pub(crate) fn toggle_recording(app: &mut AppState, viewport: Rect) -> Result<()> {
     if app.recording.is_some() {
-        stop_recording(app)
+        stop_recording(app, RecordingCompletionReason::Stopped)
     } else {
         start_recording(app, viewport)
     }
@@ -138,8 +149,10 @@ pub(crate) fn capture_recording_frame(app: &mut AppState, viewport: Rect) -> Res
     };
     if recording.frame_count >= recording.max_frames {
         app.export_status = Some(format!(
-            "Recording capped at {} frames",
-            recording.max_frames
+            "Recording capped at {}/{} frames in {}; press Ctrl+E or q to save",
+            recording.frame_count,
+            recording.max_frames,
+            recording.dir.display()
         ));
         return Ok(());
     }
@@ -201,11 +214,16 @@ fn start_recording(app: &mut AppState, viewport: Rect) -> Result<()> {
     capture_recording_frame(app, viewport)
 }
 
-pub(crate) fn stop_recording(app: &mut AppState) -> Result<()> {
+pub(crate) fn stop_recording(app: &mut AppState, reason: RecordingCompletionReason) -> Result<()> {
     let Some(recording) = app.recording.take() else {
         return Ok(());
     };
 
+    let completed_reason = if recording.frame_count >= recording.max_frames {
+        RecordingCompletionReason::Capped
+    } else {
+        reason
+    };
     let manifest = RecordingManifest {
         version: 1,
         started_at: recording.started_at,
@@ -213,16 +231,25 @@ pub(crate) fn stop_recording(app: &mut AppState) -> Result<()> {
         format: app.export.format,
         viewport: recording.viewport,
         changed_only: true,
+        frame_count: recording.frame_count,
+        max_frames: recording.max_frames,
+        completed_reason,
         frames: recording.frames,
     };
     let manifest_path = recording.dir.join("manifest.json");
     let json = serde_json::to_string_pretty(&manifest)?;
     fs::write(&manifest_path, json)
         .with_context(|| format!("failed to write {}", manifest_path.display()))?;
+    let capped = if completed_reason == RecordingCompletionReason::Capped {
+        ", capped"
+    } else {
+        ""
+    };
     app.export_status = Some(format!(
-        "Recording saved {} ({} frames)",
+        "Recording saved {} ({}/{} frames{capped})",
         recording.dir.display(),
-        recording.frame_count
+        recording.frame_count,
+        recording.max_frames
     ));
     Ok(())
 }
@@ -1507,6 +1534,9 @@ mod tests {
         assert_eq!(json["version"], 1);
         assert_eq!(json["format"], "svg");
         assert_eq!(json["changed_only"], true);
+        assert_eq!(json["frame_count"], 2);
+        assert_eq!(json["max_frames"], 10);
+        assert_eq!(json["completed_reason"], "stopped");
         assert_eq!(json["viewport"]["width"], viewport.width);
         assert_eq!(json["viewport"]["height"], viewport.height);
         assert!(json["started_at"].as_str().unwrap().contains('T'));
@@ -1560,10 +1590,21 @@ mod tests {
         let recording = app.recording.as_ref().unwrap();
         assert_eq!(recording.frame_count, 1);
         assert_eq!(recording.frames.len(), 1);
-        assert_eq!(
-            app.export_status.as_deref(),
-            Some("Recording capped at 1 frames")
-        );
+        let status = app.export_status.as_deref().unwrap();
+        assert!(status.contains("Recording capped at 1/1 frames"));
+        assert!(status.contains(&dir.display().to_string()));
+        assert!(status.contains("press Ctrl+E or q to save"));
+
+        toggle_recording(&mut app, viewport).unwrap();
+
+        let recording_dir = fs::read_dir(&dir).unwrap().next().unwrap().unwrap().path();
+        let manifest = recording_dir.join("manifest.json");
+        let json: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(manifest).unwrap()).unwrap();
+        assert_eq!(json["frame_count"], 1);
+        assert_eq!(json["max_frames"], 1);
+        assert_eq!(json["completed_reason"], "capped");
+        assert_eq!(json["frames"].as_array().unwrap().len(), 1);
         fs::remove_dir_all(dir).unwrap();
     }
 }
