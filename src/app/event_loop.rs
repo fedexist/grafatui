@@ -71,7 +71,10 @@ where
             };
 
             match action {
-                InputAction::Quit => return Ok(()),
+                InputAction::Quit => {
+                    finalize_recording_before_quit(app)?;
+                    return Ok(());
+                }
                 InputAction::Redraw => {
                     needs_draw = true;
                     capture_recording_after_change(terminal, app)?;
@@ -101,6 +104,13 @@ where
     let size = terminal.size()?;
     let viewport = Rect::new(0, 0, size.width, size.height);
     export::capture_recording_frame(app, viewport)
+}
+
+fn finalize_recording_before_quit(app: &mut AppState) -> Result<()> {
+    if app.recording.is_some() {
+        export::stop_recording(app)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -178,6 +188,25 @@ mod tests {
         capture_recording_after_change(&terminal, &mut app).unwrap();
 
         assert_eq!(app.recording.as_ref().unwrap().frame_count, 2);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn test_finalize_recording_before_quit_writes_manifest() {
+        let dir = test_export_dir("quit-recording");
+        let export = ExportOptions {
+            dir: dir.clone(),
+            format: ExportFormat::Svg,
+            record_max_frames: 10,
+        };
+        let mut app = test_app(export);
+
+        export::toggle_recording(&mut app, Rect::new(0, 0, 100, 40)).unwrap();
+        finalize_recording_before_quit(&mut app).unwrap();
+
+        assert!(app.recording.is_none());
+        let recording_dir = fs::read_dir(&dir).unwrap().next().unwrap().unwrap().path();
+        assert!(recording_dir.join("manifest.json").exists());
         fs::remove_dir_all(dir).unwrap();
     }
 }

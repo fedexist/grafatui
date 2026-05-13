@@ -192,7 +192,7 @@ fn start_recording(app: &mut AppState, viewport: Rect) -> Result<()> {
     capture_recording_frame(app, viewport)
 }
 
-fn stop_recording(app: &mut AppState) -> Result<()> {
+pub(crate) fn stop_recording(app: &mut AppState) -> Result<()> {
     let Some(recording) = app.recording.take() else {
         return Ok(());
     };
