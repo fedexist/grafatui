@@ -15,8 +15,8 @@
  */
 
 use crate::app::data::{downsample, expand_expr, format_legend};
-use crate::export::{ExportOptions, RecordingState};
 use crate::app::variables::refresh_query_variables;
+use crate::export::{ExportOptions, RecordingState};
 use crate::grafana::TemplateQueryVar;
 use crate::prom;
 use crate::theme::Theme;
