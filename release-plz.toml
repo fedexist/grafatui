@@ -1,5 +1,5 @@
 # Configuration for release-plz
-# https://release-plz.ieni.dev/docs/config
+# https://release-plz.dev/docs/config
 
 [workspace]
 # Repository URL for linking commits/issues
@@ -8,6 +8,8 @@ repo_url = "https://github.com/fedexist/grafatui"
 git_release_enable = true
 # Prefix for release PR branches
 pr_branch_prefix = "release-plz-"
+# Use git tags, not crates.io, as the release source of truth
+git_only = true
 # Don't publish to crates.io automatically (require manual trigger)
 publish = false
 # Enable changelog updates
