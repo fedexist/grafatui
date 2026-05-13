@@ -19,7 +19,7 @@ use super::state::AppState;
 use crate::export;
 use crate::ui;
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::event::{self, Event};
 use ratatui::Terminal;
 use ratatui::layout::Rect;
 use std::time::Duration;
@@ -44,25 +44,7 @@ where
 
         if event::poll(timeout)? {
             let action = match event::read()? {
-                Event::Key(key) => {
-                    let size = terminal.size()?;
-                    let viewport = Rect::new(0, 0, size.width, size.height);
-                    let is_ctrl_export = key.code == KeyCode::Char('e')
-                        && key.modifiers.contains(KeyModifiers::CONTROL);
-                    let is_export = key.code == KeyCode::Char('e')
-                        && key.modifiers.is_empty()
-                        && app.mode != crate::app::AppMode::Search;
-
-                    if is_ctrl_export {
-                        export::toggle_recording(app, viewport)?;
-                        InputAction::Redraw
-                    } else if is_export {
-                        export::export_current(app, viewport)?;
-                        InputAction::Redraw
-                    } else {
-                        input::handle_key(key, app).await?
-                    }
-                }
+                Event::Key(key) => input::handle_key(key, app).await?,
                 Event::Mouse(mouse) => {
                     let size = terminal.size()?;
                     input::handle_mouse(mouse, size, app)?
@@ -74,6 +56,18 @@ where
                 InputAction::Quit => {
                     finalize_recording_before_quit(app)?;
                     return Ok(());
+                }
+                InputAction::ExportCurrent => {
+                    let viewport = terminal_viewport(terminal)?;
+                    export::export_current(app, viewport)?;
+                    needs_draw = true;
+                    capture_recording_after_change(terminal, app)?;
+                }
+                InputAction::ToggleRecording => {
+                    let viewport = terminal_viewport(terminal)?;
+                    export::toggle_recording(app, viewport)?;
+                    needs_draw = true;
+                    capture_recording_after_change(terminal, app)?;
                 }
                 InputAction::Redraw => {
                     needs_draw = true;
@@ -90,6 +84,14 @@ where
     }
 }
 
+fn terminal_viewport<B: ratatui::backend::Backend>(terminal: &Terminal<B>) -> Result<Rect>
+where
+    <B as ratatui::backend::Backend>::Error: Send + Sync + 'static,
+{
+    let size = terminal.size()?;
+    Ok(Rect::new(0, 0, size.width, size.height))
+}
+
 fn capture_recording_after_change<B: ratatui::backend::Backend>(
     terminal: &Terminal<B>,
     app: &mut AppState,
@@ -101,8 +103,7 @@ where
         return Ok(());
     }
 
-    let size = terminal.size()?;
-    let viewport = Rect::new(0, 0, size.width, size.height);
+    let viewport = terminal_viewport(terminal)?;
     export::capture_recording_frame(app, viewport)
 }
 
