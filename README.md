@@ -65,6 +65,7 @@ This demo showcases all 7 visualization types (graph, stat, gauge, bar gauge, ta
 - **Fullscreen mode**: Focus on a single panel
 - **Value inspection**: Cursor-based point-in-time data exploration
 - **Series toggling**: Show/hide individual metrics
+- **Image export**: Save the current dashboard as SVG/PNG, or record changed states as a timestamped frame bundle
 
 ### Customization
 - **8 themes**: default, dracula, monokai, solarized (dark/light), gruvbox, tokyo-night, catppuccin
@@ -142,11 +143,47 @@ grafatui [OPTIONS]
 | `--var <KEY=VALUE>` | Override dashboard variables | - |
 | `--theme <NAME>` | UI theme | `default` |
 | `--threshold-marker <MARKER>` | Marker for threshold lines (`dashed`, `dot`, `block`, `quadrant`, etc.) | `dashed` |
+| `--export-dir <DIR>` | Directory for SVG/PNG exports and recordings | `./grafatui-exports` |
+| `--export-format <FORMAT>` | Export format (`svg`, `png`, `both`) | `svg` |
+| `--record-max-frames <COUNT>` | Maximum changed frames per recording (`> 0`) | `300` |
 | `--autogrid-color <COLOR>` | Color for autogrid lines and labels (`gray`, `dark-gray`, `#666666`, etc.) | `dark-gray` |
 | `--refresh-rate <MS>` | Data fetch interval (milliseconds) | `1000` |
 | `--config <FILE>` | Custom config file path | - |
 
 Run `grafatui --help` for the full list of options.
+
+### Exporting and Recording
+
+Exports use the visible dashboard layout and support SVG, PNG, or both formats.
+
+- Press `e` to export the current view. Files are written under `--export-dir` as `grafatui-<timestamp>.svg`, `.png`, or both, depending on `--export-format`.
+- Press `Ctrl+E` to start a changed-frame recording bundle. This creates `grafatui-recording-<timestamp>/` under `--export-dir`.
+- While recording, grafatui writes only changed rendered states as `frame-000001.svg`, `frame-000002.svg`, and so on. If `--export-format png` or `both` is selected, matching PNG files are written too.
+- Press `Ctrl+E` again, or quit with `q`, to finalize the recording and write `manifest.json`.
+- If `--record-max-frames` is reached, grafatui stops writing new frames, keeps recording active, and saves the bundle with `completed_reason = "capped"` when finalized.
+
+The recording manifest includes metadata that downstream tools can use:
+
+```json
+{
+  "version": 1,
+  "format": "svg",
+  "changed_only": true,
+  "frame_count": 2,
+  "max_frames": 300,
+  "completed_reason": "stopped",
+  "viewport": { "width": 100, "height": 40 },
+  "frames": [
+    {
+      "index": 1,
+      "elapsed_ms": 0,
+      "files": ["frame-000001.svg"]
+    }
+  ]
+}
+```
+
+`completed_reason` is `stopped` when ended with `Ctrl+E`, `quit` when finalized during quit, or `capped` when the recording reached `--record-max-frames`.
 
 ### Configuration File
 
@@ -158,6 +195,9 @@ refresh_rate = 1000
 time_range = "1h"
 theme = "dracula"
 threshold_marker = "dashed"
+export_dir = "./grafatui-exports"
+export_format = "svg"
+record_max_frames = 300
 autogrid = true
 autogrid_color = "dark-gray"
 grafana_json = "~/.config/grafatui/my-dashboard.json"
@@ -216,6 +256,8 @@ grafatui --config examples/demo/grafatui.toml
 | `1`..`9` | Toggle series visibility |
 | `f` / `Enter` | Fullscreen mode |
 | `v` | Value inspection mode |
+| `e` | Export current view |
+| `Ctrl+E` | Start/stop changed-frame recording bundle |
 | `/` | Search panels |
 | `←` / `→` | Move cursor (inspect mode) |
 | `?` | Toggle debug info |

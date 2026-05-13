@@ -30,6 +30,9 @@ pub(crate) struct Config {
     pub(crate) theme: Option<String>,
     pub(crate) grafana_json: Option<PathBuf>,
     pub(crate) threshold_marker: Option<String>,
+    pub(crate) export_dir: Option<PathBuf>,
+    pub(crate) export_format: Option<crate::export::ExportFormat>,
+    pub(crate) record_max_frames: Option<usize>,
     pub(crate) autogrid: Option<bool>,
     pub(crate) autogrid_color: Option<String>,
     pub(crate) vars: Option<HashMap<String, String>>,
@@ -98,6 +101,7 @@ mod tests {
             prometheus_url = "http://localhost:9090"
             refresh_rate = 5000
             theme = "dracula"
+            export_format = "svg"
             autogrid = false
             autogrid_color = "gray"
         "#;
@@ -108,6 +112,7 @@ mod tests {
         );
         assert_eq!(config.refresh_rate, Some(5000));
         assert_eq!(config.theme, Some("dracula".to_string()));
+        assert_eq!(config.export_format, Some(crate::export::ExportFormat::Svg));
         assert_eq!(config.autogrid, Some(false));
         assert_eq!(config.autogrid_color, Some("gray".to_string()));
     }

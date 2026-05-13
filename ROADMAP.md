@@ -35,6 +35,7 @@ These features are shipped and available today:
 | **Thresholds** | `fieldConfig.defaults.thresholds` for graph limit lines and dynamic Stat/Gauge/BarGauge coloring |
 | **Threshold marker styles** | Configurable marker styles including dashed line, braille, block, quadrant, sextant, and octant modes |
 | **Field min/max bounds** | `fieldConfig.defaults.min` / `max` for gauge scaling and percentage threshold interpolation |
+| **Export to SVG/PNG** | Native SVG dashboard snapshots, PNG rasterization, and recording frame bundles |
 | **Shell completions** | Bash, Zsh, Fish, PowerShell, Elvish |
 | **Cross-platform binaries** | Linux (x86_64, aarch64), macOS (x86_64, aarch64), Windows (x86_64) |
 | **Package formats** | `.deb`, `.rpm`, Homebrew formula |
@@ -86,8 +87,7 @@ For a field-by-field breakdown of Grafana JSON compatibility, see [GRAFANA_COMPA
 |---|---|---|---|
 | **Export to CSV** | Dump metric data to file | 🟢 | 🔜 |
 | **Copy to clipboard** | Copy panel data for reports | 🟢 | 📋 |
-| **Export to PNG/SVG** | Capture dashboard state as image | 🟡 | 💡 |
-| **Share snapshot** | Generate shareable file of current view | 🟡 | 💡 |
+| **Share snapshot** | Generate portable single-file/share-link snapshots | 🟡 | 💡 |
 
 ---
 
