@@ -16,7 +16,7 @@
 
 use super::input::{self, InputAction};
 use super::state::AppState;
-use crate::export;
+use crate::export::{self, RecordingCompletionReason};
 use crate::ui;
 use anyhow::Result;
 use crossterm::event::{self, Event};
@@ -109,7 +109,7 @@ where
 
 fn finalize_recording_before_quit(app: &mut AppState) -> Result<()> {
     if app.recording.is_some() {
-        export::stop_recording(app)?;
+        export::stop_recording(app, RecordingCompletionReason::Quit)?;
     }
     Ok(())
 }
@@ -207,7 +207,11 @@ mod tests {
 
         assert!(app.recording.is_none());
         let recording_dir = fs::read_dir(&dir).unwrap().next().unwrap().unwrap().path();
-        assert!(recording_dir.join("manifest.json").exists());
+        let manifest = recording_dir.join("manifest.json");
+        assert!(manifest.exists());
+        let json: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(manifest).unwrap()).unwrap();
+        assert_eq!(json["completed_reason"], "quit");
         fs::remove_dir_all(dir).unwrap();
     }
 }
