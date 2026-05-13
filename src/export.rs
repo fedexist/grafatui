@@ -46,6 +46,15 @@ impl Default for ExportOptions {
     }
 }
 
+impl ExportOptions {
+    pub(crate) fn validate(self) -> Result<Self> {
+        if self.record_max_frames == 0 {
+            return Err(anyhow!("record_max_frames must be greater than 0"));
+        }
+        Ok(self)
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct RecordingState {
     pub(crate) dir: PathBuf,
@@ -1512,6 +1521,49 @@ mod tests {
         );
         assert!(json["frames"][1]["elapsed_ms"].as_u64().is_some());
         assert_eq!(json["frames"][1]["files"][0], "frame-000002.svg");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn test_export_options_reject_zero_recording_frames() {
+        let export = ExportOptions {
+            record_max_frames: 0,
+            ..ExportOptions::default()
+        };
+
+        let err = export.validate().unwrap_err();
+
+        assert!(
+            err.to_string().contains("record_max_frames"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_recording_frame_cap_prevents_extra_frames() {
+        let dir = test_export_dir("recording-cap");
+        let export = ExportOptions {
+            dir: dir.clone(),
+            format: ExportFormat::Svg,
+            record_max_frames: 1,
+        };
+        let mut app = test_app(export);
+        let viewport = Rect::new(0, 0, 100, 40);
+
+        toggle_recording(&mut app, viewport).unwrap();
+        app.panels[0].series[0].value = Some(42.0);
+        app.panels[0].series[0]
+            .points
+            .push((chrono::Utc::now().timestamp() as f64, 42.0));
+        capture_recording_frame(&mut app, viewport).unwrap();
+
+        let recording = app.recording.as_ref().unwrap();
+        assert_eq!(recording.frame_count, 1);
+        assert_eq!(recording.frames.len(), 1);
+        assert_eq!(
+            app.export_status.as_deref(),
+            Some("Recording capped at 1 frames")
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 }

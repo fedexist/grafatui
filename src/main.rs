@@ -196,7 +196,8 @@ async fn main() -> Result<()> {
             dir: export_dir,
             format: export_format,
             record_max_frames,
-        },
+        }
+        .validate()?,
     );
     state.autogrid_enabled = autogrid_enabled;
     state.autogrid_color = autogrid_color;
