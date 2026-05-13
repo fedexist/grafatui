@@ -4,6 +4,39 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.1.7] - 2026-05-13
+
+### ⛰️  Features
+
+- Update recording engine with timing metadata and expand panel type rendering support ([4f6fafb](https://github.com/fedexist/grafatui/commit/4f6fafb08ce94fc35d17d668f9f412588ce1d2e6))
+- Enrich recording manifest metadata ([e3e26d5](https://github.com/fedexist/grafatui/commit/e3e26d5849e8b9c0a2aafd2cb62e2e26421c03bd))
+
+### 🐛 Bug Fixes
+
+- Finalize recording on quit ([2c8c221](https://github.com/fedexist/grafatui/commit/2c8c221c32d5a4e0db701a5315ff6f452efda506))
+- Validate recording frame limit ([203586d](https://github.com/fedexist/grafatui/commit/203586d921af6a963e03d7980d75e51bc7249373))
+
+### 📚 Documentation
+
+- Expand export recording guidance ([7f31e30](https://github.com/fedexist/grafatui/commit/7f31e305cbb9bf0c4126ac0b1c14d132c86c33a4))
+
+### 🚜 Refactor
+
+- Reorganize project structure into modules and implement event-driven app architecture ([e0a110f](https://github.com/fedexist/grafatui/commit/e0a110f3c50962dddd64d71fa7612cd2446384de))
+- Modularize graph panel into sub-components for labels, thresholds, autogrid, bounds, and overlays ([0e13dde](https://github.com/fedexist/grafatui/commit/0e13ddeb831d417c948ec05c766ff80f0c39f43b))
+- Extract key handling logic into a dedicated input module ([10d2c65](https://github.com/fedexist/grafatui/commit/10d2c65c2faa6d7749917b640aca7234ed113cce))
+- Restrict visibility of internal state structures to crate-level ([9abadc6](https://github.com/fedexist/grafatui/commit/9abadc61a98b43fd221c8d6470b8dd3c7ab19d51))
+- Route export shortcuts through input actions ([43c1c85](https://github.com/fedexist/grafatui/commit/43c1c8562b64e2cc4f7a682347ee3ddc7a5c44f7))
+
+### 🎨 Styling
+
+- Apply rustfmt import ordering ([90d96c5](https://github.com/fedexist/grafatui/commit/90d96c5c623ca736e7faf94cbc709542a2c3d334))
+
+### ⚙️ Miscellaneous Tasks
+
+- **release:** Run release automation from main ([81126e1](https://github.com/fedexist/grafatui/commit/81126e1ff02285993be5ee7ece7451df83675c94))
+
+
 ## [0.1.6] - 2026-04-30
 
 ### ⛰️  Features
