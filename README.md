@@ -145,14 +145,45 @@ grafatui [OPTIONS]
 | `--threshold-marker <MARKER>` | Marker for threshold lines (`dashed`, `dot`, `block`, `quadrant`, etc.) | `dashed` |
 | `--export-dir <DIR>` | Directory for SVG/PNG exports and recordings | `./grafatui-exports` |
 | `--export-format <FORMAT>` | Export format (`svg`, `png`, `both`) | `svg` |
-| `--record-max-frames <COUNT>` | Maximum frames per recording | `300` |
+| `--record-max-frames <COUNT>` | Maximum changed frames per recording (`> 0`) | `300` |
 | `--autogrid-color <COLOR>` | Color for autogrid lines and labels (`gray`, `dark-gray`, `#666666`, etc.) | `dark-gray` |
 | `--refresh-rate <MS>` | Data fetch interval (milliseconds) | `1000` |
 | `--config <FILE>` | Custom config file path | - |
 
 Run `grafatui --help` for the full list of options.
 
-Exports use the visible dashboard layout and support SVG, PNG, or both formats. Recordings are changed-frame bundles under `--export-dir`: `Ctrl+E` starts a recording directory, writes only frames whose rendered dashboard changed, and adds a `manifest.json` with version, viewport, timing, format, frame counts, max frames, completion reason, and frame file metadata when stopped.
+### Exporting and Recording
+
+Exports use the visible dashboard layout and support SVG, PNG, or both formats.
+
+- Press `e` to export the current view. Files are written under `--export-dir` as `grafatui-<timestamp>.svg`, `.png`, or both, depending on `--export-format`.
+- Press `Ctrl+E` to start a changed-frame recording bundle. This creates `grafatui-recording-<timestamp>/` under `--export-dir`.
+- While recording, grafatui writes only changed rendered states as `frame-000001.svg`, `frame-000002.svg`, and so on. If `--export-format png` or `both` is selected, matching PNG files are written too.
+- Press `Ctrl+E` again, or quit with `q`, to finalize the recording and write `manifest.json`.
+- If `--record-max-frames` is reached, grafatui stops writing new frames, keeps recording active, and saves the bundle with `completed_reason = "capped"` when finalized.
+
+The recording manifest includes metadata that downstream tools can use:
+
+```json
+{
+  "version": 1,
+  "format": "svg",
+  "changed_only": true,
+  "frame_count": 2,
+  "max_frames": 300,
+  "completed_reason": "stopped",
+  "viewport": { "width": 100, "height": 40 },
+  "frames": [
+    {
+      "index": 1,
+      "elapsed_ms": 0,
+      "files": ["frame-000001.svg"]
+    }
+  ]
+}
+```
+
+`completed_reason` is `stopped` when ended with `Ctrl+E`, `quit` when finalized during quit, or `capped` when the recording reached `--record-max-frames`.
 
 ### Configuration File
 
