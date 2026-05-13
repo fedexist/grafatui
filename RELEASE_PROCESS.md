@@ -22,24 +22,28 @@ When making changes:
    ```bash
    git commit -m "feat(zoom): add pan left/right functionality"
    ```
-3. Push to `main` branch
+3. Open a PR and merge it directly into `main`
 
 ### 2. Automated Release Process
 
 When commits are pushed to `main`:
 
 1. **GitHub Action triggers** (`.github/workflows/release-plz.yml`)
-2. **release-plz analyzes** commits since the last version tag
-3. **Version bump determined**:
+2. **release-plz release** checks whether the current version already has a git tag and GitHub release
+3. **release-plz release-pr** analyzes commits since the last version tag
+4. **Version bump determined**:
    - `feat:` → MINOR bump (0.1.0 → 0.2.0)
    - `fix:` → PATCH bump (0.1.0 → 0.1.1)
    - `BREAKING CHANGE:` → MAJOR bump (0.1.0 → 1.0.0)
-4. **Pull Request created** with:
+5. **Release Pull Request created or updated** with:
    - Updated `Cargo.toml` version
    - Generated `CHANGELOG.md` entries
-   - Git tag
-5. **Maintainer reviews and merges** the PR
-6. **GitHub release created** automatically
+6. **Maintainer reviews and merges** the Release PR when ready
+7. **GitHub release and git tag created** automatically
+8. **Release assets built** and uploaded automatically
+9. **Homebrew tap updated** automatically
+
+Crates.io publishing is intentionally separate and manual. After the GitHub release is created, run the `Publish to crates.io` workflow with `dry_run` enabled first, then run it again with `dry_run` disabled when the dry run succeeds.
 
 ## Commit Message Format
 
@@ -125,15 +129,16 @@ Configures changelog generation format and commit parsing rules.
 ### `release-plz.toml`
 Configures release-plz behavior:
 - Only runs on `main` branch
+- Uses git tags as the release source of truth
 - Uses git-cliff for changelog generation
 - Does not auto-publish to crates.io (manual trigger required)
 
 ### `.github/workflows/release-plz.yml`
 GitHub Actions workflow that:
 - Triggers on push to `main`
-- Runs release-plz action
-- Creates release PRs
-- Creates GitHub Release and Tag upon merge
+- Can also be run manually with `workflow_dispatch`
+- Runs `release-plz release` to create a GitHub Release and tag when the Release PR lands
+- Runs `release-plz release-pr` to create or update the Release PR after normal changes land on `main`
 
 ### `.github/workflows/release-assets.yml`
 GitHub Actions workflow that:
@@ -141,6 +146,14 @@ GitHub Actions workflow that:
 - Builds and uploads release assets for each supported target
 - Updates the `fedexist/homebrew-grafatui` tap after assets are uploaded
 - Recomputes all platform-specific SHA256 values in the Homebrew formula
+
+### `.github/workflows/publish-crates-io.yml`
+GitHub Actions workflow that:
+- Runs manually with a version input such as `0.2.0`
+- Checks out the matching tag, for example `v0.2.0`
+- Builds and tests the project
+- Runs `cargo publish --dry-run` by default
+- Publishes to crates.io only when `dry_run` is disabled
 
 ## Manual Operations
 
@@ -207,19 +220,26 @@ For the first release after setting this up:
 - Verify `release-plz.toml` has correct paths
 - Ensure commits are not filtered by `commit_parsers`
 
-## Trigger a Release Manually
+## Trigger Release Automation Manually
 
-If the automated release PR was not created (e.g. the workflow was skipped), you can trigger it manually:
+If the automated Release PR was not created or updated, open the GitHub Actions tab and run the `Release` workflow manually. This runs the same `release-plz release` and `release-plz release-pr` jobs that run after pushes to `main`.
 
-1. Ensure `dev` is up to date with `main`: `git switch dev && git merge origin/main`
-2. Make a trivial commit: `git commit --allow-empty -m "chore: trigger release"`
-3. Push: `git push origin dev`
-4. Open a PR from `dev` → `main` on GitHub and merge it
-5. The `release-plz` GitHub Action will fire and create (or update) the Release PR
+## Solo Maintainer Checklist
+
+1. Merge normal feature and fix PRs directly into `main`.
+2. Wait for the `Release` workflow to create or update the `release-plz-*` Release PR.
+3. Review the generated version bump and `CHANGELOG.md` entries.
+4. Merge the Release PR when you want to publish.
+5. Confirm the GitHub release exists and release assets were uploaded.
+6. Confirm `fedexist/homebrew-grafatui` was updated.
+7. Optionally publish to crates.io with the `Publish to crates.io` workflow:
+   - First run with `dry_run: true`.
+   - If the dry run succeeds, run again with `dry_run: false`.
 
 ## Resources
 
 - [Conventional Commits Specification](https://www.conventionalcommits.org/)
-- [release-plz Documentation](https://release-plz.ieni.dev/)
+- [release-plz Quickstart](https://release-plz.dev/docs/github/quickstart/)
+- [release-plz Configuration](https://release-plz.dev/docs/config/)
 - [git-cliff Documentation](https://git-cliff.org/)
 - [Semantic Versioning](https://semver.org/)
