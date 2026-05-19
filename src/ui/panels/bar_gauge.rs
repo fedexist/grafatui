@@ -15,7 +15,6 @@
  */
 
 use crate::app::{AppState, PanelState};
-use crate::ui::format::format_si;
 use ratatui::{
     prelude::*,
     widgets::{Bar, BarChart, BarGroup, Block, Borders, Paragraph},
@@ -54,7 +53,7 @@ pub(super) fn render_bar_gauge(frame: &mut Frame, area: Rect, p: &PanelState, ap
         let color = p.get_color_for_value(v).unwrap_or(theme.palette[0]);
         let bar = Bar::default()
             .value((v * scale) as u64)
-            .text_value(format_si(v))
+            .text_value(p.display.format_number(v))
             .label(Line::from(s.name.as_str()))
             .style(Style::default().fg(color))
             .value_style(Style::default().fg(theme.text).bg(color));

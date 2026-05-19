@@ -160,6 +160,7 @@ mod tests {
                 min: None,
                 max: None,
                 autogrid: None,
+                display: crate::ui::DisplayFormat::default(),
             }],
             0,
             Theme::default(),

@@ -15,7 +15,7 @@
  */
 
 use super::overlay::is_blank_cell;
-use crate::ui::format::{format_axis_time, format_si};
+use crate::ui::format::{DisplayFormat, format_axis_time};
 use ratatui::prelude::*;
 
 #[derive(Debug, Clone, Copy)]
@@ -32,10 +32,19 @@ pub(super) struct YLabelArea {
     pub(super) width: u16,
 }
 
+pub(super) struct YLabelContext<'a> {
+    pub(super) y_bounds: [f64; 2],
+    pub(super) autogrid_ticks: &'a [f64],
+    pub(super) threshold_labels: &'a [(f64, Color)],
+    pub(super) display: &'a DisplayFormat,
+    pub(super) color: Color,
+}
+
 pub(super) fn y_label_width(
     axis_labels: &[Span<'_>],
     autogrid_ticks: &[f64],
     threshold_labels: &[(f64, Color)],
+    display: &DisplayFormat,
 ) -> u16 {
     let axis_width = axis_labels
         .iter()
@@ -44,12 +53,12 @@ pub(super) fn y_label_width(
         .unwrap_or(0);
     let grid_width = autogrid_ticks
         .iter()
-        .map(|tick| format_si(*tick).len() as u16)
+        .map(|tick| display.format_number(*tick).len() as u16)
         .max()
         .unwrap_or(0);
     let threshold_width = threshold_labels
         .iter()
-        .map(|(tick, _)| format_si(*tick).len() as u16)
+        .map(|(tick, _)| display.format_number(*tick).len() as u16)
         .max()
         .unwrap_or(0);
 
@@ -60,36 +69,33 @@ pub(super) fn render_intermediate_y_labels(
     frame: &mut Frame,
     label_area: YLabelArea,
     plot: PlotBounds,
-    y_bounds: [f64; 2],
-    autogrid_ticks: &[f64],
-    threshold_labels: &[(f64, Color)],
-    grid_color: Color,
+    labels: YLabelContext<'_>,
 ) {
     if label_area.width == 0 {
         return;
     }
 
-    for tick in autogrid_ticks {
-        if let Some(y) = value_to_y_label_row(*tick, y_bounds, plot) {
+    for tick in labels.autogrid_ticks {
+        if let Some(y) = value_to_y_label_row(*tick, labels.y_bounds, plot) {
             write_right_aligned_label(
                 frame,
                 label_area.left,
                 y,
                 label_area.width,
-                &format_si(*tick),
-                grid_color,
+                &labels.display.format_number(*tick),
+                labels.color,
             );
         }
     }
 
-    for (tick, color) in threshold_labels {
-        if let Some(y) = value_to_y_label_row(*tick, y_bounds, plot) {
+    for (tick, color) in labels.threshold_labels {
+        if let Some(y) = value_to_y_label_row(*tick, labels.y_bounds, plot) {
             write_right_aligned_label(
                 frame,
                 label_area.left,
                 y,
                 label_area.width,
-                &format_si(*tick),
+                &labels.display.format_number(*tick),
                 *color,
             );
         }

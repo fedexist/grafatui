@@ -141,6 +141,7 @@ pub(crate) fn default_queries(mut provided: Vec<String>) -> Vec<PanelState> {
             min: None,
             max: None,
             autogrid: None,
+            display: crate::ui::DisplayFormat::default(),
         })
         .collect()
 }
