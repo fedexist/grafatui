@@ -16,6 +16,60 @@
 
 use ratatui::style::Color;
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct DisplayFormat {
+    pub(crate) unit: Option<String>,
+    pub(crate) decimals: Option<usize>,
+    pub(crate) no_value: Option<String>,
+}
+
+impl DisplayFormat {
+    pub(crate) fn format_value(&self, value: Option<f64>) -> String {
+        value
+            .map(|value| self.format_number(value))
+            .unwrap_or_else(|| self.no_value.clone().unwrap_or_else(|| "-".to_string()))
+    }
+
+    pub(crate) fn format_number(&self, value: f64) -> String {
+        match self.unit_key().as_deref() {
+            Some("bytes" | "decbytes") => format_scaled(
+                value,
+                &["B", "KB", "MB", "GB", "TB", "PB"],
+                self.decimals,
+                "",
+            ),
+            Some("bits" | "decbits") => format_scaled(
+                value,
+                &["b", "Kb", "Mb", "Gb", "Tb", "Pb"],
+                self.decimals,
+                "",
+            ),
+            Some("s" | "seconds") => format_duration_seconds(value, self.decimals),
+            Some("ms") => format_suffix(value, self.decimals, "ms"),
+            Some("percent") => format_suffix(value, self.decimals, "%"),
+            Some("percentunit") => format_suffix(value * 100.0, self.decimals, "%"),
+            Some("ops") => format_rate(value, self.decimals, " ops/s"),
+            Some("reqps" | "rps") => format_rate(value, self.decimals, " req/s"),
+            Some("bps" | "bytes/sec" | "bytes/s") => format_scaled(
+                value,
+                &["B/s", "KB/s", "MB/s", "GB/s", "TB/s", "PB/s"],
+                self.decimals,
+                "",
+            ),
+            Some("short" | "none") | None => format_si_with_decimals(value, self.decimals),
+            Some(_) => format_si_with_decimals(value, self.decimals),
+        }
+    }
+
+    fn unit_key(&self) -> Option<String> {
+        self.unit
+            .as_deref()
+            .map(str::trim)
+            .filter(|unit| !unit.is_empty())
+            .map(|unit| unit.to_ascii_lowercase())
+    }
+}
+
 /// Maps a normalized value (0.0-1.0) to a heatmap color (blue -> green -> yellow -> red)
 pub(crate) fn value_to_heatmap_color(normalized: f64) -> Color {
     // Use a simple color gradient for heatmap
@@ -32,16 +86,60 @@ pub(crate) fn value_to_heatmap_color(normalized: f64) -> Color {
     }
 }
 
-pub(crate) fn format_si(val: f64) -> String {
+fn format_si_with_decimals(val: f64, decimals: Option<usize>) -> String {
     let abs = val.abs();
+    let decimals = decimals.unwrap_or(2);
     if abs >= 1e9 {
-        format!("{:.2}G", val / 1e9)
+        format!("{:.*}G", decimals, val / 1e9)
     } else if abs >= 1e6 {
-        format!("{:.2}M", val / 1e6)
+        format!("{:.*}M", decimals, val / 1e6)
     } else if abs >= 1e3 {
-        format!("{:.2}k", val / 1e3)
+        format!("{:.*}k", decimals, val / 1e3)
     } else {
-        format!("{:.2}", val)
+        format!("{:.*}", decimals, val)
+    }
+}
+
+fn format_suffix(value: f64, decimals: Option<usize>, suffix: &str) -> String {
+    format!("{:.*}{suffix}", decimals.unwrap_or(2), value)
+}
+
+fn format_rate(value: f64, decimals: Option<usize>, suffix: &str) -> String {
+    format!("{}{suffix}", format_si_with_decimals(value, decimals))
+}
+
+fn format_scaled(
+    value: f64,
+    suffixes: &[&str],
+    decimals: Option<usize>,
+    separator: &str,
+) -> String {
+    let mut scaled = value;
+    let mut suffix_index = 0;
+
+    while scaled.abs() >= 1000.0 && suffix_index + 1 < suffixes.len() {
+        scaled /= 1000.0;
+        suffix_index += 1;
+    }
+
+    format!(
+        "{:.*}{separator}{}",
+        decimals.unwrap_or(2),
+        scaled,
+        suffixes[suffix_index]
+    )
+}
+
+fn format_duration_seconds(value: f64, decimals: Option<usize>) -> String {
+    let abs = value.abs();
+    if abs >= 86_400.0 {
+        format_suffix(value / 86_400.0, decimals, "d")
+    } else if abs >= 3_600.0 {
+        format_suffix(value / 3_600.0, decimals, "h")
+    } else if abs >= 60.0 {
+        format_suffix(value / 60.0, decimals, "m")
+    } else {
+        format_suffix(value, decimals, "s")
     }
 }
 
@@ -137,6 +235,67 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_display_format_uses_si_for_missing_and_unknown_units() {
+        let default = DisplayFormat::default();
+        assert_eq!(default.format_number(1_500.0), "1.50k");
+
+        let unknown = DisplayFormat {
+            unit: Some("widgets".to_string()),
+            decimals: None,
+            no_value: None,
+        };
+        assert_eq!(unknown.format_number(1_500.0), "1.50k");
+    }
+
+    #[test]
+    fn test_display_format_scales_bytes_and_bits() {
+        let bytes = DisplayFormat {
+            unit: Some("bytes".to_string()),
+            decimals: None,
+            no_value: None,
+        };
+        assert_eq!(bytes.format_number(1_536.0), "1.54KB");
+
+        let bits = DisplayFormat {
+            unit: Some("bits".to_string()),
+            decimals: Some(1),
+            no_value: None,
+        };
+        assert_eq!(bits.format_number(1_536.0), "1.5Kb");
+    }
+
+    #[test]
+    fn test_display_format_percent_and_percentunit() {
+        let percent = DisplayFormat {
+            unit: Some("percent".to_string()),
+            decimals: Some(1),
+            no_value: None,
+        };
+        assert_eq!(percent.format_number(42.42), "42.4%");
+
+        let percent_unit = DisplayFormat {
+            unit: Some("percentunit".to_string()),
+            decimals: Some(0),
+            no_value: None,
+        };
+        assert_eq!(percent_unit.format_number(0.4242), "42%");
+    }
+
+    #[test]
+    fn test_display_format_decimals_no_value_and_rates() {
+        let rate = DisplayFormat {
+            unit: Some("reqps".to_string()),
+            decimals: Some(0),
+            no_value: Some("n/a".to_string()),
+        };
+        assert_eq!(rate.format_number(1234.56), "1k req/s");
+        assert_eq!(rate.format_value(None), "n/a");
+
+        let default = DisplayFormat::default();
+        assert_eq!(default.format_value(None), "-");
+    }
 
     #[test]
     fn test_format_axis_time_uses_time_for_short_ranges() {

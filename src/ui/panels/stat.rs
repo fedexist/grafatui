@@ -15,7 +15,6 @@
  */
 
 use crate::app::{AppState, PanelState};
-use crate::ui::format::format_si;
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Paragraph, Sparkline},
@@ -24,15 +23,11 @@ use ratatui::{
 pub(super) fn render_stat(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
     let theme = &app.theme;
 
-    // Find the latest value from the first visible series
-    let (value, name) = p
-        .series
-        .iter()
-        .filter(|s| s.visible)
-        .find_map(|s| s.value.map(|v| (v, s.name.clone())))
-        .unwrap_or((0.0, "No data".to_string()));
-
-    let color = p.get_color_for_value(value).unwrap_or(theme.palette[0]);
+    let visible_series = p.series.iter().find(|s| s.visible);
+    let value = visible_series.and_then(|s| s.value);
+    let color = value
+        .and_then(|value| p.get_color_for_value(value))
+        .unwrap_or(theme.palette[0]);
 
     // Split area into value (top) and sparkline (bottom)
     let chunks = Layout::default()
@@ -41,7 +36,9 @@ pub(super) fn render_stat(frame: &mut Frame, area: Rect, p: &PanelState, app: &A
         .split(area);
 
     // Render Big Value
-    let val_str = format_si(value);
+    let val_str = visible_series
+        .map(|_| p.display.format_value(value))
+        .unwrap_or_else(|| "No data".to_string());
     let big_value = Paragraph::new(val_str)
         .style(Style::default().fg(color).add_modifier(Modifier::BOLD))
         .alignment(Alignment::Center)
@@ -50,7 +47,7 @@ pub(super) fn render_stat(frame: &mut Frame, area: Rect, p: &PanelState, app: &A
     frame.render_widget(big_value, chunks[0]);
 
     // Render Sparkline
-    if let Some(s) = p.series.iter().find(|s| s.visible && s.name == name) {
+    if let Some(s) = visible_series {
         let data: Vec<u64> = s.points.iter().map(|(_, v)| *v as u64).collect();
         let sparkline = Sparkline::default()
             .block(Block::default().borders(Borders::NONE))
