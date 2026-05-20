@@ -35,7 +35,8 @@ pub(super) fn render_stat(frame: &mut Frame, area: Rect, p: &PanelState, app: &A
         .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
         .split(area);
 
-    // Render Big Value
+    // A visible series with a null value should use Grafana's noValue text,
+    // while no visible series at all remains Grafatui's existing "No data" state.
     let val_str = visible_series
         .map(|_| p.display.format_value(value))
         .unwrap_or_else(|| "No data".to_string());

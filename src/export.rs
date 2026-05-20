@@ -607,6 +607,8 @@ fn render_stat_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &m
         return;
     };
 
+    // Mirror the TUI distinction: a visible null series can show Grafana's
+    // noValue fallback, but a panel with no visible series still renders No data.
     let color = series
         .value
         .map(|value| value_color(app, panel, value))

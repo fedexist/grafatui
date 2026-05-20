@@ -31,6 +31,9 @@ impl DisplayFormat {
     }
 
     pub(crate) fn format_number(&self, value: f64) -> String {
+        // Keep this first pass intentionally small: these common Grafana units
+        // unlock most imported dashboard readability while unknown units retain
+        // Grafatui's previous compact SI behavior instead of rendering worse.
         match self.unit_key().as_deref() {
             Some("bytes" | "decbytes") => format_scaled(
                 value,
@@ -47,6 +50,8 @@ impl DisplayFormat {
             Some("s" | "seconds") => format_duration_seconds(value, self.decimals),
             Some("ms") => format_suffix(value, self.decimals, "ms"),
             Some("percent") => format_suffix(value, self.decimals, "%"),
+            // Grafana's percentunit stores ratios as 0.0-1.0, so scale to the
+            // user-facing percent text dashboards expect.
             Some("percentunit") => format_suffix(value * 100.0, self.decimals, "%"),
             Some("ops") => format_rate(value, self.decimals, " ops/s"),
             Some("reqps" | "rps") => format_rate(value, self.decimals, " req/s"),

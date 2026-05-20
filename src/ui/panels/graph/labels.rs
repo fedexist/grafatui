@@ -46,6 +46,8 @@ pub(super) fn y_label_width(
     threshold_labels: &[(f64, Color)],
     display: &DisplayFormat,
 ) -> u16 {
+    // Reserve space using the same unit formatter that will draw the labels;
+    // otherwise bytes/percent suffixes can clip or push into the plot area.
     let axis_width = axis_labels
         .iter()
         .map(|label| label.width() as u16)
