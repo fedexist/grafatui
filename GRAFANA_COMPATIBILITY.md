@@ -27,7 +27,7 @@ This document provides a comprehensive feature-parity table between the [Grafana
 | `editable` | ⛔ Not Applicable | Grafatui is read-only |
 | `style` | ⛔ Not Applicable | TUI has its own theme system |
 | `schemaVersion` | ❌ Not Implemented | Not validated |
-| `refresh` | ❌ Not Implemented | Uses `--refresh-rate` CLI option instead |
+| `refresh` | ✅ Supported | Used as the default data refresh interval; overridden by config or `--refresh-rate` |
 | `time` | ❌ Not Implemented | Uses `--range` CLI option instead |
 | `time.from` / `time.to` | ❌ Not Implemented | Uses `--range` CLI option instead |
 | `fiscalYearStartMonth` | ⛔ Not Applicable | |
