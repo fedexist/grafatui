@@ -31,6 +31,8 @@ pub(crate) struct DashboardImport {
     pub(crate) query_vars: Vec<TemplateQueryVar>,
     /// Number of panels that were skipped (unsupported types).
     pub(crate) skipped_panels: usize,
+    /// Dashboard-level refresh interval in milliseconds, if provided.
+    pub(crate) refresh_rate_ms: Option<u64>,
 }
 
 /// A Prometheus-backed Grafana template variable.
@@ -71,6 +73,7 @@ pub(crate) struct GridPos {
 #[derive(Debug, Deserialize)]
 struct RawDashboard {
     title: Option<String>,
+    refresh: Option<serde_json::Value>,
     panels: Option<Vec<RawPanel>>,
     templating: Option<RawTemplating>,
 }
@@ -241,6 +244,7 @@ pub(crate) fn load_grafana_dashboard(path: &std::path::Path) -> Result<Dashboard
 
     let mut out = DashboardImport {
         title: raw.title.unwrap_or_default(),
+        refresh_rate_ms: raw.refresh.as_ref().and_then(parse_refresh_rate_ms),
         queries: vec![],
         vars,
         query_vars,
@@ -405,6 +409,19 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
     Ok(())
 }
 
+fn parse_refresh_rate_ms(value: &serde_json::Value) -> Option<u64> {
+    let refresh = value.as_str()?.trim();
+    if refresh.is_empty()
+        || refresh.eq_ignore_ascii_case("false")
+        || refresh.eq_ignore_ascii_case("off")
+    {
+        return None;
+    }
+
+    let duration = humantime::parse_duration(refresh).ok()?;
+    u64::try_from(duration.as_millis()).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -567,5 +584,29 @@ mod tests {
         assert_eq!(dashboard.query_vars[0].regex.as_deref(), Some("/(.+)/"));
         assert_eq!(dashboard.query_vars[1].query, "label_values(model_name)");
         assert_eq!(dashboard.vars.get("all_instance"), Some(&".*".to_string()));
+    }
+
+    #[test]
+    fn test_parse_dashboard_refresh_duration() {
+        let json = r#"
+        {
+            "title": "Refresh Dash",
+            "refresh": "5s",
+            "panels": [
+                {
+                    "type": "timeseries",
+                    "title": "Up",
+                    "targets": [{ "expr": "up" }]
+                }
+            ]
+        }
+        "#;
+        let path = std::env::temp_dir().join("grafatui-refresh-test.json");
+        std::fs::write(&path, json).unwrap();
+
+        let dashboard = load_grafana_dashboard(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        assert_eq!(dashboard.refresh_rate_ms, Some(5000));
     }
 }
