@@ -52,6 +52,7 @@ This demo showcases all 7 visualization types (graph, stat, gauge, bar gauge, ta
 - **Import existing dashboards** from JSON files
 - **Supported panels**: graph, timeseries, gauge, bargauge, table, stat, heatmap
 - **Template variables** with built-in PromQL time variables, dynamic Prometheus query variables, and CLI overrides
+- **Dashboard refresh interval** from Grafana JSON, with CLI/config overrides
 - **Legend formatting** (`{{label}}` syntax)
 - **Grid layouts** using `gridPos`
 - **Thresholds** dynamically applied to metrics and graph limits
