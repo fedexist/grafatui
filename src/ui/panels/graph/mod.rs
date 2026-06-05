@@ -22,14 +22,14 @@ mod thresholds;
 
 use autogrid::{build_autogrid_datasets, calculate_time_grid_ticks, calculate_value_grid_ticks};
 use labels::{
-    PlotBounds, YLabelArea, render_autogrid_time_labels, render_intermediate_y_labels,
-    y_label_width,
+    PlotBounds, YLabelArea, YLabelContext, render_autogrid_time_labels,
+    render_intermediate_y_labels, y_label_width,
 };
 use overlay::merge_overlay_buffer;
 use thresholds::{prepare_thresholds, render_raw_threshold_lines, threshold_marker};
 
 use crate::app::{AppState, PanelState};
-use crate::ui::format::{format_axis_time, format_si, get_hash_color};
+use crate::ui::format::{format_axis_time, get_hash_color};
 use ratatui::{
     prelude::*,
     widgets::{Axis, Chart, Dataset, GraphType, Paragraph, Wrap},
@@ -134,9 +134,9 @@ pub(super) fn render_graph_panel(
         // For legend display
         let mut name = s.name.clone();
         if let Some(val) = cursor_values.get(&s.name) {
-            name.push_str(&format!(" ({})", format_si(*val)));
+            name.push_str(&format!(" ({})", p.display.format_number(*val)));
         } else if let Some(val) = s.value {
-            name.push_str(&format!(" ({})", format_si(val)));
+            name.push_str(&format!(" ({})", p.display.format_number(val)));
         }
         if name.is_empty() {
             name = format!("Series {}", i);
@@ -197,12 +197,22 @@ pub(super) fn render_graph_panel(
         Vec::new()
     };
 
-    y_labels[0] = Span::styled(format_si(y_bounds[0]), Style::default().fg(theme.text));
-    y_labels[y_axis_height - 1] =
-        Span::styled(format_si(y_bounds[1]), Style::default().fg(theme.text));
+    y_labels[0] = Span::styled(
+        p.display.format_number(y_bounds[0]),
+        Style::default().fg(theme.text),
+    );
+    y_labels[y_axis_height - 1] = Span::styled(
+        p.display.format_number(y_bounds[1]),
+        Style::default().fg(theme.text),
+    );
 
     // Evaluate y_max_width before moving y_labels into Chart block
-    let y_max_width = y_label_width(&y_labels, &autogrid_value_ticks, &threshold_data.labels);
+    let y_max_width = y_label_width(
+        &y_labels,
+        &autogrid_value_ticks,
+        &threshold_data.labels,
+        &p.display,
+    );
 
     let chart = Chart::new(chart_datasets)
         // No block, as we rendered it outside
@@ -320,10 +330,13 @@ pub(super) fn render_graph_panel(
             width: y_max_width,
         },
         plot_bounds,
-        y_bounds,
-        &autogrid_value_ticks,
-        &threshold_data.labels,
-        app.autogrid_color,
+        YLabelContext {
+            y_bounds,
+            autogrid_ticks: &autogrid_value_ticks,
+            threshold_labels: &threshold_data.labels,
+            display: &p.display,
+            color: app.autogrid_color,
+        },
     );
 
     // Render custom legend

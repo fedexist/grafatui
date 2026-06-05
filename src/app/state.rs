@@ -20,6 +20,7 @@ use crate::export::{ExportOptions, RecordingState};
 use crate::grafana::TemplateQueryVar;
 use crate::prom;
 use crate::theme::Theme;
+use crate::ui::DisplayFormat;
 use anyhow::Result;
 use futures::StreamExt;
 use ratatui::style::Color;
@@ -57,6 +58,8 @@ pub(crate) struct PanelState {
     pub(crate) max: Option<f64>,
     /// Whether to render automatic grid lines for this panel.
     pub(crate) autogrid: Option<bool>,
+    /// Display formatting imported from Grafana field configuration.
+    pub(crate) display: DisplayFormat,
 }
 
 /// Visualization types supported by Grafatui.

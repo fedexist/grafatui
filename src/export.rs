@@ -466,7 +466,7 @@ fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
             out,
             plot.left - 8.0,
             y + 4.0,
-            &ui::format_si(tick),
+            &panel.display.format_number(tick),
             grid,
             "end",
             SMALL_FONT_SIZE,
@@ -500,7 +500,7 @@ fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
         out,
         plot.left - 8.0,
         plot.bottom() + 4.0,
-        &ui::format_si(y_bounds[0]),
+        &panel.display.format_number(y_bounds[0]),
         &text,
         "end",
         SMALL_FONT_SIZE,
@@ -509,7 +509,7 @@ fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
         out,
         plot.left - 8.0,
         plot.top + 4.0,
-        &ui::format_si(y_bounds[1]),
+        &panel.display.format_number(y_bounds[1]),
         &text,
         "end",
         SMALL_FONT_SIZE,
@@ -553,7 +553,7 @@ fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
             out,
             plot.left - 8.0,
             y + 4.0,
-            &ui::format_si(value),
+            &panel.display.format_number(value),
             &color,
             "end",
             SMALL_FONT_SIZE,
@@ -602,18 +602,23 @@ fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
 }
 
 fn render_stat_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &mut String) {
-    let Some((series, value)) = first_visible_value(panel) else {
+    let Some(series) = panel.series.iter().find(|series| series.visible) else {
         render_no_data(app, rect, out);
         return;
     };
 
-    let color = value_color(app, panel, value);
+    // Mirror the TUI distinction: a visible null series can show Grafana's
+    // noValue fallback, but a panel with no visible series still renders No data.
+    let color = series
+        .value
+        .map(|value| value_color(app, panel, value))
+        .unwrap_or_else(|| color_hex(app.theme.text, "#e6e6e6"));
     let text = color_hex(app.theme.text, "#e6e6e6");
     write_text(
         out,
         rect.left + rect.width / 2.0,
         rect.top + 34.0,
-        &ui::format_si(value),
+        &panel.display.format_value(series.value),
         &color,
         "middle",
         28.0,
@@ -677,7 +682,11 @@ fn render_gauge_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
         out,
         rect.left + rect.width / 2.0,
         gauge.top + 18.0,
-        &format!("{} ({:.0}%)", ui::format_si(value), ratio * 100.0),
+        &format!(
+            "{} ({:.0}%)",
+            panel.display.format_number(value),
+            ratio * 100.0
+        ),
         "#ffffff",
         "middle",
         FONT_SIZE,
@@ -686,7 +695,7 @@ fn render_gauge_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
         out,
         gauge.left,
         gauge.bottom() + 17.0,
-        &ui::format_si(min),
+        &panel.display.format_number(min),
         &text,
         "start",
         SMALL_FONT_SIZE,
@@ -695,7 +704,7 @@ fn render_gauge_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
         out,
         gauge.right(),
         gauge.bottom() + 17.0,
-        &ui::format_si(max),
+        &panel.display.format_number(max),
         &text,
         "end",
         SMALL_FONT_SIZE,
@@ -762,7 +771,7 @@ fn render_bar_gauge_panel(app: &AppState, panel: &PanelState, rect: PlotRect, ou
             out,
             track_rect.right() + 8.0,
             y,
-            &ui::format_si(value),
+            &panel.display.format_number(value),
             &color,
             "start",
             SMALL_FONT_SIZE,
@@ -821,8 +830,8 @@ fn render_table_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
         let y = rect.top + row_height * (row as f64 + 2.0) - 5.0;
         let value = series
             .value
-            .map(ui::format_si)
-            .unwrap_or_else(|| "-".to_string());
+            .map(|value| panel.display.format_number(value))
+            .unwrap_or_else(|| panel.display.format_value(None));
         let value_color = series
             .value
             .map(|value| value_color(app, panel, value))
@@ -1015,7 +1024,7 @@ fn render_legend(
             .get(&series.name)
             .copied()
             .or(series.value)
-            .map(ui::format_si);
+            .map(|value| panel.display.format_number(value));
         let label = value
             .map(|value| format!("{} ({value})", series.name))
             .unwrap_or_else(|| series.name.clone());
@@ -1357,6 +1366,7 @@ mod tests {
             min: None,
             max: None,
             autogrid: None,
+            display: crate::ui::DisplayFormat::default(),
         }
     }
 
@@ -1486,6 +1496,43 @@ mod tests {
             assert!(svg.contains(second), "{panel_type:?} missing {second}");
             assert!(!svg.contains("No data"));
         }
+    }
+
+    #[test]
+    fn test_export_uses_panel_display_format_for_stat_and_table_values() {
+        let mut stat_app = test_app_with_panel_type(PanelType::Stat);
+        stat_app.panels[0].display = ui::DisplayFormat {
+            unit: Some("bytes".to_string()),
+            decimals: Some(1),
+            no_value: None,
+        };
+        stat_app.panels[0].series[0].value = Some(1536.0);
+
+        let stat_svg = render_svg(&stat_app, Rect::new(0, 0, 100, 40));
+        assert!(stat_svg.contains("1.5KB"));
+
+        stat_app.panels[0].display.no_value = Some("n/a".to_string());
+        stat_app.panels[0].series[0].value = None;
+        let stat_no_value_svg = render_svg(&stat_app, Rect::new(0, 0, 100, 40));
+        assert!(stat_no_value_svg.contains("n/a"));
+
+        let mut table_app = test_app_with_panel_type(PanelType::Table);
+        table_app.panels[0].display = ui::DisplayFormat {
+            unit: Some("percentunit".to_string()),
+            decimals: Some(0),
+            no_value: Some("n/a".to_string()),
+        };
+        table_app.panels[0].series[0].value = Some(0.42);
+        table_app.panels[0].series.push(SeriesView {
+            name: "missing".to_string(),
+            value: None,
+            points: vec![],
+            visible: true,
+        });
+
+        let table_svg = render_svg(&table_app, Rect::new(0, 0, 100, 40));
+        assert!(table_svg.contains("42%"));
+        assert!(table_svg.contains("n/a"));
     }
 
     #[test]
