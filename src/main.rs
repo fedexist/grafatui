@@ -88,8 +88,6 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|| "5s".to_string());
     let step = app::parse_duration(&step_str).context("--step")?;
 
-    let refresh_rate = args.refresh_rate.or(config.refresh_rate).unwrap_or(1000);
-    let refresh_every = Duration::from_millis(refresh_rate);
     let export_dir = args
         .export_dir
         .or(config.export_dir)
@@ -113,6 +111,7 @@ async fn main() -> Result<()> {
 
     let mut vars: HashMap<String, String> = HashMap::new();
     let mut query_vars = Vec::new();
+    let mut dashboard_refresh_rate_ms = None;
 
     let prom = prom::PromClient::new(prometheus_url);
 
@@ -123,6 +122,7 @@ async fn main() -> Result<()> {
         .map(|p| config::expand_path(&p))
     {
         let d = grafana::load_grafana_dashboard(&path)?;
+        dashboard_refresh_rate_ms = d.refresh_rate_ms;
         // Seed vars from dashboard defaults
         for (k, v) in d.vars {
             vars.insert(k, v);
@@ -188,6 +188,12 @@ async fn main() -> Result<()> {
         .threshold_marker
         .or(config.threshold_marker)
         .unwrap_or_else(|| "dashed-line".to_string());
+    let refresh_rate = resolve_refresh_rate_ms(
+        args.refresh_rate,
+        config.refresh_rate,
+        dashboard_refresh_rate_ms,
+    );
+    let refresh_every = Duration::from_millis(refresh_rate);
 
     let mut state = app::AppState::new(
         prom,
@@ -240,4 +246,31 @@ async fn main() -> Result<()> {
     terminal.show_cursor()?;
 
     res
+}
+
+fn resolve_refresh_rate_ms(
+    cli_refresh_rate: Option<u64>,
+    config_refresh_rate: Option<u64>,
+    dashboard_refresh_rate: Option<u64>,
+) -> u64 {
+    cli_refresh_rate
+        .or(config_refresh_rate)
+        .or(dashboard_refresh_rate)
+        .unwrap_or(1000)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_refresh_rate_precedence() {
+        assert_eq!(
+            resolve_refresh_rate_ms(Some(2000), Some(3000), Some(4000)),
+            2000
+        );
+        assert_eq!(resolve_refresh_rate_ms(None, Some(3000), Some(4000)), 3000);
+        assert_eq!(resolve_refresh_rate_ms(None, None, Some(4000)), 4000);
+        assert_eq!(resolve_refresh_rate_ms(None, None, None), 1000);
+    }
 }
