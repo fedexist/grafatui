@@ -44,6 +44,7 @@ These features are shipped and available today:
 | Field config | **Thresholds** | `fieldConfig.defaults.thresholds` for graph limit lines and Stat/Gauge/BarGauge coloring |
 | Field config | **Threshold marker styles** | Dashed line, dot, braille, block, quadrant, sextant, octant, and related modes |
 | Field config | **Field min/max bounds** | `fieldConfig.defaults.min` / `max` for gauge scaling and percentage thresholds |
+| Field config | **Display formatting subset** | Common `unit` values, `decimals`, and `noValue` for supported panel values, axes, legends, and exports |
 | Export | **SVG/PNG snapshots** | Export the visible dashboard to SVG, PNG, or both |
 | Export | **Recording frame bundles** | Changed-frame recordings with manifest metadata and frame caps |
 | Config | **Config file** | TOML-based persistent configuration |
@@ -95,9 +96,8 @@ This is the main backlog, ordered by Grafana parity domain.
 
 | Feature | Grafana field / behavior | User value | Complexity | Status |
 |---|---|---|---|---|
-| **Unit formatting** | `fieldConfig.defaults.unit` | Bytes, seconds, percentages, rates, and counts display naturally | 🟡 | 🔜 |
-| **Decimal precision** | `fieldConfig.defaults.decimals` | Panel values stop showing distracting precision | 🟢 | 🔜 |
-| **No-value fallback** | `fieldConfig.defaults.noValue` | Empty/null stat and table cells show intentional text | 🟢 | 🔜 |
+| **Broader unit formatting** | `fieldConfig.defaults.unit` | Extends the shipped common-unit subset to more Grafana units | 🟡 | 📋 |
+| **Additional no-value coverage** | `fieldConfig.defaults.noValue` | Extends the shipped null-value fallback beyond current Stat/Table/export paths where relevant | 🟢 | 📋 |
 | **Value mappings** | `fieldConfig.defaults.mappings` | Status codes and enum-like values become readable labels | 🟡 | 🔜 |
 | **Display names** | `fieldConfig.defaults.displayName` | Series and table labels match Grafana naming | 🟢 | 📋 |
 | **Color mode subset** | `fieldConfig.defaults.color` | Honors configured color intent where terminal rendering permits | 🟡 | 📋 |
@@ -182,9 +182,9 @@ Goal: imported dashboards should be more readable and less silently degraded.
 | Item | Why it belongs here | Complexity | Status |
 |---|---|---|---|
 | Compatibility matrix refresh | Establish the current truth before adding more parity | 🟢 | 🔜 |
-| Unit formatting | Biggest readability win for real dashboards | 🟡 | 🔜 |
-| Decimal precision and no-value fallback | Small field-config wins that pair naturally with units | 🟢 | 🔜 |
 | Value mappings | Makes status/stat panels useful instead of numeric-only | 🟡 | 🔜 |
+| Broader unit formatting | Expands the shipped common-unit subset to more Grafana dashboards | 🟡 | 📋 |
+| Additional no-value coverage | Completes the shipped fallback behavior where terminal rendering can use it | 🟢 | 📋 |
 | Hidden targets | Prevents helper queries from appearing as normal series | 🟢 | 🔜 |
 | Unsupported panel warnings | Builds trust in imported results | 🟢 | 🔜 |
 | `--validate` import diagnostics | Gives users a non-interactive dashboard check | 🟢 | 🔜 |
@@ -265,11 +265,11 @@ Recommended order for the next focused development cycle:
    - Add tests or fixtures for fields already supported but documented as
      missing.
 
-2. **Implement the field display layer**
-   - Add a shared display configuration model for unit, decimals, no-value, and
-     value mappings.
-   - Use it across Stat, Gauge, BarGauge, Table, Graph labels, legends, and
-     exports.
+2. **Extend the field display layer**
+   - Add value mappings and broaden unit coverage beyond the shipped common
+     units.
+   - Keep the shared display configuration model applied across Stat, Gauge,
+     BarGauge, Table, Graph labels, legends, and exports.
 
 3. **Make unsupported imports visible**
    - Track skipped panel types, hidden/unsupported target behavior, and ignored

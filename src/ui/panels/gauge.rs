@@ -15,7 +15,6 @@
  */
 
 use crate::app::{AppState, PanelState};
-use crate::ui::format::format_si;
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Gauge},
@@ -49,7 +48,7 @@ pub(super) fn render_gauge(frame: &mut Frame, area: Rect, p: &PanelState, app: &
         .block(Block::default().borders(Borders::NONE))
         .gauge_style(Style::default().fg(color).bg(Color::DarkGray))
         .ratio(ratio)
-        .label(format!("{} ({})", format_si(value), name));
+        .label(format!("{} ({})", p.display.format_number(value), name));
 
     frame.render_widget(gauge, area);
 }

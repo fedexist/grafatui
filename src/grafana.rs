@@ -56,6 +56,7 @@ pub(crate) struct QueryPanel {
     pub(crate) min: Option<f64>,
     pub(crate) max: Option<f64>,
     pub(crate) autogrid: Option<bool>,
+    pub(crate) display: crate::ui::DisplayFormat,
 }
 
 /// Grid position extracted from Grafana.
@@ -126,6 +127,10 @@ struct RawFieldConfig {
 
 #[derive(Debug, Deserialize)]
 struct RawFieldConfigDefaults {
+    unit: Option<String>,
+    decimals: Option<usize>,
+    #[serde(rename = "noValue")]
+    no_value: Option<String>,
     min: Option<f64>,
     max: Option<f64>,
     thresholds: Option<RawThresholds>,
@@ -314,9 +319,15 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
             let mut min = None;
             let mut max = None;
             let mut autogrid = None;
+            let mut display = crate::ui::DisplayFormat::default();
 
             if let Some(fc) = p.field_config {
                 if let Some(defaults) = fc.defaults {
+                    display = crate::ui::DisplayFormat {
+                        unit: defaults.unit,
+                        decimals: defaults.decimals,
+                        no_value: defaults.no_value,
+                    };
                     min = defaults.min;
                     max = defaults.max;
                     autogrid = defaults
@@ -383,6 +394,7 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
                     min,
                     max,
                     autogrid,
+                    display,
                 });
             }
         } else if !kind.is_empty() && kind != "row" {
@@ -467,6 +479,49 @@ mod tests {
 
         assert_eq!(dashboard.queries[0].autogrid, Some(false));
         assert_eq!(dashboard.queries[1].autogrid, None);
+    }
+
+    #[test]
+    fn test_parse_field_display_format() {
+        let json = r#"
+        {
+            "title": "Display Format Test",
+            "panels": [
+                {
+                    "type": "stat",
+                    "title": "Memory",
+                    "targets": [{ "expr": "process_resident_memory_bytes" }],
+                    "fieldConfig": {
+                        "defaults": {
+                            "unit": "bytes",
+                            "decimals": 1,
+                            "noValue": "n/a"
+                        }
+                    }
+                },
+                {
+                    "type": "stat",
+                    "title": "Default",
+                    "targets": [{ "expr": "up" }]
+                }
+            ]
+        }
+        "#;
+        let path = std::env::temp_dir().join("grafatui-display-format-test.json");
+        std::fs::write(&path, json).unwrap();
+
+        let dashboard = load_grafana_dashboard(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        assert_eq!(dashboard.queries[0].display.unit.as_deref(), Some("bytes"));
+        assert_eq!(dashboard.queries[0].display.decimals, Some(1));
+        assert_eq!(
+            dashboard.queries[0].display.no_value.as_deref(),
+            Some("n/a")
+        );
+        assert_eq!(dashboard.queries[1].display.unit, None);
+        assert_eq!(dashboard.queries[1].display.decimals, None);
+        assert_eq!(dashboard.queries[1].display.no_value, None);
     }
 
     #[test]

@@ -15,7 +15,6 @@
  */
 
 use crate::app::{AppState, PanelState};
-use crate::ui::format::format_si;
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Paragraph, Row, Table},
@@ -30,7 +29,7 @@ pub(super) fn render_table(frame: &mut Frame, area: Rect, p: &PanelState, app: &
         .iter()
         .filter(|s| s.visible)
         .map(|s| {
-            let val_str = s.value.map(format_si).unwrap_or_else(|| "-".to_string());
+            let val_str = p.display.format_value(s.value);
             let color = s
                 .value
                 .and_then(|v| p.get_color_for_value(v))
