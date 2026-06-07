@@ -81,6 +81,15 @@ impl PromClient {
         )
     }
 
+    pub(crate) fn build_query_url(&self, expr: &str, time: i64) -> String {
+        format!(
+            "{}/api/v1/query?query={}&time={}",
+            self.base.trim_end_matches('/'),
+            urlencoding::encode(expr),
+            time
+        )
+    }
+
     pub(crate) async fn query_range(
         &self,
         expr: &str,
@@ -219,15 +228,17 @@ impl PromClient {
         expr: &str,
         time: i64,
     ) -> Result<Vec<String>> {
-        let url = format!(
-            "{}/api/v1/query?query={}&time={}",
-            self.base.trim_end_matches('/'),
-            urlencoding::encode(expr),
-            time
-        );
+        let url = self.build_query_url(expr, time);
         let body: PromResponse<QueryInstantData> = self.get_json(&url).await?;
         ensure_success(&body.status)?;
         Ok(body.data.result_strings())
+    }
+
+    pub(crate) async fn query_instant_series(&self, expr: &str, time: i64) -> Result<Vec<Series>> {
+        let url = self.build_query_url(expr, time);
+        let body: PromResponse<QueryInstantData> = self.get_json(&url).await?;
+        ensure_success(&body.status)?;
+        Ok(body.data.into_series(time))
     }
 
     async fn get_json<T: DeserializeOwned>(&self, url: &str) -> Result<T> {
@@ -299,6 +310,56 @@ impl QueryInstantData {
             _ => Vec::new(),
         }
     }
+
+    fn into_series(self, time: i64) -> Vec<Series> {
+        match self.result_type.as_str() {
+            "vector" => vector_result_series(&self.result, time),
+            "scalar" => scalar_result_series(&self.result, time)
+                .into_iter()
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+}
+
+fn vector_result_series(result: &serde_json::Value, time: i64) -> Vec<Series> {
+    result
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|sample| {
+            let metric = sample.get("metric")?.as_object()?;
+            let value = sample
+                .get("value")
+                .and_then(|value| value.as_array())
+                .and_then(|value| value.get(1))
+                .and_then(|value| value.as_str())?;
+
+            Some(Series {
+                metric: metric
+                    .iter()
+                    .filter_map(|(label, value)| {
+                        value
+                            .as_str()
+                            .map(|value| (label.clone(), value.to_string()))
+                    })
+                    .collect(),
+                values: vec![(time as f64, value.to_string())],
+            })
+        })
+        .collect()
+}
+
+fn scalar_result_series(result: &serde_json::Value, time: i64) -> Option<Series> {
+    let value = result
+        .as_array()
+        .and_then(|value| value.get(1))
+        .and_then(|value| value.as_str())?;
+
+    Some(Series {
+        metric: HashMap::new(),
+        values: vec![(time as f64, value.to_string())],
+    })
 }
 
 fn vector_result_strings(result: &serde_json::Value) -> Vec<String> {
@@ -362,6 +423,17 @@ mod tests {
     }
 
     #[test]
+    fn test_build_query_url_preserves_path_prefix() {
+        let client = PromClient::new("http://localhost:9090/prometheus/".to_string());
+        let url = client.build_query_url("up{job=\"node\"}", 1600003600);
+
+        assert_eq!(
+            url,
+            "http://localhost:9090/prometheus/api/v1/query?query=up%7Bjob%3D%22node%22%7D&time=1600003600"
+        );
+    }
+
+    #[test]
     fn test_deserialize_query_range_response() {
         let json = r#"
         {
@@ -412,5 +484,50 @@ mod tests {
             data.result_strings(),
             vec![r#"{instance="node-1", job="node"} 1"#]
         );
+    }
+
+    #[test]
+    fn test_query_instant_vector_converts_to_series() {
+        let json = r#"
+        {
+            "resultType": "vector",
+            "result": [
+                {
+                    "metric": { "instance": "node-1", "job": "node" },
+                    "value": [1435781451.781, "1"]
+                },
+                {
+                    "metric": { "instance": "node-2", "job": "node" },
+                    "value": [1435781451.781, "2.5"]
+                }
+            ]
+        }
+        "#;
+
+        let data: QueryInstantData = serde_json::from_str(json).unwrap();
+        let series = data.into_series(1_435_781_451);
+
+        assert_eq!(series.len(), 2);
+        assert_eq!(series[0].metric.get("instance").unwrap(), "node-1");
+        assert_eq!(series[0].values, vec![(1_435_781_451.0, "1".to_string())]);
+        assert_eq!(series[1].metric.get("instance").unwrap(), "node-2");
+        assert_eq!(series[1].values, vec![(1_435_781_451.0, "2.5".to_string())]);
+    }
+
+    #[test]
+    fn test_query_instant_scalar_converts_to_unlabeled_series() {
+        let json = r#"
+        {
+            "resultType": "scalar",
+            "result": [1435781451.781, "42"]
+        }
+        "#;
+
+        let data: QueryInstantData = serde_json::from_str(json).unwrap();
+        let series = data.into_series(1_435_781_451);
+
+        assert_eq!(series.len(), 1);
+        assert!(series[0].metric.is_empty());
+        assert_eq!(series[0].values, vec![(1_435_781_451.0, "42".to_string())]);
     }
 }

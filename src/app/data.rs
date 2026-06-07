@@ -130,6 +130,7 @@ pub(crate) fn default_queries(mut provided: Vec<String>) -> Vec<PanelState> {
             title: q.clone(),
             exprs: vec![q],
             legends: vec![None],
+            query_modes: vec![crate::app::QueryMode::Range],
             series: vec![],
             last_error: None,
             last_url: None,
