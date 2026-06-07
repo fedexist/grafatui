@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.1.8] - 2026-06-07
+
+### ⛰️  Features
+
+- Honor dashboard refresh interval ([3a74e15](https://github.com/fedexist/grafatui/commit/3a74e158b966d533b8d66921834624f8f0e27224))
+- Dashboard refresh interval ([#50](https://github.com/fedexist/grafatui/pull/50)) ([312b890](https://github.com/fedexist/grafatui/commit/312b8908d528e9680f9c85ca6122edd34730d66c))
+- Support instant target queries ([f886f84](https://github.com/fedexist/grafatui/commit/f886f845683cbf3585965d87d38c99d7a3d3fe26))
+
+### 📚 Documentation
+
+- Align roadmap with Grafana parity priorities ([b0e128d](https://github.com/fedexist/grafatui/commit/b0e128de94fa91da94c6a9b6c723ba44d21e8e41))
+- Add instant query dashboard example ([2b38ded](https://github.com/fedexist/grafatui/commit/2b38ded40532fb13de39c4d09e9f6705d6cf8271))
+- Add mdBook user guide ([a0feba1](https://github.com/fedexist/grafatui/commit/a0feba1e6cbe97e0d19aaab8183b3209d28e5b09))
+
+
 ## [0.1.7] - 2026-05-13
 
 ### ⛰️  Features
