@@ -36,6 +36,8 @@ pub(crate) struct PanelState {
     pub(crate) exprs: Vec<String>,
     /// Optional legend formats (e.g. "{{instance}}"). Parallel to exprs.
     pub(crate) legends: Vec<Option<String>>,
+    /// Query mode for each expression. Parallel to exprs.
+    pub(crate) query_modes: Vec<QueryMode>,
     /// Current time-series data for this panel.
     pub(crate) series: Vec<SeriesView>,
     /// Last error message, if any.
@@ -72,6 +74,13 @@ pub(crate) enum PanelType {
     Stat,
     Heatmap,
     Unknown,
+}
+
+/// Prometheus endpoint mode for a target query.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QueryMode {
+    Range,
+    Instant,
 }
 
 /// Modes for Y-axis scaling.
@@ -125,6 +134,13 @@ pub(crate) struct Thresholds {
 }
 
 impl PanelState {
+    pub(crate) fn query_mode(&self, index: usize) -> QueryMode {
+        self.query_modes
+            .get(index)
+            .copied()
+            .unwrap_or(QueryMode::Range)
+    }
+
     pub(crate) fn get_color_for_value(&self, val: f64) -> Option<Color> {
         let thresholds = self.thresholds.as_ref()?;
 
@@ -456,17 +472,33 @@ impl AppState {
         for (i, expr) in p.exprs.iter().enumerate() {
             let expr_expanded = expand_expr(expr, range, step, vars);
             let legend_fmt = p.legends.get(i).and_then(|x| x.as_ref());
+            let query_mode = p.query_mode(i);
 
             // Calculate start/end for URL display purposes
             let start_ts = end_ts - (range.as_secs() as i64);
 
-            let url = prometheus.build_query_range_url(&expr_expanded, start_ts, end_ts, step);
+            let url = match query_mode {
+                QueryMode::Range => {
+                    prometheus.build_query_range_url(&expr_expanded, start_ts, end_ts, step)
+                }
+                QueryMode::Instant => prometheus.build_query_url(&expr_expanded, end_ts),
+            };
             last_url = Some(url);
 
-            match prometheus
-                .query_range(&expr_expanded, start_ts, end_ts, step)
-                .await
-            {
+            let query_result = match query_mode {
+                QueryMode::Range => {
+                    prometheus
+                        .query_range(&expr_expanded, start_ts, end_ts, step)
+                        .await
+                }
+                QueryMode::Instant => {
+                    prometheus
+                        .query_instant_series(&expr_expanded, end_ts)
+                        .await
+                }
+            };
+
+            match query_result {
                 Ok(res) => {
                     for s in res {
                         let latest_val = s.values.last().and_then(|(_, v)| v.parse::<f64>().ok());
@@ -501,7 +533,14 @@ impl AppState {
                     }
                 }
                 Err(e) => {
-                    error = Some(format!("query_range failed for `{}`: {}", expr_expanded, e));
+                    let query_name = match query_mode {
+                        QueryMode::Range => "query_range",
+                        QueryMode::Instant => "query",
+                    };
+                    error = Some(format!(
+                        "{} failed for `{}`: {}",
+                        query_name, expr_expanded, e
+                    ));
                 }
             }
         }
@@ -598,5 +637,30 @@ mod tests {
 
         app.select_previous_panel();
         assert_eq!(app.selected_panel, 0);
+    }
+
+    #[test]
+    fn test_panel_query_mode_defaults_to_range_when_missing() {
+        let panel = PanelState {
+            title: "Modes".to_string(),
+            exprs: vec!["up".to_string(), "rate(up[5m])".to_string()],
+            legends: vec![None, None],
+            query_modes: vec![QueryMode::Instant],
+            series: vec![],
+            last_error: None,
+            last_url: None,
+            last_samples: 0,
+            grid: None,
+            y_axis_mode: YAxisMode::Auto,
+            panel_type: PanelType::Graph,
+            thresholds: None,
+            min: None,
+            max: None,
+            autogrid: None,
+            display: crate::ui::DisplayFormat::default(),
+        };
+
+        assert_eq!(panel.query_mode(0), QueryMode::Instant);
+        assert_eq!(panel.query_mode(1), QueryMode::Range);
     }
 }

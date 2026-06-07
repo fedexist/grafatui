@@ -1350,6 +1350,7 @@ mod tests {
             title: "CPU <main>".to_string(),
             exprs: vec![],
             legends: vec![],
+            query_modes: vec![],
             series: vec![SeriesView {
                 name: "usage & total".to_string(),
                 value: Some(10.0),
