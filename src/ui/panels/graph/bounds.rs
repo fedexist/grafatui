@@ -71,6 +71,7 @@ mod tests {
             title: "test".to_string(),
             exprs: vec![],
             legends: vec![],
+            query_modes: vec![],
             series: vec![],
             last_error: None,
             last_url: None,

@@ -144,6 +144,7 @@ mod tests {
                 title: "CPU".to_string(),
                 exprs: vec![],
                 legends: vec![],
+                query_modes: vec![],
                 series: vec![SeriesView {
                     name: "usage".to_string(),
                     value: Some(1.0),

@@ -29,6 +29,7 @@ These features are shipped and available today:
 | Variables | **Dynamic Prometheus variables** | Query-backed variables using `label_values(...)` and `query_result(...)` |
 | Variables | **PromQL built-ins** | `$__interval`, `$__interval_ms`, `$__range`, `$__range_s`, `$__range_ms`, `$__rate_interval` |
 | Queries | **Multiple targets per panel** | Multiple PromQL expressions render as separate series |
+| Queries | **Instant target queries** | Honors `targets[].instant` and defaults summary table/gauge panels to Prometheus instant queries |
 | Queries | **Legend formatting** | `{{label}}` syntax from Grafana |
 | UI | **8 color themes** | default, dracula, monokai, solarized dark/light, gruvbox, tokyo-night, catppuccin |
 | UI | **Time controls** | Zoom in/out, pan left/right, live mode toggle |
@@ -119,7 +120,7 @@ This is the main backlog, ordered by Grafana parity domain.
 | Feature | Grafana field / behavior | User value | Complexity | Status |
 |---|---|---|---|---|
 | **Hidden targets** | `targets[].hide` | Helper queries do not clutter imported panels | 🟢 | 🔜 |
-| **Instant queries** | `targets[].instant` / Prometheus `query` | Stat/table panels can use point-in-time queries | 🟡 | 🔜 |
+| **Instant queries** | `targets[].instant` / Prometheus `query` | Stat/table panels can use point-in-time queries | 🟡 | ✅ |
 | **Target interval** | `targets[].interval` / `intervalFactor` | Panel-specific resolution is respected | 🟡 | 📋 |
 | **Target ref IDs** | `targets[].refId` | Better diagnostics and future transformation support | 🟢 | 📋 |
 | **Format handling** | `targets[].format` | Tables and heatmaps can choose more appropriate handling | 🟡 | 📋 |
@@ -197,7 +198,7 @@ expectations.
 | Item | Why it belongs here | Complexity | Status |
 |---|---|---|---|
 | Reduce options | Summary panels need more than "last" | 🟡 | 📋 |
-| Instant query support | Many summary/table panels are intended as instant queries | 🟡 | 📋 |
+| Instant query support | Many summary/table panels are intended as instant queries | 🟡 | ✅ |
 | Display names | Imported labels become clearer without changing queries | 🟢 | 📋 |
 | Legend display modes and placement | Dense dashboards need predictable legend behavior | 🟡 | 📋 |
 | Legend calculations | Adds useful table-like summaries without a new panel type | 🟡 | 📋 |

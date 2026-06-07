@@ -136,6 +136,7 @@ async fn main() -> Result<()> {
                 title: q.title,
                 exprs: q.exprs,
                 legends: q.legends,
+                query_modes: q.query_modes,
                 series: vec![],
                 last_error: None,
                 last_url: None,

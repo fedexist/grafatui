@@ -383,6 +383,7 @@ mod tests {
             title: title.to_string(),
             exprs: vec![],
             legends: vec![],
+            query_modes: vec![],
             series: vec![
                 SeriesView {
                     name: "a".to_string(),
