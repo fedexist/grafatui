@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 📚 Documentation
 
+- Publish the user guide at [fedexist.github.io/grafatui](https://fedexist.github.io/grafatui/).
 - Align roadmap with Grafana parity priorities ([b0e128d](https://github.com/fedexist/grafatui/commit/b0e128de94fa91da94c6a9b6c723ba44d21e8e41))
 - Add instant query dashboard example ([2b38ded](https://github.com/fedexist/grafatui/commit/2b38ded40532fb13de39c4d09e9f6705d6cf8271))
 - Add mdBook user guide ([a0feba1](https://github.com/fedexist/grafatui/commit/a0feba1e6cbe97e0d19aaab8183b3209d28e5b09))
