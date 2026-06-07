@@ -52,6 +52,7 @@ pub(crate) struct QueryPanel {
     pub(crate) title: String,
     pub(crate) exprs: Vec<String>,
     pub(crate) legends: Vec<Option<String>>, // Parallel to exprs
+    pub(crate) query_modes: Vec<crate::app::QueryMode>, // Parallel to exprs
     pub(crate) grid: Option<GridPos>,
     pub(crate) panel_type: crate::app::PanelType,
     pub(crate) thresholds: Option<crate::app::Thresholds>,
@@ -170,6 +171,7 @@ struct RawTarget {
     expr: Option<String>,
     #[serde(rename = "legendFormat")]
     legend_format: Option<String>,
+    instant: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -291,6 +293,26 @@ fn value_is_all(value: Option<&serde_json::Value>) -> bool {
     }
 }
 
+fn query_mode_for_target(
+    instant: Option<bool>,
+    panel_type: crate::app::PanelType,
+) -> crate::app::QueryMode {
+    match instant {
+        Some(true) => crate::app::QueryMode::Instant,
+        Some(false) => crate::app::QueryMode::Range,
+        None => default_query_mode_for_panel(panel_type),
+    }
+}
+
+fn default_query_mode_for_panel(panel_type: crate::app::PanelType) -> crate::app::QueryMode {
+    match panel_type {
+        crate::app::PanelType::Gauge
+        | crate::app::PanelType::BarGauge
+        | crate::app::PanelType::Table => crate::app::QueryMode::Instant,
+        _ => crate::app::QueryMode::Range,
+    }
+}
+
 fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()> {
     for p in panels.into_iter() {
         if let Some(children) = p.panels {
@@ -311,11 +333,13 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
         if panel_type != crate::app::PanelType::Unknown {
             let mut exprs = Vec::new();
             let mut legends = Vec::new();
+            let mut query_modes = Vec::new();
 
             for t in p.targets.unwrap_or_default() {
                 if let Some(e) = t.expr {
                     exprs.push(e);
                     legends.push(t.legend_format);
+                    query_modes.push(query_mode_for_target(t.instant, panel_type));
                 }
             }
 
@@ -392,6 +416,7 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
                     title: p.title.unwrap_or_default(),
                     exprs,
                     legends,
+                    query_modes,
                     grid: gp,
                     panel_type,
                     thresholds,
@@ -539,6 +564,80 @@ mod tests {
         assert_eq!(dashboard.queries[1].display.unit, None);
         assert_eq!(dashboard.queries[1].display.decimals, None);
         assert_eq!(dashboard.queries[1].display.no_value, None);
+    }
+
+    #[test]
+    fn test_parse_target_instant_query_modes() {
+        let json = r#"
+        {
+            "title": "Instant Mode Test",
+            "panels": [
+                {
+                    "type": "timeseries",
+                    "title": "Explicit Instant",
+                    "targets": [
+                        { "expr": "up", "instant": true },
+                        { "expr": "rate(http_requests_total[5m])", "instant": false }
+                    ]
+                },
+                {
+                    "type": "gauge",
+                    "title": "Gauge Default",
+                    "targets": [{ "expr": "up" }]
+                },
+                {
+                    "type": "bargauge",
+                    "title": "Bar Gauge Default",
+                    "targets": [{ "expr": "up" }]
+                },
+                {
+                    "type": "table",
+                    "title": "Table Default",
+                    "targets": [{ "expr": "up" }]
+                },
+                {
+                    "type": "stat",
+                    "title": "Stat Default",
+                    "targets": [{ "expr": "up" }]
+                },
+                {
+                    "type": "gauge",
+                    "title": "Gauge Range Override",
+                    "targets": [{ "expr": "up", "instant": false }]
+                }
+            ]
+        }
+        "#;
+        let path = std::env::temp_dir().join("grafatui-instant-mode-test.json");
+        std::fs::write(&path, json).unwrap();
+
+        let dashboard = load_grafana_dashboard(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        assert_eq!(
+            dashboard.queries[0].query_modes,
+            vec![crate::app::QueryMode::Instant, crate::app::QueryMode::Range]
+        );
+        assert_eq!(
+            dashboard.queries[1].query_modes,
+            vec![crate::app::QueryMode::Instant]
+        );
+        assert_eq!(
+            dashboard.queries[2].query_modes,
+            vec![crate::app::QueryMode::Instant]
+        );
+        assert_eq!(
+            dashboard.queries[3].query_modes,
+            vec![crate::app::QueryMode::Instant]
+        );
+        assert_eq!(
+            dashboard.queries[4].query_modes,
+            vec![crate::app::QueryMode::Range]
+        );
+        assert_eq!(
+            dashboard.queries[5].query_modes,
+            vec![crate::app::QueryMode::Range]
+        );
     }
 
     #[test]

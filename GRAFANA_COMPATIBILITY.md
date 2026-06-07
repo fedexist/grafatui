@@ -104,7 +104,7 @@ This document provides a comprehensive feature-parity table between the [Grafana
 | `targets[].datasource` | ❌ Not Implemented | Only Prometheus datasource is supported |
 | `targets[].interval` | ❌ Not Implemented | Uses global `--step` instead |
 | `targets[].intervalFactor` | ❌ Not Implemented | |
-| `targets[].instant` | ❌ Not Implemented | All queries use `query_range` |
+| `targets[].instant` | ✅ Supported | Uses Prometheus instant `query` when true; Gauge, BarGauge, and Table default to instant |
 | `targets[].format` | ❌ Not Implemented | Always treated as time_series |
 | `targets[].hide` | ❌ Not Implemented | All targets are visible |
 | `targets[].exemplar` | ❌ Not Implemented | |
@@ -264,7 +264,7 @@ tooltips.
 | Feature | Status | Notes |
 |---|---|---|
 | Prometheus (`query_range`) | ✅ Supported | Primary and only supported datasource |
-| Prometheus (`query` instant) | 🔶 Partial | Used for dynamic template variable `query_result(...)`; panel targets still use `query_range` |
+| Prometheus (`query` instant) | ✅ Supported | Used for dynamic template variables and instant panel targets |
 | Prometheus labels API | ✅ Supported | Used for dynamic variable `label_values(...)` |
 | Mixed datasource | ❌ Not Implemented | |
 | InfluxDB | ❌ Not Implemented | |
