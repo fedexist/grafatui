@@ -10,12 +10,19 @@ on:
       - "GRAFANA_COMPATIBILITY.md"
       - "Cargo.toml"
       - ".github/workflows/docs.yml"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "book.toml"
+      - "docs/**"
+      - "README.md"
+      - "GRAFANA_COMPATIBILITY.md"
+      - "Cargo.toml"
+      - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: "pages"
@@ -43,8 +50,13 @@ jobs:
           path: book
 
   deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
