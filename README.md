@@ -45,11 +45,11 @@ cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheu
 ## Documentation
 
 - [User guide](https://fedexist.github.io/grafatui/)
-- [Installation](docs/installation.md)
-- [Quick start](docs/quick-start.md)
-- [Configuration](docs/configuration.md)
-- [Grafana dashboard import](docs/grafana-dashboard-import.md)
-- [Grafana compatibility matrix](GRAFANA_COMPATIBILITY.md)
+- [Installation](https://fedexist.github.io/grafatui/installation.html)
+- [Quick start](https://fedexist.github.io/grafatui/quick-start.html)
+- [Configuration](https://fedexist.github.io/grafatui/configuration.html)
+- [Grafana dashboard import](https://fedexist.github.io/grafatui/grafana-dashboard-import.html)
+- [Grafana compatibility matrix](https://fedexist.github.io/grafatui/grafana-compatibility.html)
 - [Examples](examples/README.md)
 
 Rust API documentation is available on [docs.rs](https://docs.rs/grafatui).

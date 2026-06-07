@@ -7,6 +7,8 @@ assignees: ''
 
 ---
 
+Before filing, please check the [user guide](https://fedexist.github.io/grafatui/), especially [Troubleshooting](https://fedexist.github.io/grafatui/troubleshooting.html) and the [Grafana compatibility matrix](https://fedexist.github.io/grafatui/grafana-compatibility.html).
+
 **Describe the bug**
 A clear and concise description of what the bug is.
 

@@ -7,6 +7,8 @@ assignees: ''
 
 ---
 
+Before filing, please check the [user guide](https://fedexist.github.io/grafatui/) and the [Grafana compatibility matrix](https://fedexist.github.io/grafatui/grafana-compatibility.html) in case the feature is already documented or partially supported.
+
 **Is your feature request related to a problem? Please describe.**
 A clear and concise description of what the problem is. Ex: I'm always frustrated when [...]
 
