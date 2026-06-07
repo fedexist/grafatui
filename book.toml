@@ -1,0 +1,14 @@
+[book]
+authors = ["Federico D'Ambrosio"]
+language = "en"
+src = "docs"
+title = "Grafatui User Guide"
+
+[build]
+build-dir = "book"
+create-missing = false
+
+[output.html]
+git-repository-url = "https://github.com/fedexist/grafatui"
+edit-url-template = "https://github.com/fedexist/grafatui/edit/main/{path}"
+site-url = "/grafatui/"
