@@ -6,31 +6,25 @@
 [![Rust Version](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 [![docs.rs](https://img.shields.io/docsrs/grafatui)](https://docs.rs/grafatui)
 
-**Grafatui** is a terminal-based user interface (TUI) for Prometheus, inspired by Grafana. It allows you to visualize time-series data directly in your terminal with a lightweight, keyboard-driven interface.
+**Grafatui** is a terminal user interface for Prometheus, inspired by Grafana. It lets you inspect time-series dashboards from a fast, keyboard-driven TUI that works well over SSH and in minimal environments.
 
 [![asciicast](https://asciinema.org/a/vMRNEjG0FEDKGP31.svg)](https://asciinema.org/a/vMRNEjG0FEDKGP31)
 
-## Why Grafatui?
-
-- 🚀 **Lightweight**: No browser, no Electron, just your terminal
-- ⚡ **Fast**: Sub-second startup, minimal resource usage
-- 📊 **Familiar**: Import your existing Grafana dashboards
-- ⌨️ **Keyboard-first**: Navigate and explore without touching your mouse
-- 🎨 **Customizable**: Multiple themes and configuration options
-
 ## Quick Start
 
-If you already have Prometheus running:
+Install from crates.io:
 
 ```bash
-# Install from crates.io
 cargo install grafatui
+```
 
-# Run with your Prometheus instance
+Run against a Prometheus instance:
+
+```bash
 grafatui --prometheus-url http://localhost:9090
 ```
 
-Or try the included demo with zero setup:
+Or try the included demo:
 
 ```bash
 git clone https://github.com/fedexist/grafatui.git
@@ -39,289 +33,47 @@ cd examples/demo && docker-compose up -d && sleep 5 && cd ../..
 cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus-url http://localhost:19090
 ```
 
-This demo showcases all 7 visualization types (graph, stat, gauge, bar gauge, table, heatmap) using a local Prometheus instance.
-
 ## Features
 
-### Prometheus Integration
-- **Direct connection** to any Prometheus instance
-- **Real-time updates** with configurable refresh rates
-- **Optimized queries** with caching and request deduplication
+- Prometheus range and instant queries with async fetching.
+- Grafana dashboard JSON import for graph, timeseries, stat, gauge, bar gauge, table, and heatmap panels.
+- Template variables, Grafana built-in PromQL variables, legend formatting, thresholds, and grid layout support.
+- Keyboard-first navigation, panel search, fullscreen mode, mouse selection, and value inspection.
+- SVG/PNG export and changed-frame recording bundles.
+- TOML configuration and built-in themes.
 
-### Grafana Dashboard Import
-- **Import existing dashboards** from JSON files
-- **Supported panels**: graph, timeseries, gauge, bargauge, table, stat, heatmap
-- **Template variables** with built-in PromQL time variables, dynamic Prometheus query variables, and CLI overrides
-- **Dashboard refresh interval** from Grafana JSON, with CLI/config overrides
-- **Legend formatting** (`{{label}}` syntax)
-- **Grid layouts** using `gridPos`
-- **Thresholds** dynamically applied to metrics and graph limits
+## Documentation
 
-> 📋 For a detailed breakdown of which Grafana JSON features are supported, see [GRAFANA_COMPATIBILITY.md](GRAFANA_COMPATIBILITY.md).
+- [User guide](https://fedexist.github.io/grafatui/)
+- [Installation](docs/installation.md)
+- [Quick start](docs/quick-start.md)
+- [Configuration](docs/configuration.md)
+- [Grafana dashboard import](docs/grafana-dashboard-import.md)
+- [Grafana compatibility matrix](GRAFANA_COMPATIBILITY.md)
+- [Examples](examples/README.md)
 
-### Interactive TUI
-- **Time controls**: Zoom, pan, and jump to live updates
-- **Panel navigation**: Arrow keys, vim-style, or mouse
-- **Search**: Quickly find panels by name
-- **Fullscreen mode**: Focus on a single panel
-- **Value inspection**: Cursor-based point-in-time data exploration
-- **Series toggling**: Show/hide individual metrics
-- **Image export**: Save the current dashboard as SVG/PNG, or record changed states as a timestamped frame bundle
+Rust API documentation is available on [docs.rs](https://docs.rs/grafatui).
 
-### Customization
-- **8 themes**: default, dracula, monokai, solarized (dark/light), gruvbox, tokyo-night, catppuccin
-- **Config file support** (TOML)
-- **Flexible CLI** with sensible defaults
-
-## Installation
-
-### From Crates.io
+## Common Commands
 
 ```bash
-cargo install grafatui
-```
+# Import a Grafana dashboard
+grafatui --prometheus-url http://localhost:9090 --grafana-json ./dashboard.json
 
-### From Source
-
-Ensure you have Rust installed (1.85+ recommended).
-
-```bash
-git clone https://github.com/fedexist/grafatui.git
-cd grafatui
-cargo install --path .
-```
-
-### Prebuilt Binaries
-
-Download the latest release for your platform from [GitHub Releases](https://github.com/fedexist/grafatui/releases):
-
-- **Linux** (x86_64, aarch64)
-- **macOS** (x86_64, aarch64)
-- **Windows** (x86_64)
-
-### Package Managers
-
-**Homebrew** (coming soon):
-```bash
-brew install grafatui
-```
-
-## Shell Completions
-
-Grafatui can generate shell completions for Bash, Zsh, Fish, PowerShell, and Elvish.
-
-**Bash:**
-```bash
-# Add to .bashrc
-source <(grafatui completions bash)
-```
-
-**Zsh:**
-```zsh
-# Add to .zshrc
-source <(grafatui completions zsh)
-```
-
-**Fish:**
-```fish
-grafatui completions fish | source
-```
-
-## Usage
-
-```bash
-grafatui [OPTIONS]
-```
-
-### Common Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--prometheus-url <URL>` | Prometheus server URL | `http://localhost:9090` |
-| `--grafana-json <FILE>` | Import Grafana dashboard JSON | - |
-| `--range <DURATION>` | Time range window (e.g., `5m`, `1h`, `24h`) | `5m` |
-| `--step <DURATION>` | Query step resolution (e.g., `5s`, `30s`) | `5s` |
-| `--var <KEY=VALUE>` | Override dashboard variables | - |
-| `--theme <NAME>` | UI theme | `default` |
-| `--threshold-marker <MARKER>` | Marker for threshold lines (`dashed`, `dot`, `block`, `quadrant`, etc.) | `dashed` |
-| `--export-dir <DIR>` | Directory for SVG/PNG exports and recordings | `./grafatui-exports` |
-| `--export-format <FORMAT>` | Export format (`svg`, `png`, `both`) | `svg` |
-| `--record-max-frames <COUNT>` | Maximum changed frames per recording (`> 0`) | `300` |
-| `--autogrid-color <COLOR>` | Color for autogrid lines and labels (`gray`, `dark-gray`, `#666666`, etc.) | `dark-gray` |
-| `--refresh-rate <MS>` | Data fetch interval (milliseconds) | `1000` |
-| `--config <FILE>` | Custom config file path | - |
-
-Run `grafatui --help` for the full list of options.
-
-### Exporting and Recording
-
-Exports use the visible dashboard layout and support SVG, PNG, or both formats.
-
-- Press `e` to export the current view. Files are written under `--export-dir` as `grafatui-<timestamp>.svg`, `.png`, or both, depending on `--export-format`.
-- Press `Ctrl+E` to start a changed-frame recording bundle. This creates `grafatui-recording-<timestamp>/` under `--export-dir`.
-- While recording, grafatui writes only changed rendered states as `frame-000001.svg`, `frame-000002.svg`, and so on. If `--export-format png` or `both` is selected, matching PNG files are written too.
-- Press `Ctrl+E` again, or quit with `q`, to finalize the recording and write `manifest.json`.
-- If `--record-max-frames` is reached, grafatui stops writing new frames, keeps recording active, and saves the bundle with `completed_reason = "capped"` when finalized.
-
-The recording manifest includes metadata that downstream tools can use:
-
-```json
-{
-  "version": 1,
-  "format": "svg",
-  "changed_only": true,
-  "frame_count": 2,
-  "max_frames": 300,
-  "completed_reason": "stopped",
-  "viewport": { "width": 100, "height": 40 },
-  "frames": [
-    {
-      "index": 1,
-      "elapsed_ms": 0,
-      "files": ["frame-000001.svg"]
-    }
-  ]
-}
-```
-
-`completed_reason` is `stopped` when ended with `Ctrl+E`, `quit` when finalized during quit, or `capped` when the recording reached `--record-max-frames`.
-
-### Configuration File
-
-Create a `grafatui.toml` in `~/.config/grafatui/` (or use `--config`):
-
-```toml
-prometheus_url = "http://localhost:9090"
-refresh_rate = 1000
-time_range = "1h"
-theme = "dracula"
-threshold_marker = "dashed"
-export_dir = "./grafatui-exports"
-export_format = "svg"
-record_max_frames = 300
-autogrid = true
-autogrid_color = "dark-gray"
-grafana_json = "~/.config/grafatui/my-dashboard.json"
-```
-
-### Examples
-
-**Basic usage:**
-```bash
-grafatui --prometheus-url http://localhost:9090
-```
-
-**Import a Grafana dashboard:**
-```bash
-grafatui --prometheus-url http://prod-prom:9090 --grafana-json ./node-exporter.json
-```
-
-**Override template variables:**
-```bash
+# Override Grafana template variables
 grafatui --grafana-json ./dash.json --var job=node --var instance=server-01
-```
 
-Grafana query variables such as `label_values(up, instance)` and `query_result(...)` are resolved from Prometheus before panel queries run. Built-in PromQL variables including `$__interval`, `$__interval_ms`, `$__range`, `$__range_s`, `$__range_ms`, and `$__rate_interval` are expanded automatically.
-
-**Use a theme:**
-```bash
+# Use a theme
 grafatui --theme tokyo-night
+
+# Generate shell completions or a man page
+grafatui completions zsh
+grafatui man
 ```
-
-**Try the included examples:**
-```bash
-# All visualization types
-grafatui --grafana-json examples/dashboards/all_visualizations.json --prometheus-url http://localhost:9090
-
-# vLLM monitoring (mock demo)
-cd examples/demo && docker-compose up -d && cd ../..
-grafatui --config examples/demo/grafatui.toml
-```
-
-> **Tip**: See the `examples/` directory for more sample dashboards.
-
-## Keyboard Controls
-
-| Key | Action |
-|-----|--------|
-| `q` | Quit |
-| `r` | Force refresh |
-| `+` / `-` | Zoom out / in |
-| `[` / `]` | Pan left / right (time) |
-| `0` | Reset to live mode |
-| `↑` / `↓` or `k` / `j` | Select previous/next panel |
-| `PgUp` / `PgDn` | Scroll vertically (normal) / select previous or next panel (fullscreen) |
-| `Home` / `End` | Jump to top / bottom |
-| `y` | Toggle Y-axis mode |
-| `g` | Toggle autogrid guide lines |
-| `1`..`9` | Toggle series visibility |
-| `f` / `Enter` | Fullscreen mode |
-| `v` | Value inspection mode |
-| `e` | Export current view |
-| `Ctrl+E` | Start/stop changed-frame recording bundle |
-| `/` | Search panels |
-| `←` / `→` | Move cursor (inspect mode) |
-| `?` | Toggle debug info |
-
-## Mouse Support
-
-- **Click**: Select panel (or move cursor in fullscreen inspect mode)
-- **Drag**: Move cursor (fullscreen inspect mode only)
-- **Scroll**: Scroll dashboard vertically
-
-> **Note**: In normal mode, clicking selects panels. Press `v` or `f` to enable cursor interaction.
-
-## Comparison with Grafana
-
-| Feature | Grafatui | Grafana |
-|---------|----------|---------|
-| **Resource usage** | ~10 MB RAM | ~500+ MB RAM |
-| **Startup time** | <1 second | 5-10 seconds |
-| **Interface** | Terminal (TUI) | Web browser |
-| **Dashboard format** | Import Grafana JSON | Native |
-| **Ideal for** | Quick debugging, SSH sessions, minimal environments | Production monitoring, complex dashboards, sharing |
-
-**Use Grafatui when:**
-- You're SSH'd into a server and want quick metrics
-- You need fast, low-overhead monitoring
-- You live in the terminal
-- You want keyboard-first workflow
-
-**Use Grafana when:**
-- You need advanced features (alerts, annotations, user management)
-- You're building dashboards for a team
-- You need rich visualizations and plugins
-
-> 📋 See [GRAFANA_COMPATIBILITY.md](GRAFANA_COMPATIBILITY.md) for a field-by-field breakdown of Grafana JSON features and their support status in Grafatui.
-
-## Performance
-
-Grafatui is designed to be fast and resource-efficient:
-
-- **Minimal footprint**: ~10 MB memory usage
-- **Smart caching**: Deduplicates identical queries across panels
-- **Client-side downsampling**: Adapts data points to terminal width
-- **Async architecture**: Non-blocking UI using Tokio
 
 ## Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-**Quick tips:**
-- Use [Conventional Commits](https://www.conventionalcommits.org/) for your commit messages
-- Run `cargo fmt` and `cargo clippy` before submitting
-- Add tests for new features
-
-## Acknowledgments
-
-Grafatui is built with amazing open-source libraries:
-
-- [ratatui](https://github.com/ratatui-org/ratatui) - Terminal UI framework
-- [crossterm](https://github.com/crossterm-rs/crossterm) - Terminal manipulation
-- [tokio](https://github.com/tokio-rs/tokio) - Async runtime
-- [reqwest](https://github.com/seanmonstar/reqwest) - HTTP client
-
-Inspired by [Grafana](https://grafana.com/) and the TUI ecosystem.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [DEVELOPMENT.md](DEVELOPMENT.md) for local development notes.
 
 ## License
 
