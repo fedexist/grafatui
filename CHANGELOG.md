@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.1.9] - 2026-06-12
+
+### 🐛 Bug Fixes
+
+- **graph:** Honor explicit y-axis bounds ([832afd9](https://github.com/fedexist/grafatui/commit/832afd9fcf095a194d64316153f42e77d238a938))
+
+### 📚 Documentation
+
+- Point contributors to user guide ([bf73a4f](https://github.com/fedexist/grafatui/commit/bf73a4fa3b05c591ddfe8836cdf0565e1764d74d))
+
+
 ## [0.1.8] - 2026-06-07
 
 ### ⛰️  Features
