@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
-use crate::app::{PanelState, YAxisMode};
+use crate::app::{PanelState, ThresholdMode, YAxisMode};
 
 pub(crate) fn calculate_y_bounds(p: &PanelState) -> [f64; 2] {
-    let mut min = f64::MAX;
-    let mut max = f64::MIN;
+    let mut min = f64::INFINITY;
+    let mut max = f64::NEG_INFINITY;
     let mut has_data = false;
 
     for s in &p.series {
@@ -26,21 +26,17 @@ pub(crate) fn calculate_y_bounds(p: &PanelState) -> [f64; 2] {
             continue;
         }
         for &(_, v) in &s.points {
-            if !v.is_finite() {
-                continue;
-            }
-            if v < min {
-                min = v;
-            }
-            if v > max {
-                max = v;
-            }
-            has_data = true;
+            observe_value(v, &mut min, &mut max, &mut has_data);
         }
     }
 
+    observe_thresholds(p, &mut min, &mut max, &mut has_data);
+
+    let explicit_min = p.min.filter(|value| value.is_finite());
+    let explicit_max = p.max.filter(|value| value.is_finite());
+
     if !has_data {
-        return [0.0, 1.0];
+        return fallback_bounds(explicit_min, explicit_max);
     }
 
     if min == max {
@@ -56,15 +52,75 @@ pub(crate) fn calculate_y_bounds(p: &PanelState) -> [f64; 2] {
         }
     }
 
+    if let Some(value) = explicit_min {
+        min = value;
+    }
+    if let Some(value) = explicit_max {
+        max = value;
+    }
+
+    if max <= min {
+        return fallback_bounds(Some(min), explicit_max.filter(|value| *value > min));
+    }
+
     // Add some padding
     let range = max - min;
-    [min - range * 0.05, max + range * 0.05]
+    [
+        if explicit_min.is_some() {
+            min
+        } else {
+            min - range * 0.05
+        },
+        if explicit_max.is_some() {
+            max
+        } else {
+            max + range * 0.05
+        },
+    ]
+}
+
+fn observe_thresholds(p: &PanelState, min: &mut f64, max: &mut f64, has_data: &mut bool) {
+    let Some(thresholds) = &p.thresholds else {
+        return;
+    };
+
+    for step in thresholds.steps.iter().filter_map(|step| step.value) {
+        let value = match thresholds.mode {
+            ThresholdMode::Absolute => step,
+            ThresholdMode::Percentage => {
+                let min = p.min.unwrap_or(0.0);
+                let max = p.max.unwrap_or(100.0);
+                min + (step / 100.0) * (max - min)
+            }
+        };
+        observe_value(value, min, max, has_data);
+    }
+}
+
+fn observe_value(value: f64, min: &mut f64, max: &mut f64, has_data: &mut bool) {
+    if !value.is_finite() {
+        return;
+    }
+
+    *min = min.min(value);
+    *max = max.max(value);
+    *has_data = true;
+}
+
+fn fallback_bounds(explicit_min: Option<f64>, explicit_max: Option<f64>) -> [f64; 2] {
+    match (explicit_min, explicit_max) {
+        (Some(min), Some(max)) if max > min => [min, max],
+        (Some(min), _) => [min, min + 1.0],
+        (_, Some(max)) => [max - 1.0, max],
+        _ => [0.0, 1.0],
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::SeriesView;
+    use crate::app::{SeriesView, ThresholdMode, ThresholdStep, Thresholds};
+    use ratatui::style::Color;
 
     fn create_test_panel() -> PanelState {
         PanelState {
@@ -148,5 +204,53 @@ mod tests {
         // So min should be 0.0 - 1.0 = -1.0.
         assert_eq!(bounds[0], -1.0);
         assert!(bounds[1] > 20.0);
+    }
+
+    #[test]
+    fn test_calculate_y_bounds_respects_explicit_min() {
+        let mut p = create_test_panel();
+        p.min = Some(0.0);
+        p.series.push(SeriesView {
+            name: "requests".to_string(),
+            value: None,
+            points: vec![(0.0, 4.5), (1.0, 11_200.0)],
+            visible: true,
+        });
+
+        let bounds = calculate_y_bounds(&p);
+
+        assert_eq!(bounds[0], 0.0);
+        assert!(bounds[1] > 11_200.0);
+    }
+
+    #[test]
+    fn test_calculate_y_bounds_includes_threshold_lines() {
+        let mut p = create_test_panel();
+        p.min = Some(0.0);
+        p.series.push(SeriesView {
+            name: "latency".to_string(),
+            value: None,
+            points: vec![(0.0, 0.5), (1.0, 1.0)],
+            visible: true,
+        });
+        p.thresholds = Some(Thresholds {
+            mode: ThresholdMode::Absolute,
+            steps: vec![
+                ThresholdStep {
+                    value: None,
+                    color: Color::Green,
+                },
+                ThresholdStep {
+                    value: Some(5.0),
+                    color: Color::Red,
+                },
+            ],
+            style: Some("line".to_string()),
+        });
+
+        let bounds = calculate_y_bounds(&p);
+
+        assert_eq!(bounds[0], 0.0);
+        assert!(bounds[1] > 5.0);
     }
 }
