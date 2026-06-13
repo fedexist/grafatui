@@ -1343,7 +1343,7 @@ fn display_paths(paths: &[PathBuf]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{PanelState, SeriesView, YAxisMode};
+    use crate::app::{GraphOptions, PanelOptions, PanelState, SeriesView, YAxisMode};
 
     fn test_panel(start: f64) -> PanelState {
         PanelState {
@@ -1368,6 +1368,7 @@ mod tests {
             max: None,
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
+            options: PanelOptions::Graph(GraphOptions::default()),
         }
     }
 

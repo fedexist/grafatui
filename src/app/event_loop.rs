@@ -117,7 +117,7 @@ fn finalize_recording_before_quit(app: &mut AppState) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{PanelState, PanelType, SeriesView, YAxisMode};
+    use crate::app::{GraphOptions, PanelOptions, PanelState, PanelType, SeriesView, YAxisMode};
     use crate::export::{ExportFormat, ExportOptions};
     use crate::prom::PromClient;
     use crate::theme::Theme;
@@ -162,6 +162,7 @@ mod tests {
                 max: None,
                 autogrid: None,
                 display: crate::ui::DisplayFormat::default(),
+                options: PanelOptions::Graph(GraphOptions::default()),
             }],
             0,
             Theme::default(),

@@ -60,6 +60,7 @@ pub(crate) struct QueryPanel {
     pub(crate) max: Option<f64>,
     pub(crate) autogrid: Option<bool>,
     pub(crate) display: crate::ui::DisplayFormat,
+    pub(crate) options: crate::app::PanelOptions,
 }
 
 /// Grid position extracted from Grafana.
@@ -412,6 +413,12 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
                     w: g.w,
                     h: g.h,
                 });
+                let options = match panel_type {
+                    crate::app::PanelType::Graph => {
+                        crate::app::PanelOptions::Graph(crate::app::GraphOptions::default())
+                    }
+                    _ => crate::app::PanelOptions::None,
+                };
                 out.queries.push(QueryPanel {
                     title: p.title.unwrap_or_default(),
                     exprs,
@@ -424,6 +431,7 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
                     max,
                     autogrid,
                     display,
+                    options,
                 });
             }
         } else if !kind.is_empty() && kind != "row" {
