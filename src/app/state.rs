@@ -62,6 +62,8 @@ pub(crate) struct PanelState {
     pub(crate) autogrid: Option<bool>,
     /// Display formatting imported from Grafana field configuration.
     pub(crate) display: DisplayFormat,
+    /// Renderer-specific presentation options.
+    pub(crate) options: PanelOptions,
 }
 
 /// Visualization types supported by Grafatui.
@@ -74,6 +76,70 @@ pub(crate) enum PanelType {
     Stat,
     Heatmap,
     Unknown,
+}
+
+/// Renderer-specific options carried by a generic panel.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum PanelOptions {
+    None,
+    Graph(GraphOptions),
+}
+
+impl Default for PanelOptions {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+/// Graph/timeseries rendering options imported from Grafana.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct GraphOptions {
+    pub(crate) draw_style: GraphDrawStyle,
+    pub(crate) show_points: GraphPointMode,
+    pub(crate) fill_opacity: Option<u8>,
+    pub(crate) axis_placement: GraphAxisPlacement,
+    pub(crate) line_interpolation: Option<String>,
+    pub(crate) stacking: GraphStackingMode,
+}
+
+impl Default for GraphOptions {
+    fn default() -> Self {
+        Self {
+            draw_style: GraphDrawStyle::Line,
+            show_points: GraphPointMode::Auto,
+            fill_opacity: None,
+            axis_placement: GraphAxisPlacement::Visible,
+            line_interpolation: None,
+            stacking: GraphStackingMode::Off,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GraphDrawStyle {
+    Line,
+    Points,
+    Bars,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GraphPointMode {
+    Auto,
+    Always,
+    Never,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GraphAxisPlacement {
+    Visible,
+    Hidden,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GraphStackingMode {
+    Off,
+    Normal,
+    Percent,
 }
 
 /// Prometheus endpoint mode for a target query.
@@ -134,6 +200,13 @@ pub(crate) struct Thresholds {
 }
 
 impl PanelState {
+    pub(crate) fn graph_options(&self) -> GraphOptions {
+        match &self.options {
+            PanelOptions::Graph(options) => options.clone(),
+            PanelOptions::None => GraphOptions::default(),
+        }
+    }
+
     pub(crate) fn query_mode(&self, index: usize) -> QueryMode {
         self.query_modes
             .get(index)
@@ -658,9 +731,47 @@ mod tests {
             max: None,
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
+            options: PanelOptions::None,
         };
 
         assert_eq!(panel.query_mode(0), QueryMode::Instant);
         assert_eq!(panel.query_mode(1), QueryMode::Range);
+    }
+
+    #[test]
+    fn test_default_graph_options_match_current_line_rendering() {
+        let options = GraphOptions::default();
+
+        assert_eq!(options.draw_style, GraphDrawStyle::Line);
+        assert_eq!(options.show_points, GraphPointMode::Auto);
+        assert_eq!(options.fill_opacity, None);
+        assert_eq!(options.axis_placement, GraphAxisPlacement::Visible);
+        assert_eq!(options.line_interpolation, None);
+        assert_eq!(options.stacking, GraphStackingMode::Off);
+    }
+
+    #[test]
+    fn test_panel_graph_options_fall_back_to_defaults() {
+        let panel = PanelState {
+            title: "not graph".to_string(),
+            exprs: vec![],
+            legends: vec![],
+            query_modes: vec![],
+            series: vec![],
+            last_error: None,
+            last_url: None,
+            last_samples: 0,
+            grid: None,
+            y_axis_mode: YAxisMode::Auto,
+            panel_type: PanelType::Stat,
+            thresholds: None,
+            min: None,
+            max: None,
+            autogrid: None,
+            display: crate::ui::DisplayFormat::default(),
+            options: PanelOptions::None,
+        };
+
+        assert_eq!(panel.graph_options(), GraphOptions::default());
     }
 }
