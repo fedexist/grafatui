@@ -8,7 +8,7 @@ Install the latest published release with Cargo:
 cargo install grafatui
 ```
 
-Grafatui currently requires Rust 1.85 or newer.
+Grafatui currently requires Rust 1.88 or newer.
 
 ## From Source
 
