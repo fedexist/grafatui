@@ -11,7 +11,7 @@ docker-compose up -d && sleep 5 && cargo run -- --grafana-json ../dashboards/pro
 > **Note**: The docker-compose is configured to use port **19090** to avoid conflicts with development tools and other services.
 
 This will:
-1. Start Prometheus (port **10001**) and node-exporter (port 9100)
+1. Start Prometheus (port **19090**) and node-exporter (port 9100)
 2. Wait 5 seconds for metrics to populate
 3. Launch grafatui with the demo dashboard
 
@@ -46,7 +46,7 @@ curl http://localhost:19090/-/healthy
 
 # Run grafatui (from repo root)
 cd ../..
-cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus http://localhost:19090
+cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus-url http://localhost:19090
 
 # Run vLLM Dashboard (using config file)
 # This uses grafatui.toml to set Prometheus URL and dashboard automatically
@@ -54,7 +54,7 @@ cd examples/demo
 cargo run -- --config grafatui.toml
 
 # Optional: customize time range and step
-cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus http://localhost:19090 --range 5m --step 2s
+cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus-url http://localhost:19090 --range 5m --step 2s
 ```
 
 ## Cleanup
@@ -77,4 +77,4 @@ docker-compose down -v  # -v removes volumes (data)
 
 **Port already in use:**
 - Change port in `docker-compose.yml`: `"9091:9090"` (use 9091 instead)
-- Then run grafatui with: `--prometheus http://localhost:9091`
+- Then run grafatui with: `--prometheus-url http://localhost:9091`
