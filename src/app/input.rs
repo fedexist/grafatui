@@ -349,7 +349,7 @@ fn toggle_series_visibility(app: &mut AppState, c: char) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{PanelState, PanelType, SeriesView};
+    use crate::app::{GraphOptions, PanelOptions, PanelState, PanelType, SeriesView};
     use crate::export::ExportOptions;
     use crate::prom;
     use crate::theme::Theme;
@@ -409,6 +409,7 @@ mod tests {
             max: None,
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
+            options: PanelOptions::Graph(GraphOptions::default()),
         }
     }
 

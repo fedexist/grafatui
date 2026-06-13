@@ -24,6 +24,6 @@ pub(crate) use data::{default_queries, parse_duration};
 pub(crate) use event_loop::run_app;
 #[allow(unused_imports)]
 pub(crate) use state::{
-    AppMode, AppState, GridUnit, PanelState, PanelType, QueryMode, SeriesView, ThresholdMode,
-    ThresholdStep, Thresholds, YAxisMode,
+    AppMode, AppState, GraphOptions, GridUnit, PanelOptions, PanelState, PanelType, QueryMode,
+    SeriesView, ThresholdMode, ThresholdStep, Thresholds, YAxisMode,
 };

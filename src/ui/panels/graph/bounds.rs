@@ -119,7 +119,9 @@ fn fallback_bounds(explicit_min: Option<f64>, explicit_max: Option<f64>) -> [f64
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{SeriesView, ThresholdMode, ThresholdStep, Thresholds};
+    use crate::app::{
+        GraphOptions, PanelOptions, SeriesView, ThresholdMode, ThresholdStep, Thresholds,
+    };
     use ratatui::style::Color;
 
     fn create_test_panel() -> PanelState {
@@ -140,6 +142,7 @@ mod tests {
             max: None,
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
+            options: PanelOptions::Graph(GraphOptions::default()),
         }
     }
 
