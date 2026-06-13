@@ -38,6 +38,31 @@ use std::collections::HashMap;
 
 pub(crate) use bounds::calculate_y_bounds;
 
+fn graph_type_for_draw_style(draw_style: crate::app::GraphDrawStyle) -> GraphType {
+    match draw_style {
+        crate::app::GraphDrawStyle::Line => GraphType::Line,
+        crate::app::GraphDrawStyle::Points => GraphType::Scatter,
+        crate::app::GraphDrawStyle::Bars => GraphType::Bar,
+    }
+}
+
+fn should_overlay_points(options: &crate::app::GraphOptions) -> bool {
+    options.show_points == crate::app::GraphPointMode::Always
+        && options.draw_style != crate::app::GraphDrawStyle::Points
+}
+
+fn area_fill_baseline(y_bounds: [f64; 2]) -> f64 {
+    if y_bounds[0] <= 0.0 && y_bounds[1] >= 0.0 {
+        0.0
+    } else {
+        y_bounds[0]
+    }
+}
+
+fn is_y_axis_hidden(options: &crate::app::GraphOptions) -> bool {
+    options.axis_placement == crate::app::GraphAxisPlacement::Hidden
+}
+
 pub(super) fn render_graph_panel(
     frame: &mut Frame,
     area: Rect,
@@ -98,6 +123,8 @@ pub(super) fn render_graph_panel(
     // Calculate y_bounds once
     let y_bounds = calculate_y_bounds(p);
     let show_autogrid = app.autogrid_enabled && p.autogrid.unwrap_or(true);
+    let graph_options = p.graph_options();
+    let hide_y_axis = is_y_axis_hidden(&graph_options);
 
     // Prepare datasets (without names for the chart itself to avoid built-in legend)
     let mut chart_datasets = Vec::new();
@@ -149,14 +176,33 @@ pub(super) fn render_graph_panel(
         ));
 
         // For chart (no name to avoid legend)
-        chart_datasets.push(
-            Dataset::default()
-                .name("")
-                .marker(ratatui::symbols::Marker::Braille)
-                .graph_type(GraphType::Line)
-                .style(Style::default().fg(color))
-                .data(data),
-        );
+        let mut dataset = Dataset::default()
+            .name("")
+            .marker(ratatui::symbols::Marker::Braille)
+            .graph_type(graph_type_for_draw_style(graph_options.draw_style))
+            .style(Style::default().fg(color))
+            .data(data);
+
+        if graph_options.fill_opacity.unwrap_or(0) > 0
+            && graph_options.draw_style == crate::app::GraphDrawStyle::Line
+        {
+            dataset = dataset
+                .graph_type(GraphType::Area)
+                .fill_to_y(area_fill_baseline(y_bounds));
+        }
+
+        chart_datasets.push(dataset);
+
+        if should_overlay_points(&graph_options) {
+            chart_datasets.push(
+                Dataset::default()
+                    .name("")
+                    .marker(ratatui::symbols::Marker::Dot)
+                    .graph_type(GraphType::Scatter)
+                    .style(Style::default().fg(color))
+                    .data(data),
+            );
+        }
     }
 
     // Add cursor line if inspecting
@@ -197,22 +243,28 @@ pub(super) fn render_graph_panel(
         Vec::new()
     };
 
-    y_labels[0] = Span::styled(
-        p.display.format_number(y_bounds[0]),
-        Style::default().fg(theme.text),
-    );
-    y_labels[y_axis_height - 1] = Span::styled(
-        p.display.format_number(y_bounds[1]),
-        Style::default().fg(theme.text),
-    );
+    if !hide_y_axis {
+        y_labels[0] = Span::styled(
+            p.display.format_number(y_bounds[0]),
+            Style::default().fg(theme.text),
+        );
+        y_labels[y_axis_height - 1] = Span::styled(
+            p.display.format_number(y_bounds[1]),
+            Style::default().fg(theme.text),
+        );
+    }
 
     // Evaluate y_max_width before moving y_labels into Chart block
-    let y_max_width = y_label_width(
-        &y_labels,
-        &autogrid_value_ticks,
-        &threshold_data.labels,
-        &p.display,
-    );
+    let y_max_width = if hide_y_axis {
+        0
+    } else {
+        y_label_width(
+            &y_labels,
+            &autogrid_value_ticks,
+            &threshold_data.labels,
+            &p.display,
+        )
+    };
 
     let chart = Chart::new(chart_datasets)
         // No block, as we rendered it outside
@@ -323,25 +375,92 @@ pub(super) fn render_graph_panel(
         );
     }
 
-    render_intermediate_y_labels(
-        frame,
-        YLabelArea {
-            left: chart_area.left(),
-            width: y_max_width,
-        },
-        plot_bounds,
-        YLabelContext {
-            y_bounds,
-            autogrid_ticks: &autogrid_value_ticks,
-            threshold_labels: &threshold_data.labels,
-            display: &p.display,
-            color: app.autogrid_color,
-        },
-    );
+    if !hide_y_axis {
+        render_intermediate_y_labels(
+            frame,
+            YLabelArea {
+                left: chart_area.left(),
+                width: y_max_width,
+            },
+            plot_bounds,
+            YLabelContext {
+                y_bounds,
+                autogrid_ticks: &autogrid_value_ticks,
+                threshold_labels: &threshold_data.labels,
+                display: &p.display,
+                color: app.autogrid_color,
+            },
+        );
+    }
 
     // Render custom legend
     if legend_height > 0 {
         let legend = Paragraph::new(Line::from(legend_items)).wrap(Wrap { trim: true });
         frame.render_widget(legend, legend_area);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::{
+        GraphAxisPlacement, GraphDrawStyle, GraphOptions, GraphPointMode, GraphStackingMode,
+    };
+
+    #[test]
+    fn test_graph_type_for_draw_style() {
+        assert_eq!(
+            graph_type_for_draw_style(GraphDrawStyle::Line),
+            GraphType::Line
+        );
+        assert_eq!(
+            graph_type_for_draw_style(GraphDrawStyle::Points),
+            GraphType::Scatter
+        );
+        assert_eq!(
+            graph_type_for_draw_style(GraphDrawStyle::Bars),
+            GraphType::Bar
+        );
+    }
+
+    #[test]
+    fn test_should_overlay_points() {
+        let mut options = GraphOptions::default();
+        options.draw_style = GraphDrawStyle::Line;
+        options.show_points = GraphPointMode::Auto;
+        assert!(!should_overlay_points(&options));
+
+        options.show_points = GraphPointMode::Always;
+        assert!(should_overlay_points(&options));
+
+        options.draw_style = GraphDrawStyle::Points;
+        assert!(!should_overlay_points(&options));
+
+        options.draw_style = GraphDrawStyle::Bars;
+        options.show_points = GraphPointMode::Always;
+        assert!(should_overlay_points(&options));
+    }
+
+    #[test]
+    fn test_area_fill_baseline_prefers_zero_when_visible() {
+        assert_eq!(area_fill_baseline([-10.0, 20.0]), 0.0);
+        assert_eq!(area_fill_baseline([5.0, 20.0]), 5.0);
+        assert_eq!(area_fill_baseline([-20.0, -5.0]), -20.0);
+    }
+
+    #[test]
+    fn test_hidden_axis_flag() {
+        let visible = GraphOptions::default();
+        assert!(!is_y_axis_hidden(&visible));
+
+        let hidden = GraphOptions {
+            axis_placement: GraphAxisPlacement::Hidden,
+            draw_style: GraphDrawStyle::Line,
+            show_points: GraphPointMode::Auto,
+            fill_opacity: None,
+            line_interpolation: Some("smooth".to_string()),
+            stacking: GraphStackingMode::Normal,
+        };
+        assert!(is_y_axis_hidden(&hidden));
     }
 }
