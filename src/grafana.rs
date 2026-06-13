@@ -144,6 +144,17 @@ struct RawFieldConfigDefaults {
 
 #[derive(Debug, Deserialize)]
 struct RawCustom {
+    #[serde(rename = "drawStyle")]
+    draw_style: Option<String>,
+    #[serde(rename = "showPoints")]
+    show_points: Option<String>,
+    #[serde(rename = "fillOpacity")]
+    fill_opacity: Option<u16>,
+    #[serde(rename = "axisPlacement")]
+    axis_placement: Option<String>,
+    #[serde(rename = "lineInterpolation")]
+    line_interpolation: Option<String>,
+    stacking: Option<RawStacking>,
     #[serde(rename = "axisGridShow")]
     axis_grid_show: Option<bool>,
     #[serde(rename = "thresholdsStyle")]
@@ -152,6 +163,11 @@ struct RawCustom {
 
 #[derive(Debug, Deserialize)]
 struct RawThresholdsStyle {
+    mode: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawStacking {
     mode: Option<String>,
 }
 
@@ -314,6 +330,61 @@ fn default_query_mode_for_panel(panel_type: crate::app::PanelType) -> crate::app
     }
 }
 
+fn graph_options_from_custom(custom: Option<&RawCustom>) -> crate::app::GraphOptions {
+    let Some(custom) = custom else {
+        return crate::app::GraphOptions::default();
+    };
+
+    crate::app::GraphOptions {
+        draw_style: parse_graph_draw_style(custom.draw_style.as_deref()),
+        show_points: parse_graph_point_mode(custom.show_points.as_deref()),
+        fill_opacity: custom.fill_opacity.map(|value| value.min(100) as u8),
+        axis_placement: parse_graph_axis_placement(custom.axis_placement.as_deref()),
+        line_interpolation: custom
+            .line_interpolation
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+            .cloned(),
+        stacking: parse_graph_stacking_mode(
+            custom
+                .stacking
+                .as_ref()
+                .and_then(|stacking| stacking.mode.as_deref()),
+        ),
+    }
+}
+
+fn parse_graph_draw_style(value: Option<&str>) -> crate::app::GraphDrawStyle {
+    match value {
+        Some("points") => crate::app::GraphDrawStyle::Points,
+        Some("bars") => crate::app::GraphDrawStyle::Bars,
+        _ => crate::app::GraphDrawStyle::Line,
+    }
+}
+
+fn parse_graph_point_mode(value: Option<&str>) -> crate::app::GraphPointMode {
+    match value {
+        Some("always") => crate::app::GraphPointMode::Always,
+        Some("never") => crate::app::GraphPointMode::Never,
+        _ => crate::app::GraphPointMode::Auto,
+    }
+}
+
+fn parse_graph_axis_placement(value: Option<&str>) -> crate::app::GraphAxisPlacement {
+    match value {
+        Some("hidden") => crate::app::GraphAxisPlacement::Hidden,
+        _ => crate::app::GraphAxisPlacement::Visible,
+    }
+}
+
+fn parse_graph_stacking_mode(value: Option<&str>) -> crate::app::GraphStackingMode {
+    match value {
+        Some("normal") => crate::app::GraphStackingMode::Normal,
+        Some("percent") => crate::app::GraphStackingMode::Percent,
+        _ => crate::app::GraphStackingMode::Off,
+    }
+}
+
 fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()> {
     for p in panels.into_iter() {
         if let Some(children) = p.panels {
@@ -349,9 +420,11 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
             let mut max = None;
             let mut autogrid = None;
             let mut display = crate::ui::DisplayFormat::default();
+            let mut graph_options = crate::app::GraphOptions::default();
 
             if let Some(fc) = p.field_config {
                 if let Some(defaults) = fc.defaults {
+                    graph_options = graph_options_from_custom(defaults.custom.as_ref());
                     display = crate::ui::DisplayFormat {
                         unit: defaults.unit,
                         decimals: defaults.decimals,
@@ -392,8 +465,9 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
                         if !steps.is_empty() {
                             let style = defaults
                                 .custom
-                                .and_then(|c| c.thresholds_style)
-                                .and_then(|t| t.mode)
+                                .as_ref()
+                                .and_then(|c| c.thresholds_style.as_ref())
+                                .and_then(|t| t.mode.clone())
                                 .unwrap_or_else(|| "line".to_string());
 
                             thresholds = Some(crate::app::Thresholds {
@@ -414,9 +488,7 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
                     h: g.h,
                 });
                 let options = match panel_type {
-                    crate::app::PanelType::Graph => {
-                        crate::app::PanelOptions::Graph(crate::app::GraphOptions::default())
-                    }
+                    crate::app::PanelType::Graph => crate::app::PanelOptions::Graph(graph_options),
                     _ => crate::app::PanelOptions::None,
                 };
                 out.queries.push(QueryPanel {
@@ -715,5 +787,114 @@ mod tests {
         std::fs::remove_file(path).unwrap();
 
         assert_eq!(dashboard.refresh_rate_ms, Some(5000));
+    }
+
+    #[test]
+    fn test_import_timeseries_graph_options() {
+        let json = r#"{
+            "title": "Graph options",
+            "panels": [{
+                "type": "timeseries",
+                "title": "Area points",
+                "targets": [{ "expr": "up" }],
+                "fieldConfig": {
+                    "defaults": {
+                        "custom": {
+                            "drawStyle": "line",
+                            "showPoints": "always",
+                            "fillOpacity": 20,
+                            "axisPlacement": "hidden",
+                            "lineInterpolation": "smooth",
+                            "stacking": { "mode": "normal" }
+                        }
+                    }
+                }
+            }]
+        }"#;
+
+        let raw: RawDashboard = serde_json::from_str(json).unwrap();
+        let mut out = DashboardImport {
+            title: raw.title.unwrap_or_default(),
+            refresh_rate_ms: None,
+            queries: vec![],
+            vars: HashMap::new(),
+            query_vars: vec![],
+            skipped_panels: 0,
+        };
+
+        collect_panels(&mut out, raw.panels.unwrap()).unwrap();
+
+        let options = match &out.queries[0].options {
+            crate::app::PanelOptions::Graph(options) => options,
+            other => panic!("expected graph options, got {other:?}"),
+        };
+        assert_eq!(options.draw_style, crate::app::GraphDrawStyle::Line);
+        assert_eq!(options.show_points, crate::app::GraphPointMode::Always);
+        assert_eq!(options.fill_opacity, Some(20));
+        assert_eq!(
+            options.axis_placement,
+            crate::app::GraphAxisPlacement::Hidden
+        );
+        assert_eq!(options.line_interpolation.as_deref(), Some("smooth"));
+        assert_eq!(options.stacking, crate::app::GraphStackingMode::Normal);
+    }
+
+    #[test]
+    fn test_import_graph_options_fallbacks_and_non_graph_none() {
+        let json = r#"{
+            "title": "Fallbacks",
+            "panels": [
+                {
+                    "type": "timeseries",
+                    "title": "Unknown values",
+                    "targets": [{ "expr": "up" }],
+                    "fieldConfig": {
+                        "defaults": {
+                            "custom": {
+                                "drawStyle": "candles",
+                                "showPoints": "sometimes",
+                                "fillOpacity": 999,
+                                "axisPlacement": "right",
+                                "stacking": { "mode": "percent" }
+                            }
+                        }
+                    }
+                },
+                {
+                    "type": "stat",
+                    "title": "Stat",
+                    "targets": [{ "expr": "up" }]
+                }
+            ]
+        }"#;
+
+        let raw: RawDashboard = serde_json::from_str(json).unwrap();
+        let mut out = DashboardImport {
+            title: raw.title.unwrap_or_default(),
+            refresh_rate_ms: None,
+            queries: vec![],
+            vars: HashMap::new(),
+            query_vars: vec![],
+            skipped_panels: 0,
+        };
+
+        collect_panels(&mut out, raw.panels.unwrap()).unwrap();
+
+        let graph_options = match &out.queries[0].options {
+            crate::app::PanelOptions::Graph(options) => options,
+            other => panic!("expected graph options, got {other:?}"),
+        };
+        assert_eq!(graph_options.draw_style, crate::app::GraphDrawStyle::Line);
+        assert_eq!(graph_options.show_points, crate::app::GraphPointMode::Auto);
+        assert_eq!(graph_options.fill_opacity, Some(100));
+        assert_eq!(
+            graph_options.axis_placement,
+            crate::app::GraphAxisPlacement::Visible
+        );
+        assert_eq!(
+            graph_options.stacking,
+            crate::app::GraphStackingMode::Percent
+        );
+        assert_eq!(out.queries[1].options, crate::app::PanelOptions::None);
     }
 }
