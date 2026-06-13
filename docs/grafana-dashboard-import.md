@@ -40,6 +40,28 @@ grafatui --grafana-json ./dash.json --var job=node --var instance=server-01
 
 Prometheus query variables such as `label_values(up, instance)` and `query_result(...)` are resolved before panel queries run.
 
+## Query Modes
+
+Grafatui honors `targets[].instant` from Grafana dashboard JSON. Targets marked
+as instant use the Prometheus instant `query` endpoint, while range targets use
+`query_range`.
+
+If a target does not specify `instant`, Gauge, Bar Gauge, and Table panels
+default to instant queries. Graph, Timeseries, Stat, and Heatmap panels default
+to range queries.
+
+## Field Configuration
+
+Grafatui applies selected `fieldConfig.defaults` values where they map cleanly
+to terminal rendering:
+
+- `min` and `max` set explicit Graph y-axis bounds and Gauge limits.
+- `thresholds` render graph threshold lines and drive dynamic coloring for Stat,
+  Gauge, and Bar Gauge panels.
+- `unit`, `decimals`, and `noValue` affect supported panel values, axes,
+  legends, and exports.
+- `custom.axisGridShow` controls per-panel graph guide lines.
+
 ## Built-In PromQL Variables
 
 Grafatui expands the following Grafana-style variables:
