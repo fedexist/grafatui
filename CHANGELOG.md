@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.1.10] - 2026-06-13
+
+### 📚 Documentation
+
+- Update project documentation, roadmap, and example structure to reflect v0.1.9 changes ([7dd5d0f](https://github.com/fedexist/grafatui/commit/7dd5d0ffb7a31dfbe8a26a4121943e7505c788fc))
+
+### ⚙️ Miscellaneous Tasks
+
+- Update copyright year and add license headers to missing files ([4b567fb](https://github.com/fedexist/grafatui/commit/4b567fb360b9a6489e2504f659f08ed390394ec0))
+
+
 ## [0.1.9] - 2026-06-12
 
 ### 🐛 Bug Fixes
