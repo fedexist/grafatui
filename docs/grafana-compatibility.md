@@ -70,6 +70,14 @@ This document provides a comprehensive feature-parity table between the [Grafana
 | `trend` | ❌ Not Implemented | |
 | `xychart` | ❌ Not Implemented | |
 
+### Graph & Timeseries Parity
+
+| Feature | JSON Field | Behavior | Grafana | Grafatui |
+|---|---|---|---|---|
+| **Draw styles** | `fieldConfig.defaults.custom.drawStyle` | Line, points, and bars map to terminal graph styles | 🟡 | ✅ |
+| **Stacking** | `fieldConfig.defaults.custom.stacking` | Parsed and retained; non-off modes render non-stacked in this slice | 🟡 | 🔶 |
+| **Axis placement** | `fieldConfig.defaults.custom.axisPlacement` | `hidden` suppresses y-axis labels; left/right map to the terminal y-axis | 🟡 | 🔶 |
+
 ### Panel Common Fields
 
 | JSON Field | Status | Notes |
@@ -181,12 +189,9 @@ parsed; value mappings, display names, and field overrides remain major gaps.
 | `fieldConfig.defaults.noValue` | 🔶 Partial | Used for null Stat/Table values and exports; empty panels still show Grafatui's `No data` state |
 | `fieldConfig.defaults.displayName` | ❌ Not Implemented | |
 | `fieldConfig.defaults.custom` | 🔶 Partial | Used for threshold style and axis grid visibility |
-| `fieldConfig.defaults.custom.drawStyle` | ❌ Not Implemented | Always drawn as lines |
 | `fieldConfig.defaults.custom.lineWidth` | ❌ Not Implemented | TUI limitation |
 | `fieldConfig.defaults.custom.fillOpacity` | ⛔ Not Applicable | TUI limitation |
 | `fieldConfig.defaults.custom.pointSize` | ⛔ Not Applicable | TUI limitation |
-| `fieldConfig.defaults.custom.stacking` | ❌ Not Implemented | No stacked charts |
-| `fieldConfig.defaults.custom.axisPlacement` | ❌ Not Implemented | |
 | `fieldConfig.defaults.custom.axisLabel` | ❌ Not Implemented | |
 | `fieldConfig.defaults.custom.axisGridShow` | ✅ Supported | Controls per-panel autogrid guide lines for graph/time-series panels |
 | `fieldConfig.defaults.custom.thresholdsStyle` | 🔶 Partial | `mode` is parsed for threshold rendering; glyph style is also controlled by Grafatui's marker setting |
