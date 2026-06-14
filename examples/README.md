@@ -8,7 +8,7 @@ Want to try grafatui instantly? Use the pre-configured demo environment:
 
 ```bash
 cd demo
-docker-compose up -d && sleep 5 && cd ../.. && cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus http://localhost:19090
+docker-compose up -d && sleep 5 && cd ../.. && cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheus-url http://localhost:19090
 ```
 
 See [`demo/README.md`](demo/README.md) for details.
@@ -38,10 +38,10 @@ Demonstrates all supported panel types in a single dashboard:
 cargo run -- --grafana-json examples/dashboards/all_visualizations.json
 
 # Or with custom Prometheus URL
-cargo run -- --grafana-json examples/dashboards/all_visualizations.json --prometheus http://prometheus.example.com:9090
+cargo run -- --grafana-json examples/dashboards/all_visualizations.json --prometheus-url http://prometheus.example.com:9090
 
 # Override variables
-cargo run -- --grafana-json examples/dashboards/all_visualizations.json --var instance=localhost:9090
+cargo run -- --grafana-json examples/dashboards/all_visualizations.json --var instance=prometheus:9090
 ```
 
 ## Creating Your Own
