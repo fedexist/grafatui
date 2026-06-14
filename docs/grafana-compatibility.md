@@ -188,9 +188,9 @@ parsed; value mappings, display names, and field overrides remain major gaps.
 | `fieldConfig.defaults.mappings` | ❌ Not Implemented | Value mappings not supported |
 | `fieldConfig.defaults.noValue` | 🔶 Partial | Used for null Stat/Table values and exports; empty panels still show Grafatui's `No data` state |
 | `fieldConfig.defaults.displayName` | ❌ Not Implemented | |
-| `fieldConfig.defaults.custom` | 🔶 Partial | Used for threshold style and axis grid visibility |
+| `fieldConfig.defaults.custom` | 🔶 Partial | Used for graph draw style, fill/points, axis placement, stacking metadata, threshold style, and axis grid visibility |
 | `fieldConfig.defaults.custom.lineWidth` | ❌ Not Implemented | TUI limitation |
-| `fieldConfig.defaults.custom.fillOpacity` | ⛔ Not Applicable | TUI limitation |
+| `fieldConfig.defaults.custom.fillOpacity` | 🔶 Partial | Nonzero values enable terminal/SVG area fill; exact browser opacity is approximated |
 | `fieldConfig.defaults.custom.pointSize` | ⛔ Not Applicable | TUI limitation |
 | `fieldConfig.defaults.custom.axisLabel` | ❌ Not Implemented | |
 | `fieldConfig.defaults.custom.axisGridShow` | ✅ Supported | Controls per-panel autogrid guide lines for graph/time-series panels |
