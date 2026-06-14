@@ -25,7 +25,7 @@ use labels::{
     PlotBounds, YLabelArea, YLabelContext, render_autogrid_time_labels,
     render_intermediate_y_labels, y_label_width,
 };
-use overlay::merge_overlay_buffer;
+use overlay::{merge_overlay_buffer, merge_overlay_buffer_preserving_data};
 use thresholds::{prepare_thresholds, render_raw_threshold_lines, threshold_marker};
 
 use crate::app::{AppState, PanelState};
@@ -61,6 +61,25 @@ fn area_fill_baseline(y_bounds: [f64; 2]) -> f64 {
 
 fn is_y_axis_hidden(options: &crate::app::GraphOptions) -> bool {
     options.axis_placement == crate::app::GraphAxisPlacement::Hidden
+}
+
+fn chart_plot_left(
+    chart_area: Rect,
+    y_label_width: u16,
+    x_labels: &[Span<'_>],
+    has_y_axis_labels: bool,
+) -> u16 {
+    let gutter = if has_y_axis_labels {
+        y_label_width + 1
+    } else {
+        x_labels
+            .first()
+            .map(|label| label.width() as u16)
+            .unwrap_or_default()
+            .min(chart_area.width / 3)
+    };
+
+    chart_area.left() + gutter
 }
 
 pub(super) fn render_graph_panel(
@@ -128,6 +147,7 @@ pub(super) fn render_graph_panel(
 
     // Prepare datasets (without names for the chart itself to avoid built-in legend)
     let mut chart_datasets = Vec::new();
+    let mut strong_data_datasets = Vec::new();
     let mut legend_items = Vec::new();
 
     // Declare helper datasets to extend their lifetimes
@@ -183,9 +203,19 @@ pub(super) fn render_graph_panel(
             .style(Style::default().fg(color))
             .data(data);
 
-        if graph_options.fill_opacity.unwrap_or(0) > 0
-            && graph_options.draw_style == crate::app::GraphDrawStyle::Line
-        {
+        let is_area_filled = graph_options.fill_opacity.unwrap_or(0) > 0
+            && graph_options.draw_style == crate::app::GraphDrawStyle::Line;
+
+        if is_area_filled {
+            strong_data_datasets.push(
+                Dataset::default()
+                    .name("")
+                    .marker(ratatui::symbols::Marker::Braille)
+                    .graph_type(GraphType::Line)
+                    .style(Style::default().fg(color))
+                    .data(data),
+            );
+
             dataset = dataset
                 .graph_type(GraphType::Area)
                 .fill_to_y(area_fill_baseline(y_bounds));
@@ -202,6 +232,17 @@ pub(super) fn render_graph_panel(
                     .style(Style::default().fg(color))
                     .data(data),
             );
+
+            if is_area_filled {
+                strong_data_datasets.push(
+                    Dataset::default()
+                        .name("")
+                        .marker(ratatui::symbols::Marker::Dot)
+                        .graph_type(GraphType::Scatter)
+                        .style(Style::default().fg(color))
+                        .data(data),
+                );
+            }
         }
     }
 
@@ -218,6 +259,17 @@ pub(super) fn render_graph_panel(
                 .style(Style::default().fg(Color::White))
                 .data(&cursor_dataset),
         );
+
+        if !strong_data_datasets.is_empty() {
+            strong_data_datasets.push(
+                Dataset::default()
+                    .name("")
+                    .marker(ratatui::symbols::Marker::Braille)
+                    .graph_type(GraphType::Line)
+                    .style(Style::default().fg(Color::White))
+                    .data(&cursor_dataset),
+            );
+        }
     }
 
     let time_range_secs = now - start;
@@ -265,6 +317,11 @@ pub(super) fn render_graph_panel(
             &p.display,
         )
     };
+    let chart_y_labels = if hide_y_axis {
+        Vec::new()
+    } else {
+        y_labels.clone()
+    };
 
     let chart = Chart::new(chart_datasets)
         // No block, as we rendered it outside
@@ -278,13 +335,39 @@ pub(super) fn render_graph_panel(
             Axis::default()
                 .style(Style::default().fg(Color::Gray))
                 .bounds(y_bounds)
-                .labels(y_labels.clone()),
+                .labels(chart_y_labels.clone()),
         );
     // No legend position needed as we disabled names
 
     frame.render_widget(chart, chart_area);
 
-    let chart_left = chart_area.left() + y_max_width + 1; // +1 for the | axis line
+    let strong_data_buf = if strong_data_datasets.is_empty() {
+        None
+    } else {
+        let strong_data_chart = Chart::new(strong_data_datasets)
+            .x_axis(
+                Axis::default()
+                    .bounds([start, now])
+                    .labels(x_labels.clone())
+                    .style(Style::default().fg(theme.text)),
+            )
+            .y_axis(
+                Axis::default()
+                    .style(Style::default().fg(Color::Gray))
+                    .bounds(y_bounds)
+                    .labels(chart_y_labels.clone()),
+            );
+        let mut buf = ratatui::buffer::Buffer::empty(chart_area);
+        strong_data_chart.render(chart_area, &mut buf);
+        Some(buf)
+    };
+
+    let chart_left = chart_plot_left(
+        chart_area,
+        y_max_width,
+        &x_labels,
+        !chart_y_labels.is_empty(),
+    );
     let chart_right = chart_area.right();
     let plot_bounds = PlotBounds {
         left: chart_left,
@@ -307,13 +390,22 @@ pub(super) fn render_graph_panel(
                 Axis::default()
                     .style(Style::default().fg(Color::Gray))
                     .bounds(y_bounds)
-                    .labels(y_labels.clone()),
+                    .labels(chart_y_labels.clone()),
             );
 
         let mut threshold_buf = ratatui::buffer::Buffer::empty(chart_area);
         threshold_chart.render(chart_area, &mut threshold_buf);
 
-        merge_overlay_buffer(frame, &threshold_buf, plot_bounds);
+        if let Some(strong_data_buf) = strong_data_buf.as_ref() {
+            merge_overlay_buffer_preserving_data(
+                frame,
+                &threshold_buf,
+                strong_data_buf,
+                plot_bounds,
+            );
+        } else {
+            merge_overlay_buffer(frame, &threshold_buf, plot_bounds);
+        }
     }
 
     render_raw_threshold_lines(
@@ -358,13 +450,22 @@ pub(super) fn render_graph_panel(
                 Axis::default()
                     .style(Style::default().fg(Color::Gray))
                     .bounds(y_bounds)
-                    .labels(y_labels),
+                    .labels(chart_y_labels),
             );
 
         let mut autogrid_buf = ratatui::buffer::Buffer::empty(chart_area);
         autogrid_chart.render(chart_area, &mut autogrid_buf);
 
-        merge_overlay_buffer(frame, &autogrid_buf, plot_bounds);
+        if let Some(strong_data_buf) = strong_data_buf.as_ref() {
+            merge_overlay_buffer_preserving_data(
+                frame,
+                &autogrid_buf,
+                strong_data_buf,
+                plot_bounds,
+            );
+        } else {
+            merge_overlay_buffer(frame, &autogrid_buf, plot_bounds);
+        }
         render_autogrid_time_labels(
             frame,
             plot_bounds,
@@ -462,5 +563,29 @@ mod tests {
             stacking: GraphStackingMode::Normal,
         };
         assert!(is_y_axis_hidden(&hidden));
+    }
+
+    #[test]
+    fn test_chart_plot_left_visible_axis_preserves_y_label_gutter() {
+        let chart_area = Rect::new(10, 0, 90, 20);
+        let x_labels = vec![Span::raw("long-start-label")];
+
+        assert_eq!(chart_plot_left(chart_area, 6, &x_labels, true), 17);
+    }
+
+    #[test]
+    fn test_chart_plot_left_hidden_axis_uses_first_x_label_gutter() {
+        let chart_area = Rect::new(10, 0, 90, 20);
+        let x_labels = vec![Span::raw("long-start-label")];
+
+        assert_eq!(chart_plot_left(chart_area, 0, &x_labels, false), 26);
+    }
+
+    #[test]
+    fn test_chart_plot_left_hidden_axis_clamps_first_x_label_gutter() {
+        let chart_area = Rect::new(10, 0, 30, 20);
+        let x_labels = vec![Span::raw("very-long-start-label")];
+
+        assert_eq!(chart_plot_left(chart_area, 0, &x_labels, false), 20);
     }
 }
