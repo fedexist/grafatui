@@ -154,6 +154,7 @@ async fn main() -> Result<()> {
                 max: q.max,
                 autogrid: q.autogrid,
                 display: q.display,
+                options: q.options,
             })
             .collect();
         (format!("{} (imported)", d.title), ps, d.skipped_panels)

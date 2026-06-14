@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-use super::state::{PanelState, PanelType, YAxisMode};
+use super::state::{GraphOptions, PanelOptions, PanelState, PanelType, YAxisMode};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -143,6 +143,7 @@ pub(crate) fn default_queries(mut provided: Vec<String>) -> Vec<PanelState> {
             max: None,
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
+            options: PanelOptions::Graph(GraphOptions::default()),
         })
         .collect()
 }

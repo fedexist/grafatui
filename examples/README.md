@@ -49,7 +49,7 @@ cargo run -- --grafana-json examples/dashboards/all_visualizations.json
 cargo run -- --grafana-json examples/dashboards/all_visualizations.json --prometheus-url http://prometheus.example.com:9090
 
 # Override variables
-cargo run -- --grafana-json examples/dashboards/all_visualizations.json --var instance=localhost:9090
+cargo run -- --grafana-json examples/dashboards/all_visualizations.json --var instance=prometheus:9090
 ```
 
 ## Creating Your Own
