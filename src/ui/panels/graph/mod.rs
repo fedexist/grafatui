@@ -69,15 +69,19 @@ fn chart_plot_left(
     x_labels: &[Span<'_>],
     has_y_axis_labels: bool,
 ) -> u16 {
-    let gutter = if has_y_axis_labels {
-        y_label_width + 1
+    let first_x_label_width = x_labels
+        .first()
+        .map(|label| label.width() as u16)
+        .unwrap_or_default();
+    let y_axis_offset = u16::from(has_y_axis_labels);
+    let x_label_gutter = first_x_label_width.saturating_sub(y_axis_offset);
+    let labels_left_of_y_axis = if has_y_axis_labels {
+        y_label_width.max(x_label_gutter)
     } else {
-        x_labels
-            .first()
-            .map(|label| label.width() as u16)
-            .unwrap_or_default()
-            .min(chart_area.width / 3)
-    };
+        x_label_gutter
+    }
+    .min(chart_area.width / 3);
+    let gutter = labels_left_of_y_axis + y_axis_offset;
 
     chart_area.left() + gutter
 }
@@ -566,11 +570,27 @@ mod tests {
     }
 
     #[test]
-    fn test_chart_plot_left_visible_axis_preserves_y_label_gutter() {
+    fn test_chart_plot_left_visible_axis_uses_y_label_width_when_dominant() {
+        let chart_area = Rect::new(10, 0, 90, 20);
+        let x_labels = vec![Span::raw("abc")];
+
+        assert_eq!(chart_plot_left(chart_area, 6, &x_labels, true), 17);
+    }
+
+    #[test]
+    fn test_chart_plot_left_visible_axis_uses_first_x_label_when_dominant() {
         let chart_area = Rect::new(10, 0, 90, 20);
         let x_labels = vec![Span::raw("long-start-label")];
 
-        assert_eq!(chart_plot_left(chart_area, 6, &x_labels, true), 17);
+        assert_eq!(chart_plot_left(chart_area, 6, &x_labels, true), 26);
+    }
+
+    #[test]
+    fn test_chart_plot_left_visible_axis_clamps_gutter() {
+        let chart_area = Rect::new(10, 0, 30, 20);
+        let x_labels = vec![Span::raw("very-long-start-label")];
+
+        assert_eq!(chart_plot_left(chart_area, 2, &x_labels, true), 21);
     }
 
     #[test]
