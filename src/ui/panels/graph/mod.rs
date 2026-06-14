@@ -239,7 +239,7 @@ pub(super) fn render_graph_panel(
             chart_datasets.push(
                 Dataset::default()
                     .name("")
-                    .marker(ratatui::symbols::Marker::Dot)
+                    .marker(ratatui::symbols::Marker::Braille)
                     .graph_type(GraphType::Scatter)
                     .style(Style::default().fg(color))
                     .data(data),
@@ -249,7 +249,7 @@ pub(super) fn render_graph_panel(
                 strong_data_datasets.push(
                     Dataset::default()
                         .name("")
-                        .marker(ratatui::symbols::Marker::Dot)
+                        .marker(ratatui::symbols::Marker::Braille)
                         .graph_type(GraphType::Scatter)
                         .style(Style::default().fg(color))
                         .data(data),
@@ -741,5 +741,36 @@ mod tests {
             .count();
 
         assert_eq!(grid_colored_cells_inside_fill, 0);
+    }
+
+    #[test]
+    fn test_line_forced_points_use_line_marker_grid() {
+        let mut panel = area_fill_panel();
+        panel.options = PanelOptions::Graph(GraphOptions {
+            draw_style: GraphDrawStyle::Line,
+            show_points: GraphPointMode::Always,
+            fill_opacity: None,
+            axis_placement: GraphAxisPlacement::Visible,
+            line_interpolation: None,
+            stacking: GraphStackingMode::Off,
+        });
+        let app = area_fill_app(panel);
+        let panel = &app.panels[0];
+        let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
+
+        terminal
+            .draw(|frame| {
+                render_graph_panel(frame, Rect::new(0, 0, 80, 20), panel, &app, None);
+            })
+            .unwrap();
+
+        let has_cell_level_point_marker = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .any(|cell| cell.symbol() == "•");
+
+        assert!(!has_cell_level_point_marker);
     }
 }
