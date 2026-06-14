@@ -15,7 +15,7 @@
  */
 
 use super::labels::PlotBounds;
-use super::overlay::is_blank_cell;
+use super::overlay::{is_blank_cell, overlay_cell_if_blank_or_weak_area_fill};
 use crate::app::{PanelState, ThresholdMode};
 use ratatui::{prelude::*, widgets::GraphType};
 
@@ -86,6 +86,7 @@ pub(super) fn render_raw_threshold_lines(
     threshold_labels: &[(f64, Color)],
     y_bounds: [f64; 2],
     plot: PlotBounds,
+    strong_data_buf: Option<&ratatui::buffer::Buffer>,
 ) {
     if !marker_name.ends_with("line") || y_bounds[1] <= y_bounds[0] {
         return;
@@ -118,9 +119,18 @@ pub(super) fn render_raw_threshold_lines(
                 continue;
             }
             if let Some(cell) = buf.cell_mut((x, y)) {
-                if is_blank_cell(cell) {
-                    cell.set_char(line_char)
-                        .set_style(Style::default().fg(*color));
+                let mut line_cell = ratatui::buffer::Cell::default();
+                line_cell
+                    .set_char(line_char)
+                    .set_style(Style::default().fg(*color));
+
+                if let Some(strong_data_buf) = strong_data_buf {
+                    if let Some(mask_cell) = strong_data_buf.cell((x, y)) {
+                        overlay_cell_if_blank_or_weak_area_fill(cell, &line_cell, mask_cell);
+                    }
+                } else if is_blank_cell(cell) {
+                    cell.set_symbol(line_cell.symbol())
+                        .set_style(line_cell.style());
                 }
             }
         }
@@ -143,4 +153,80 @@ fn threshold_dataset(
     }
 
     vec![(start, threshold_value), (end, threshold_value)]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{Terminal, backend::TestBackend};
+
+    fn plot_bounds() -> PlotBounds {
+        PlotBounds {
+            left: 0,
+            right: 5,
+            top: 0,
+            bottom: 4,
+        }
+    }
+
+    #[test]
+    fn test_raw_threshold_line_replaces_weak_area_fill_with_mask() {
+        let mut terminal = Terminal::new(TestBackend::new(5, 5)).unwrap();
+        let mask = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 5, 5));
+
+        terminal
+            .draw(|frame| {
+                frame
+                    .buffer_mut()
+                    .cell_mut((1, 2))
+                    .unwrap()
+                    .set_char('⣿')
+                    .set_style(Style::default().fg(Color::Blue));
+
+                render_raw_threshold_lines(
+                    frame,
+                    "dashed-line",
+                    &[(5.0, Color::Red)],
+                    [0.0, 10.0],
+                    plot_bounds(),
+                    Some(&mask),
+                );
+            })
+            .unwrap();
+
+        let cell = terminal.backend().buffer().cell((1, 2)).unwrap();
+        assert_eq!(cell.symbol(), "-");
+        assert_eq!(cell.style().fg, Some(Color::Red));
+    }
+
+    #[test]
+    fn test_raw_threshold_line_preserves_strong_data_with_mask() {
+        let mut terminal = Terminal::new(TestBackend::new(5, 5)).unwrap();
+        let mut mask = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 5, 5));
+        mask.cell_mut((1, 2)).unwrap().set_char('⠉');
+
+        terminal
+            .draw(|frame| {
+                frame
+                    .buffer_mut()
+                    .cell_mut((1, 2))
+                    .unwrap()
+                    .set_char('⣿')
+                    .set_style(Style::default().fg(Color::Blue));
+
+                render_raw_threshold_lines(
+                    frame,
+                    "dashed-line",
+                    &[(5.0, Color::Red)],
+                    [0.0, 10.0],
+                    plot_bounds(),
+                    Some(&mask),
+                );
+            })
+            .unwrap();
+
+        let cell = terminal.backend().buffer().cell((1, 2)).unwrap();
+        assert_eq!(cell.symbol(), "⣿");
+        assert_eq!(cell.style().fg, Some(Color::Blue));
+    }
 }

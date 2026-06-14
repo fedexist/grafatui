@@ -86,6 +86,14 @@ fn chart_plot_left(
     chart_area.left() + gutter
 }
 
+fn chart_y_label_width(labels: &[Span<'_>]) -> u16 {
+    labels
+        .iter()
+        .map(|label| label.width() as u16)
+        .max()
+        .unwrap_or_default()
+}
+
 pub(super) fn render_graph_panel(
     frame: &mut Frame,
     area: Rect,
@@ -326,6 +334,7 @@ pub(super) fn render_graph_panel(
     } else {
         y_labels.clone()
     };
+    let chart_y_label_width = chart_y_label_width(&chart_y_labels);
 
     let chart = Chart::new(chart_datasets)
         // No block, as we rendered it outside
@@ -368,7 +377,7 @@ pub(super) fn render_graph_panel(
 
     let chart_left = chart_plot_left(
         chart_area,
-        y_max_width,
+        chart_y_label_width,
         &x_labels,
         !chart_y_labels.is_empty(),
     );
@@ -418,6 +427,7 @@ pub(super) fn render_graph_panel(
         &threshold_data.labels,
         y_bounds,
         plot_bounds,
+        strong_data_buf.as_ref(),
     );
 
     if show_autogrid && chart_top <= chart_bottom {
@@ -607,5 +617,33 @@ mod tests {
         let x_labels = vec![Span::raw("very-long-start-label")];
 
         assert_eq!(chart_plot_left(chart_area, 0, &x_labels, false), 20);
+    }
+
+    #[test]
+    fn test_chart_plot_left_ignores_custom_label_width() {
+        let chart_area = Rect::new(10, 0, 90, 20);
+        let x_labels = vec![Span::raw("abc")];
+        let chart_y_labels = vec![Span::raw("0"), Span::raw("9")];
+        let custom_label_width = 30;
+        let chart_y_label_width = chart_y_label_width(&chart_y_labels);
+
+        assert_eq!(
+            chart_plot_left(
+                chart_area,
+                chart_y_label_width,
+                &x_labels,
+                !chart_y_labels.is_empty(),
+            ),
+            13
+        );
+        assert_ne!(
+            chart_plot_left(
+                chart_area,
+                custom_label_width,
+                &x_labels,
+                !chart_y_labels.is_empty(),
+            ),
+            13
+        );
     }
 }

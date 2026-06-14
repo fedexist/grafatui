@@ -67,7 +67,7 @@ fn overlay_cell_if_blank(dst: &mut ratatui::buffer::Cell, src: &ratatui::buffer:
     }
 }
 
-fn overlay_cell_if_blank_or_weak_area_fill(
+pub(super) fn overlay_cell_if_blank_or_weak_area_fill(
     dst: &mut ratatui::buffer::Cell,
     src: &ratatui::buffer::Cell,
     strong_data_mask: &ratatui::buffer::Cell,
