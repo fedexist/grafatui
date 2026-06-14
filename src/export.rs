@@ -1100,6 +1100,10 @@ fn graph_area_baseline(y_bounds: [f64; 2]) -> f64 {
     }
 }
 
+fn graph_point_in_range(x: f64, y: f64, x_bounds: [f64; 2]) -> bool {
+    x.is_finite() && y.is_finite() && x >= x_bounds[0] && x <= x_bounds[1]
+}
+
 fn render_graph_points(
     series: &SeriesView,
     rect: PlotRect,
@@ -1109,14 +1113,14 @@ fn render_graph_points(
     out: &mut String,
 ) {
     for (x, y) in &series.points {
-        if *x < x_bounds[0] || *x > x_bounds[1] {
+        if !graph_point_in_range(*x, *y, x_bounds) {
             continue;
         }
         let px = map_x(*x, x_bounds, rect);
         let py = map_y(*y, y_bounds, rect);
         write!(
             out,
-            r#"<circle cx="{:.2}" cy="{:.2}" r="2.2" fill="{}" />"#,
+            r#"<circle data-role="graph-point" cx="{:.2}" cy="{:.2}" r="2.2" fill="{}" />"#,
             px, py, color
         )
         .unwrap();
@@ -1134,7 +1138,7 @@ fn render_graph_bars(
     let visible_points: Vec<_> = series
         .points
         .iter()
-        .filter(|(x, _)| *x >= x_bounds[0] && *x <= x_bounds[1])
+        .filter(|(x, y)| graph_point_in_range(*x, *y, x_bounds))
         .collect();
     if visible_points.is_empty() {
         return;
@@ -1149,7 +1153,7 @@ fn render_graph_bars(
         let height = (baseline_y - map_y(*y, y_bounds, rect)).abs().max(1.0);
         write!(
             out,
-            r#"<rect x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}" fill="{}" />"#,
+            r#"<rect data-role="graph-bar" x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}" fill="{}" />"#,
             px, py, bar_width, height, color
         )
         .unwrap();
@@ -1168,7 +1172,7 @@ fn render_graph_area(
     let points: Vec<_> = series
         .points
         .iter()
-        .filter(|(x, _)| *x >= x_bounds[0] && *x <= x_bounds[1])
+        .filter(|(x, y)| graph_point_in_range(*x, *y, x_bounds))
         .collect();
     if points.len() < 2 {
         return;
@@ -1191,7 +1195,7 @@ fn render_graph_area(
 
     write!(
         out,
-        r#"<path d="{}" fill="{}" fill-opacity="{:.2}" stroke="none" />"#,
+        r#"<path data-role="graph-area" d="{}" fill="{}" fill-opacity="{:.2}" stroke="none" />"#,
         path, color, opacity
     )
     .unwrap();
@@ -1625,7 +1629,7 @@ mod tests {
             stacking: GraphStackingMode::Off,
         });
         let points_svg = render_svg(&points_app, Rect::new(0, 0, 120, 50));
-        assert!(points_svg.contains("<circle "));
+        assert!(points_svg.contains(r#"data-role="graph-point""#));
 
         let mut area_app = test_app_with_panel_type(PanelType::Graph);
         area_app.panels[0].options = PanelOptions::Graph(GraphOptions {
@@ -1637,6 +1641,7 @@ mod tests {
             stacking: GraphStackingMode::Off,
         });
         let area_svg = render_svg(&area_app, Rect::new(0, 0, 120, 50));
+        assert!(area_svg.contains(r#"data-role="graph-area""#));
         assert!(area_svg.contains("fill-opacity=\"0.30\""));
 
         let mut bars_app = test_app_with_panel_type(PanelType::Graph);
@@ -1649,7 +1654,67 @@ mod tests {
             stacking: GraphStackingMode::Off,
         });
         let bars_svg = render_svg(&bars_app, Rect::new(0, 0, 120, 50));
-        assert!(bars_svg.contains("<rect "));
+        assert!(bars_svg.contains(r#"data-role="graph-bar""#));
+    }
+
+    #[test]
+    fn test_graph_export_skips_non_finite_style_points() {
+        let mut points_app = test_app_with_panel_type(PanelType::Graph);
+        points_app.panels[0].options = PanelOptions::Graph(GraphOptions {
+            draw_style: GraphDrawStyle::Points,
+            show_points: GraphPointMode::Auto,
+            fill_opacity: None,
+            axis_placement: GraphAxisPlacement::Visible,
+            line_interpolation: None,
+            stacking: GraphStackingMode::Off,
+        });
+        let points_start = points_app.panels[0].series[0].points[0].0;
+        points_app.panels[0].series[0].points = vec![
+            (points_start, 0.0),
+            (f64::NAN, 50.0),
+            (points_start + 50.0, f64::NAN),
+            (points_start + 100.0, 100.0),
+        ];
+        let points_svg = render_svg(&points_app, Rect::new(0, 0, 120, 50));
+        assert!(!points_svg.contains("NaN"));
+
+        let mut area_app = test_app_with_panel_type(PanelType::Graph);
+        area_app.panels[0].options = PanelOptions::Graph(GraphOptions {
+            draw_style: GraphDrawStyle::Line,
+            show_points: GraphPointMode::Never,
+            fill_opacity: Some(30),
+            axis_placement: GraphAxisPlacement::Visible,
+            line_interpolation: None,
+            stacking: GraphStackingMode::Off,
+        });
+        let area_start = area_app.panels[0].series[0].points[0].0;
+        area_app.panels[0].series[0].points = vec![
+            (area_start, 0.0),
+            (f64::NAN, 50.0),
+            (area_start + 50.0, f64::NAN),
+            (area_start + 100.0, 100.0),
+        ];
+        let area_svg = render_svg(&area_app, Rect::new(0, 0, 120, 50));
+        assert!(!area_svg.contains("NaN"));
+
+        let mut bars_app = test_app_with_panel_type(PanelType::Graph);
+        bars_app.panels[0].options = PanelOptions::Graph(GraphOptions {
+            draw_style: GraphDrawStyle::Bars,
+            show_points: GraphPointMode::Auto,
+            fill_opacity: None,
+            axis_placement: GraphAxisPlacement::Visible,
+            line_interpolation: None,
+            stacking: GraphStackingMode::Off,
+        });
+        let bars_start = bars_app.panels[0].series[0].points[0].0;
+        bars_app.panels[0].series[0].points = vec![
+            (bars_start, 0.0),
+            (f64::NAN, 50.0),
+            (bars_start + 50.0, f64::NAN),
+            (bars_start + 100.0, 100.0),
+        ];
+        let bars_svg = render_svg(&bars_app, Rect::new(0, 0, 120, 50));
+        assert!(!bars_svg.contains("NaN"));
     }
 
     #[test]
