@@ -430,6 +430,7 @@ fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
     let text = color_hex(app.theme.text, "#e6e6e6");
     let axis = color_hex(Color::Gray, "#777777");
     let grid = "#6d6d6d";
+    let graph_options = panel.graph_options();
 
     write!(
         out,
@@ -582,12 +583,30 @@ fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
         }
         let color = series_color(panel, &app.theme, index);
         let color = color_hex(color, "#00ff88");
-        if let Some(path) = series_path(series, [x_min, x_max], y_bounds, plot) {
-            write!(
-                out,
-                r#"<path d="{path}" fill="none" stroke="{color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>"#
-            )
-            .unwrap();
+        let x_bounds = [x_min, x_max];
+
+        match graph_options.draw_style {
+            crate::app::GraphDrawStyle::Points => {
+                render_graph_points(series, plot, y_bounds, x_bounds, &color, out);
+            }
+            crate::app::GraphDrawStyle::Bars => {
+                render_graph_bars(series, plot, y_bounds, x_bounds, &color, out);
+            }
+            crate::app::GraphDrawStyle::Line => {
+                if let Some(opacity) = graph_area_opacity(&graph_options) {
+                    render_graph_area(series, plot, y_bounds, x_bounds, &color, opacity, out);
+                }
+                if let Some(path) = series_path(series, x_bounds, y_bounds, plot) {
+                    write!(
+                        out,
+                        r#"<path d="{path}" fill="none" stroke="{color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>"#
+                    )
+                    .unwrap();
+                }
+                if graph_options.show_points == crate::app::GraphPointMode::Always {
+                    render_graph_points(series, plot, y_bounds, x_bounds, &color, out);
+                }
+            }
         }
     }
 
@@ -1066,6 +1085,118 @@ fn cursor_values(panel: &PanelState, app: &AppState) -> std::collections::HashMa
     values
 }
 
+fn graph_area_opacity(options: &crate::app::GraphOptions) -> Option<f64> {
+    options
+        .fill_opacity
+        .filter(|value| *value > 0)
+        .map(|value| f64::from(value.min(100)) / 100.0)
+}
+
+fn graph_area_baseline(y_bounds: [f64; 2]) -> f64 {
+    if y_bounds[0] <= 0.0 && y_bounds[1] >= 0.0 {
+        0.0
+    } else {
+        y_bounds[0]
+    }
+}
+
+fn render_graph_points(
+    series: &SeriesView,
+    rect: PlotRect,
+    y_bounds: [f64; 2],
+    x_bounds: [f64; 2],
+    color: &str,
+    out: &mut String,
+) {
+    for (x, y) in &series.points {
+        if *x < x_bounds[0] || *x > x_bounds[1] {
+            continue;
+        }
+        let px = map_x(*x, x_bounds, rect);
+        let py = map_y(*y, y_bounds, rect);
+        write!(
+            out,
+            r#"<circle cx="{:.2}" cy="{:.2}" r="2.2" fill="{}" />"#,
+            px, py, color
+        )
+        .unwrap();
+    }
+}
+
+fn render_graph_bars(
+    series: &SeriesView,
+    rect: PlotRect,
+    y_bounds: [f64; 2],
+    x_bounds: [f64; 2],
+    color: &str,
+    out: &mut String,
+) {
+    let visible_points: Vec<_> = series
+        .points
+        .iter()
+        .filter(|(x, _)| *x >= x_bounds[0] && *x <= x_bounds[1])
+        .collect();
+    if visible_points.is_empty() {
+        return;
+    }
+    let bar_width = (rect.width / visible_points.len() as f64).max(1.0) * 0.7;
+    let baseline = graph_area_baseline(y_bounds);
+    let baseline_y = map_y(baseline, y_bounds, rect);
+
+    for (x, y) in visible_points {
+        let px = map_x(*x, x_bounds, rect) - bar_width / 2.0;
+        let py = map_y(*y, y_bounds, rect).min(baseline_y);
+        let height = (baseline_y - map_y(*y, y_bounds, rect)).abs().max(1.0);
+        write!(
+            out,
+            r#"<rect x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}" fill="{}" />"#,
+            px, py, bar_width, height, color
+        )
+        .unwrap();
+    }
+}
+
+fn render_graph_area(
+    series: &SeriesView,
+    rect: PlotRect,
+    y_bounds: [f64; 2],
+    x_bounds: [f64; 2],
+    color: &str,
+    opacity: f64,
+    out: &mut String,
+) {
+    let points: Vec<_> = series
+        .points
+        .iter()
+        .filter(|(x, _)| *x >= x_bounds[0] && *x <= x_bounds[1])
+        .collect();
+    if points.len() < 2 {
+        return;
+    }
+
+    let baseline = graph_area_baseline(y_bounds);
+    let baseline_y = map_y(baseline, y_bounds, rect);
+    let first_x = map_x(points[0].0, x_bounds, rect);
+    let last_x = map_x(points[points.len() - 1].0, x_bounds, rect);
+
+    let mut path = format!("M {:.2} {:.2}", first_x, baseline_y);
+    for (x, y) in points {
+        path.push_str(&format!(
+            " L {:.2} {:.2}",
+            map_x(*x, x_bounds, rect),
+            map_y(*y, y_bounds, rect)
+        ));
+    }
+    path.push_str(&format!(" L {:.2} {:.2} Z", last_x, baseline_y));
+
+    write!(
+        out,
+        r#"<path d="{}" fill="{}" fill-opacity="{:.2}" stroke="none" />"#,
+        path, color, opacity
+    )
+    .unwrap();
+}
+
 fn series_path(
     series: &SeriesView,
     x_bounds: [f64; 2],
@@ -1343,7 +1474,10 @@ fn display_paths(paths: &[PathBuf]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{GraphOptions, PanelOptions, PanelState, SeriesView, YAxisMode};
+    use crate::app::{
+        GraphAxisPlacement, GraphDrawStyle, GraphOptions, GraphPointMode, GraphStackingMode,
+        PanelOptions, PanelState, SeriesView, YAxisMode,
+    };
 
     fn test_panel(start: f64) -> PanelState {
         PanelState {
@@ -1477,6 +1611,45 @@ mod tests {
 
         assert!(svg.contains(&ui::format_time(1_699_999_900.0)));
         assert!(svg.contains(&ui::format_time(1_700_000_000.0)));
+    }
+
+    #[test]
+    fn test_graph_export_renders_points_area_and_bars() {
+        let mut points_app = test_app_with_panel_type(PanelType::Graph);
+        points_app.panels[0].options = PanelOptions::Graph(GraphOptions {
+            draw_style: GraphDrawStyle::Points,
+            show_points: GraphPointMode::Auto,
+            fill_opacity: None,
+            axis_placement: GraphAxisPlacement::Visible,
+            line_interpolation: None,
+            stacking: GraphStackingMode::Off,
+        });
+        let points_svg = render_svg(&points_app, Rect::new(0, 0, 120, 50));
+        assert!(points_svg.contains("<circle "));
+
+        let mut area_app = test_app_with_panel_type(PanelType::Graph);
+        area_app.panels[0].options = PanelOptions::Graph(GraphOptions {
+            draw_style: GraphDrawStyle::Line,
+            show_points: GraphPointMode::Never,
+            fill_opacity: Some(30),
+            axis_placement: GraphAxisPlacement::Visible,
+            line_interpolation: None,
+            stacking: GraphStackingMode::Off,
+        });
+        let area_svg = render_svg(&area_app, Rect::new(0, 0, 120, 50));
+        assert!(area_svg.contains("fill-opacity=\"0.30\""));
+
+        let mut bars_app = test_app_with_panel_type(PanelType::Graph);
+        bars_app.panels[0].options = PanelOptions::Graph(GraphOptions {
+            draw_style: GraphDrawStyle::Bars,
+            show_points: GraphPointMode::Auto,
+            fill_opacity: None,
+            axis_placement: GraphAxisPlacement::Visible,
+            line_interpolation: None,
+            stacking: GraphStackingMode::Off,
+        });
+        let bars_svg = render_svg(&bars_app, Rect::new(0, 0, 120, 50));
+        assert!(bars_svg.contains("<rect "));
     }
 
     #[test]
