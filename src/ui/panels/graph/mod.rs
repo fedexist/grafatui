@@ -470,16 +470,9 @@ pub(super) fn render_graph_panel(
         let mut autogrid_buf = ratatui::buffer::Buffer::empty(chart_area);
         autogrid_chart.render(chart_area, &mut autogrid_buf);
 
-        if let Some(strong_data_buf) = strong_data_buf.as_ref() {
-            merge_overlay_buffer_preserving_data(
-                frame,
-                &autogrid_buf,
-                strong_data_buf,
-                plot_bounds,
-            );
-        } else {
-            merge_overlay_buffer(frame, &autogrid_buf, plot_bounds);
-        }
+        // Autogrid is a background layer: it may fill empty plot cells, but it
+        // should not cut through area fills or other rendered data.
+        merge_overlay_buffer(frame, &autogrid_buf, plot_bounds);
         render_autogrid_time_labels(
             frame,
             plot_bounds,
@@ -520,7 +513,12 @@ mod tests {
     use super::*;
     use crate::app::{
         GraphAxisPlacement, GraphDrawStyle, GraphOptions, GraphPointMode, GraphStackingMode,
+        PanelOptions, PanelType, QueryMode, SeriesView, YAxisMode,
     };
+    use crate::export::ExportOptions;
+    use crate::theme::Theme;
+    use ratatui::{Terminal, backend::TestBackend};
+    use std::time::Duration;
 
     #[test]
     fn test_graph_type_for_draw_style() {
@@ -645,5 +643,103 @@ mod tests {
             ),
             13
         );
+    }
+
+    fn area_fill_panel() -> PanelState {
+        PanelState {
+            title: "area".to_string(),
+            exprs: vec![],
+            legends: vec![],
+            query_modes: vec![QueryMode::Range],
+            series: vec![SeriesView {
+                name: "filled".to_string(),
+                value: Some(8.0),
+                points: vec![(0.0, 8.0), (50.0, 8.0), (100.0, 8.0)],
+                visible: true,
+            }],
+            last_error: None,
+            last_url: None,
+            last_samples: 3,
+            grid: None,
+            y_axis_mode: YAxisMode::Auto,
+            panel_type: PanelType::Graph,
+            thresholds: None,
+            min: Some(0.0),
+            max: Some(10.0),
+            autogrid: Some(true),
+            display: crate::ui::DisplayFormat::default(),
+            options: PanelOptions::Graph(GraphOptions {
+                draw_style: GraphDrawStyle::Line,
+                show_points: GraphPointMode::Never,
+                fill_opacity: Some(30),
+                axis_placement: GraphAxisPlacement::Visible,
+                line_interpolation: None,
+                stacking: GraphStackingMode::Off,
+            }),
+        }
+    }
+
+    fn area_fill_app(panel: PanelState) -> AppState {
+        let mut app = AppState::new(
+            crate::prom::PromClient::new("http://localhost:9090".to_string()),
+            Duration::from_secs(100),
+            Duration::from_secs(5),
+            Duration::from_secs(1),
+            "test".to_string(),
+            vec![panel],
+            0,
+            Theme::default(),
+            "dashed-line".to_string(),
+            ExportOptions::default(),
+        );
+        app.view_end_ts = 100;
+        app.autogrid_color = Color::Red;
+        app
+    }
+
+    #[test]
+    fn test_area_fill_keeps_precedence_over_autogrid() {
+        let app = area_fill_app(area_fill_panel());
+        let panel = &app.panels[0];
+        let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
+
+        terminal
+            .draw(|frame| {
+                render_graph_panel(frame, Rect::new(0, 0, 80, 20), panel, &app, None);
+            })
+            .unwrap();
+
+        let y_bounds = calculate_y_bounds(panel);
+        let chart_area = Rect::new(0, 0, 80, 18);
+        let x_labels = vec![Span::raw("00:00:00"), Span::raw("00:01:40")];
+        let chart_y_labels = vec![Span::raw("0"), Span::raw("10")];
+        let plot = PlotBounds {
+            left: chart_plot_left(
+                chart_area,
+                chart_y_label_width(&chart_y_labels),
+                &x_labels,
+                true,
+            ),
+            right: chart_area.right(),
+            top: chart_area.top(),
+            bottom: chart_area.bottom().saturating_sub(2),
+        };
+        let plot_height = plot.bottom.saturating_sub(plot.top) as f64;
+        let grid_ratio = (5.0 - y_bounds[0]) / (y_bounds[1] - y_bounds[0]);
+        let grid_y = plot
+            .bottom
+            .saturating_sub((grid_ratio * plot_height).round() as u16);
+
+        let grid_colored_cells_inside_fill = (plot.left..plot.right)
+            .filter(|x| {
+                terminal
+                    .backend()
+                    .buffer()
+                    .cell((*x, grid_y))
+                    .is_some_and(|cell| cell.style().fg == Some(Color::Red))
+            })
+            .count();
+
+        assert_eq!(grid_colored_cells_inside_fill, 0);
     }
 }
