@@ -25,6 +25,7 @@ Shows all 6 visualization types with real metrics from Prometheus monitoring its
 ### `all_visualizations.json`
 Demonstrates all supported panel types in a single dashboard:
 - **Graph**: Line chart showing CPU usage over time
+- **Timeseries styles**: Bars with hidden axis, area fill, and points-only rendering
 - **Gauge**: Progress bar for memory usage
 - **Stat**: Big value display with sparkline for uptime
 - **Bar Gauge**: Vertical bars comparing request rates
@@ -54,7 +55,7 @@ You can export any Grafana dashboard as JSON and use it with grafatui:
 
 ## Supported Panel Types
 
-- ✅ `graph` / `timeseries` - Line charts
+- ✅ `graph` / `timeseries` - Line, point, bar, and area-style charts
 - ✅ `gauge` - Progress bars
 - ✅ `bargauge` - Bar charts
 - ✅ `table` - Data tables

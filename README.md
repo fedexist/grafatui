@@ -38,6 +38,7 @@ cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheu
 - Prometheus range and instant queries with async fetching.
 - Grafana dashboard JSON import for graph, timeseries, stat, gauge, bar gauge, table, and heatmap panels.
 - Template variables, Grafana built-in PromQL variables, legend formatting, thresholds, and grid layout support.
+- Grafana timeseries draw styles for lines, points, bars, area fill, hidden axes, and per-panel grid visibility.
 - Keyboard-first navigation, panel search, fullscreen mode, mouse selection, and value inspection.
 - SVG/PNG export and changed-frame recording bundles.
 - TOML configuration and built-in themes.
