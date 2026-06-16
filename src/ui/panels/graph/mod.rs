@@ -94,6 +94,65 @@ fn chart_y_label_width(labels: &[Span<'_>]) -> u16 {
         .unwrap_or_default()
 }
 
+fn point_to_braille_cell(
+    x: f64,
+    y: f64,
+    x_bounds: [f64; 2],
+    y_bounds: [f64; 2],
+    plot: PlotBounds,
+) -> Option<(u16, u16)> {
+    if !x.is_finite()
+        || !y.is_finite()
+        || !x_bounds[0].is_finite()
+        || !x_bounds[1].is_finite()
+        || !y_bounds[0].is_finite()
+        || !y_bounds[1].is_finite()
+        || x < x_bounds[0]
+        || x > x_bounds[1]
+        || y < y_bounds[0]
+        || y > y_bounds[1]
+        || x_bounds[1] <= x_bounds[0]
+        || y_bounds[1] <= y_bounds[0]
+        || plot.right <= plot.left
+        || plot.bottom < plot.top
+    {
+        return None;
+    }
+
+    let plot_width = plot.right.saturating_sub(plot.left);
+    let plot_height = plot.bottom.saturating_sub(plot.top).saturating_add(1);
+    let x_resolution = f64::from(plot_width) * 2.0;
+    let y_resolution = f64::from(plot_height) * 4.0;
+
+    let braille_x =
+        ((x - x_bounds[0]) * (x_resolution - 1.0) / (x_bounds[1] - x_bounds[0])).round() as u16;
+    let braille_y =
+        ((y_bounds[1] - y) * (y_resolution - 1.0) / (y_bounds[1] - y_bounds[0])).round() as u16;
+
+    let cell_x = plot.left.saturating_add(braille_x / 2);
+    let cell_y = plot.top.saturating_add(braille_y / 4);
+    (cell_x < plot.right && cell_y <= plot.bottom).then_some((cell_x, cell_y))
+}
+
+fn render_forced_point_markers(
+    frame: &mut Frame,
+    markers: &[(f64, f64, Color)],
+    x_bounds: [f64; 2],
+    y_bounds: [f64; 2],
+    plot: PlotBounds,
+) {
+    let buf = frame.buffer_mut();
+    for (x, y, color) in markers {
+        let Some((cell_x, cell_y)) = point_to_braille_cell(*x, *y, x_bounds, y_bounds, plot) else {
+            continue;
+        };
+        if let Some(cell) = buf.cell_mut((cell_x, cell_y)) {
+            cell.set_symbol(ratatui::symbols::DOT)
+                .set_style(Style::default().fg(*color));
+        }
+    }
+}
+
 pub(super) fn render_graph_panel(
     frame: &mut Frame,
     area: Rect,
@@ -161,6 +220,7 @@ pub(super) fn render_graph_panel(
     let mut chart_datasets = Vec::new();
     let mut strong_data_datasets = Vec::new();
     let mut legend_items = Vec::new();
+    let mut forced_point_markers = Vec::new();
 
     // Declare helper datasets to extend their lifetimes
     let mut cursor_dataset = vec![];
@@ -236,25 +296,7 @@ pub(super) fn render_graph_panel(
         chart_datasets.push(dataset);
 
         if should_overlay_points(&graph_options) {
-            chart_datasets.push(
-                Dataset::default()
-                    .name("")
-                    .marker(ratatui::symbols::Marker::Braille)
-                    .graph_type(GraphType::Scatter)
-                    .style(Style::default().fg(color))
-                    .data(data),
-            );
-
-            if is_area_filled {
-                strong_data_datasets.push(
-                    Dataset::default()
-                        .name("")
-                        .marker(ratatui::symbols::Marker::Braille)
-                        .graph_type(GraphType::Scatter)
-                        .style(Style::default().fg(color))
-                        .data(data),
-                );
-            }
+            forced_point_markers.extend(data.iter().map(|(x, y)| (*x, *y, color)));
         }
     }
 
@@ -501,6 +543,14 @@ pub(super) fn render_graph_panel(
         );
     }
 
+    render_forced_point_markers(
+        frame,
+        &forced_point_markers,
+        [start, now],
+        y_bounds,
+        plot_bounds,
+    );
+
     // Render custom legend
     if legend_height > 0 {
         let legend = Paragraph::new(Line::from(legend_items)).wrap(Wrap { trim: true });
@@ -744,8 +794,9 @@ mod tests {
     }
 
     #[test]
-    fn test_line_forced_points_use_line_marker_grid() {
+    fn test_line_forced_points_are_visible_and_use_line_marker_cells() {
         let mut panel = area_fill_panel();
+        panel.series[0].points = vec![(25.0, 2.0), (50.0, 8.0), (75.0, 4.0)];
         panel.options = PanelOptions::Graph(GraphOptions {
             draw_style: GraphDrawStyle::Line,
             show_points: GraphPointMode::Always,
@@ -764,13 +815,38 @@ mod tests {
             })
             .unwrap();
 
-        let has_cell_level_point_marker = terminal
+        let y_bounds = calculate_y_bounds(panel);
+        let chart_area = Rect::new(0, 0, 80, 18);
+        let x_labels = vec![Span::raw("00:00:00"), Span::raw("00:01:40")];
+        let chart_y_labels = vec![Span::raw("0"), Span::raw("10")];
+        let plot = PlotBounds {
+            left: chart_plot_left(
+                chart_area,
+                chart_y_label_width(&chart_y_labels),
+                &x_labels,
+                true,
+            ),
+            right: chart_area.right(),
+            top: chart_area.top(),
+            bottom: chart_area.bottom().saturating_sub(2),
+        };
+        let expected_cells: std::collections::HashSet<_> = panel.series[0]
+            .points
+            .iter()
+            .filter_map(|(x, y)| point_to_braille_cell(*x, *y, [0.0, 100.0], y_bounds, plot))
+            .collect();
+        let visible_point_cells: std::collections::HashSet<_> = terminal
             .backend()
             .buffer()
             .content()
             .iter()
-            .any(|cell| cell.symbol() == "•");
+            .enumerate()
+            .filter_map(|(index, cell)| {
+                (cell.symbol() == "•").then_some(((index % 80) as u16, (index / 80) as u16))
+            })
+            .collect();
 
-        assert!(!has_cell_level_point_marker);
+        assert!(!visible_point_cells.is_empty());
+        assert_eq!(visible_point_cells, expected_cells);
     }
 }
