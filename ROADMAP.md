@@ -8,7 +8,7 @@ oriented around two priorities:
 2. **User-visible product value** - parity work should make real dashboards
    easier to read, debug, and share.
 
-> **Current version**: 0.1.7 · **Status**: Active development, pre-1.0
+> **Current version**: 0.1.9 · **Status**: Active development, pre-1.0
 
 **Legend**:
 - 🟢 Low complexity · 🟡 Medium complexity · 🔴 High complexity
@@ -44,7 +44,7 @@ These features are shipped and available today:
 | Rendering | **Autogrid** | Global and per-panel guide lines, including configurable color |
 | Field config | **Thresholds** | `fieldConfig.defaults.thresholds` for graph limit lines and Stat/Gauge/BarGauge coloring |
 | Field config | **Threshold marker styles** | Dashed line, dot, braille, block, quadrant, sextant, octant, and related modes |
-| Field config | **Field min/max bounds** | `fieldConfig.defaults.min` / `max` for gauge scaling and percentage thresholds |
+| Field config | **Field min/max bounds** | `fieldConfig.defaults.min` / `max` for graph y-axis bounds, gauge scaling, and percentage thresholds |
 | Field config | **Display formatting subset** | Common `unit` values, `decimals`, and `noValue` for supported panel values, axes, legends, and exports |
 | Export | **SVG/PNG snapshots** | Export the visible dashboard to SVG, PNG, or both |
 | Export | **Recording frame bundles** | Changed-frame recordings with manifest metadata and frame caps |
@@ -53,10 +53,9 @@ These features are shipped and available today:
 | Distribution | **Cross-platform binaries** | Linux, macOS, and Windows release assets |
 | Distribution | **Package formats** | `.deb`, `.rpm`, Homebrew formula support |
 
-For a field-by-field breakdown of Grafana JSON compatibility, see
-[GRAFANA_COMPATIBILITY.md](GRAFANA_COMPATIBILITY.md). That document should be
-refreshed alongside roadmap work because several v0.1.x parity features have
-landed since its original snapshot.
+For a field-by-field breakdown of Grafana JSON compatibility, see the
+[compatibility matrix](docs/grafana-compatibility.md). Keep that document
+refreshed alongside parity work so it stays aligned with the current release.
 
 ---
 
@@ -87,7 +86,7 @@ This is the main backlog, ordered by Grafana parity domain.
 
 | Feature | Grafana field / behavior | User value | Complexity | Status |
 |---|---|---|---|---|
-| **Compatibility matrix refresh** | Documentation generated from current code | Keeps users and contributors aligned with reality | 🟢 | 🔜 |
+| **Compatibility matrix automation** | Documentation generated or checked against current code | Keeps users and contributors aligned with reality | 🟢 | 📋 |
 | **Unsupported panel warnings** | Unsupported `panels[].type` and skipped targets | Makes import degradation visible instead of silent | 🟢 | 🔜 |
 | **Import validation** | `schemaVersion`, panel shape, target shape, required fields | Lets users check dashboards before launching the TUI | 🟢 | 🔜 |
 | **Better JSON/import errors** | Parse errors with path/context where possible | Faster debugging for broken exports | 🟢 | 📋 |
@@ -120,7 +119,7 @@ This is the main backlog, ordered by Grafana parity domain.
 | Feature | Grafana field / behavior | User value | Complexity | Status |
 |---|---|---|---|---|
 | **Hidden targets** | `targets[].hide` | Helper queries do not clutter imported panels | 🟢 | 🔜 |
-| **Instant queries** | `targets[].instant` / Prometheus `query` | Stat/table panels can use point-in-time queries | 🟡 | ✅ |
+| **Instant query defaults** | Panel-specific fallback behavior when `targets[].instant` is omitted | Keeps summary panels fast while preserving range queries for charts | 🟢 | ✅ |
 | **Target interval** | `targets[].interval` / `intervalFactor` | Panel-specific resolution is respected | 🟡 | 📋 |
 | **Target ref IDs** | `targets[].refId` | Better diagnostics and future transformation support | 🟢 | 📋 |
 | **Format handling** | `targets[].format` | Tables and heatmaps can choose more appropriate handling | 🟡 | 📋 |
@@ -182,7 +181,6 @@ Goal: imported dashboards should be more readable and less silently degraded.
 
 | Item | Why it belongs here | Complexity | Status |
 |---|---|---|---|
-| Compatibility matrix refresh | Establish the current truth before adding more parity | 🟢 | 🔜 |
 | Value mappings | Makes status/stat panels useful instead of numeric-only | 🟡 | 🔜 |
 | Broader unit formatting | Expands the shipped common-unit subset to more Grafana dashboards | 🟡 | 📋 |
 | Additional no-value coverage | Completes the shipped fallback behavior where terminal rendering can use it | 🟢 | 📋 |
@@ -198,7 +196,6 @@ expectations.
 | Item | Why it belongs here | Complexity | Status |
 |---|---|---|---|
 | Reduce options | Summary panels need more than "last" | 🟡 | 📋 |
-| Instant query support | Many summary/table panels are intended as instant queries | 🟡 | ✅ |
 | Display names | Imported labels become clearer without changing queries | 🟢 | 📋 |
 | Legend display modes and placement | Dense dashboards need predictable legend behavior | 🟡 | 📋 |
 | Legend calculations | Adds useful table-like summaries without a new panel type | 🟡 | 📋 |
@@ -261,10 +258,10 @@ These are valuable, but they should not outrank core Grafana import fidelity.
 
 Recommended order for the next focused development cycle:
 
-1. **Refresh compatibility truth**
-   - Update `GRAFANA_COMPATIBILITY.md` to match v0.1.7.
-   - Add tests or fixtures for fields already supported but documented as
-     missing.
+1. **Automate compatibility truth**
+   - Add tests or fixtures for fields already supported by v0.1.9 so the
+     compatibility matrix is easier to keep current.
+   - Prefer small checks that compare parser behavior with documented support.
 
 2. **Extend the field display layer**
    - Add value mappings and broaden unit coverage beyond the shipped common
@@ -290,9 +287,9 @@ Roadmap items are especially useful when PRs include:
 
 - A small Grafana JSON fixture that demonstrates the supported field.
 - Unit tests for parsing and display behavior.
-- A short note in `GRAFANA_COMPATIBILITY.md` explaining the TUI mapping or
+- A short note in `docs/grafana-compatibility.md` explaining the TUI mapping or
   limitation.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines, and
-[GRAFANA_COMPATIBILITY.md](GRAFANA_COMPATIBILITY.md) for the full Grafana JSON
+[docs/grafana-compatibility.md](docs/grafana-compatibility.md) for the full Grafana JSON
 feature-parity breakdown.

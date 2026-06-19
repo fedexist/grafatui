@@ -32,6 +32,14 @@ Demonstrates all supported panel types in a single dashboard:
 - **Table**: Tabular view of series
 - **Heatmap**: Color-coded time-series intensity
 
+### `instant_queries.json`
+Demonstrates explicit `targets[].instant` support and the default instant query
+behavior used by Gauge, Bar Gauge, and Table panels.
+
+### `thresholds_demo.json`
+Demonstrates threshold rendering, threshold marker styles, and explicit field
+min/max bounds.
+
 ### Usage
 
 ```bash
