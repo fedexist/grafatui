@@ -2,7 +2,7 @@
 
 This document provides a comprehensive feature-parity table between the [Grafana Dashboard JSON Model](https://grafana.com/docs/grafana/latest/dashboards/build-dashboards/json-model/) and what Grafatui currently supports.
 
-> **Snapshot**: Grafatui v0.1.7. The roadmap prioritizes Grafana parity first,
+> **Snapshot**: Grafatui v0.1.9. The roadmap prioritizes Grafana parity first,
 > then user-visible product value. See the [roadmap](https://github.com/fedexist/grafatui/blob/main/ROADMAP.md) for milestone
 > slices built from this compatibility ladder.
 
@@ -176,17 +176,18 @@ This document provides a comprehensive feature-parity table between the [Grafana
 
 ## Field Configuration (`fieldConfig`)
 
-`fieldConfig` is partially implemented. Thresholds, min/max bounds, selected
-display formatting fields, threshold style, and per-panel autogrid settings are
-parsed; value mappings, display names, and field overrides remain major gaps.
+`fieldConfig` is partially implemented. Thresholds, explicit min/max bounds,
+selected display formatting fields, threshold style, and per-panel autogrid
+settings are parsed; value mappings, display names, and field overrides remain
+major gaps.
 
 | JSON Field | Status | Notes |
 |---|---|---|
 | `fieldConfig` | 🔶 Partial | Parsed for supported defaults/custom fields below |
 | `fieldConfig.defaults` | 🔶 Partial | Parsed for min/max, thresholds, and selected custom fields |
 | `fieldConfig.defaults.unit` | 🔶 Partial | Common units such as bytes, bits, seconds, milliseconds, percent, percentunit, ops, request rate, and byte rate are formatted; unknown units fall back to Grafatui's compact SI formatter |
-| `fieldConfig.defaults.min` | ✅ Supported | Used for interpolating percentage thresholds and Gauge limits |
-| `fieldConfig.defaults.max` | ✅ Supported | Used for scaling gauges and threshold boundaries |
+| `fieldConfig.defaults.min` | ✅ Supported | Used for Graph y-axis lower bounds, percentage thresholds, and Gauge limits |
+| `fieldConfig.defaults.max` | ✅ Supported | Used for Graph y-axis upper bounds, gauge scaling, and threshold boundaries |
 | `fieldConfig.defaults.decimals` | ✅ Supported | Controls numeric precision in panel values, graph axes, legends, and exports |
 | `fieldConfig.defaults.color` | ❌ Not Implemented | Uses theme palette instead |
 | `fieldConfig.defaults.mappings` | ❌ Not Implemented | Value mappings not supported |
@@ -300,8 +301,8 @@ tooltips.
 | Annotations | 0 | 0 | 2 | 0 |
 | Data Links / Transforms | 0 | 0 | 2 | 1 |
 | Alert Rules | 0 | 0 | 3 | 0 |
-| Datasources | 2 | 1 | 5 | 0 |
-| **Total** | **46** | **14** | **85** | **15** |
+| Datasources | 3 | 0 | 5 | 0 |
+| **Total** | **47** | **13** | **85** | **15** |
 
 ---
 
@@ -313,7 +314,7 @@ Based on user feedback, the following missing features are most commonly expecte
 2. **Broader unit formatting** (`fieldConfig.defaults.unit`) — Extend the current common-unit subset to more Grafana unit families
 3. **Reduce options** (`options.reduceOptions`) — Use min/max/mean/total instead of always using the latest value
 4. **Import diagnostics** — Warn clearly about skipped panel types and ignored high-impact fields
-5. **Instant query panel targets** (`targets[].instant`) — Support point-in-time queries for stat/table-style panels
+5. **Hidden targets** (`targets[].hide`) — Hide helper queries that should not render as visible series
 6. **Additional panel types** — `text`, `piechart`, `histogram`, `logs`
 
 ---
@@ -340,4 +341,4 @@ Grafatui provides several TUI-native capabilities that don't map directly to Gra
 
 ---
 
-*This document was reviewed against the Grafatui source code at v0.1.7. If you notice any inaccuracies, please open an issue or PR.*
+*This document was reviewed against the Grafatui source code at v0.1.9. If you notice any inaccuracies, please open an issue or PR.*
