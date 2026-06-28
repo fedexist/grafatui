@@ -70,6 +70,18 @@ This document provides a comprehensive feature-parity table between the [Grafana
 | `trend` | ❌ Not Implemented | |
 | `xychart` | ❌ Not Implemented | |
 
+### Graph & Timeseries Parity
+
+| Feature | JSON Field | Behavior | Grafana | Grafatui |
+|---|---|---|---|---|
+| **Draw styles** | `fieldConfig.defaults.custom.drawStyle` | Line, points, and bars map to terminal graph styles | 🟡 | ✅ |
+| **Point display** | `fieldConfig.defaults.custom.showPoints` | `always` overlays visible point markers; `never` suppresses area/line point markers | 🟡 | 🔶 |
+| **Area fill** | `fieldConfig.defaults.custom.fillOpacity` | Nonzero fill opacity renders terminal/SVG area fill behind the line | 🟡 | 🔶 |
+| **Stacking** | `fieldConfig.defaults.custom.stacking` | Parsed and retained; non-off modes render non-stacked in this slice | 🟡 | 🔶 |
+| **Axis placement** | `fieldConfig.defaults.custom.axisPlacement` | `hidden` suppresses y-axis labels; left/right map to the terminal y-axis | 🟡 | 🔶 |
+| **Axis grid** | `fieldConfig.defaults.custom.axisGridShow` | Controls per-panel autogrid guide lines | 🟡 | ✅ |
+| **Threshold style** | `fieldConfig.defaults.custom.thresholdsStyle` | Dashed/line style is parsed for graph threshold rendering | 🟡 | 🔶 |
+
 ### Panel Common Fields
 
 | JSON Field | Status | Notes |
@@ -181,13 +193,10 @@ major gaps.
 | `fieldConfig.defaults.mappings` | ❌ Not Implemented | Value mappings not supported |
 | `fieldConfig.defaults.noValue` | 🔶 Partial | Used for null Stat/Table values and exports; empty panels still show Grafatui's `No data` state |
 | `fieldConfig.defaults.displayName` | ❌ Not Implemented | |
-| `fieldConfig.defaults.custom` | 🔶 Partial | Used for threshold style and axis grid visibility |
-| `fieldConfig.defaults.custom.drawStyle` | ❌ Not Implemented | Always drawn as lines |
+| `fieldConfig.defaults.custom` | 🔶 Partial | Used for graph draw style, fill/points, axis placement, stacking metadata, threshold style, and axis grid visibility |
 | `fieldConfig.defaults.custom.lineWidth` | ❌ Not Implemented | TUI limitation |
-| `fieldConfig.defaults.custom.fillOpacity` | ⛔ Not Applicable | TUI limitation |
-| `fieldConfig.defaults.custom.pointSize` | ⛔ Not Applicable | TUI limitation |
-| `fieldConfig.defaults.custom.stacking` | ❌ Not Implemented | No stacked charts |
-| `fieldConfig.defaults.custom.axisPlacement` | ❌ Not Implemented | |
+| `fieldConfig.defaults.custom.fillOpacity` | 🔶 Partial | Nonzero values enable terminal/SVG area fill; exact browser opacity is approximated |
+| `fieldConfig.defaults.custom.pointSize` | ⛔ Not Applicable | TUI points use fixed terminal-cell markers |
 | `fieldConfig.defaults.custom.axisLabel` | ❌ Not Implemented | |
 | `fieldConfig.defaults.custom.axisGridShow` | ✅ Supported | Controls per-panel autogrid guide lines for graph/time-series panels |
 | `fieldConfig.defaults.custom.thresholdsStyle` | 🔶 Partial | `mode` is parsed for threshold rendering; glyph style is also controlled by Grafatui's marker setting |
