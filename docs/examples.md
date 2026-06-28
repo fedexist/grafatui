@@ -27,7 +27,7 @@ docker-compose down -v
 ## Included Dashboards
 
 - `examples/dashboards/prometheus_demo.json`: recommended first demo for the bundled Prometheus stack.
-- `examples/dashboards/all_visualizations.json`: compact dashboard showing the supported visualization types.
+- `examples/dashboards/all_visualizations.json`: compact dashboard showing the supported visualization types, including timeseries bars, area fill, point mode, and hidden-axis examples.
 - `examples/dashboards/instant_queries.json`: demonstrates explicit instant targets and the default instant behavior for summary panels.
 - `examples/dashboards/thresholds_demo.json`: demonstrates thresholds, field bounds, and threshold marker rendering.
 - `examples/demo/vllm/grafana.json`: vLLM-oriented dashboard for the mock demo services.

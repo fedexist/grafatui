@@ -5,8 +5,8 @@
             {
                 "name": "instance",
                 "current": {
-                    "text": "localhost:9090",
-                    "value": "localhost:9090"
+                    "text": "prometheus:9090",
+                    "value": "prometheus:9090"
                 }
             }
         ]
@@ -105,6 +105,79 @@
                 {
                     "expr": "rate(prometheus_http_request_duration_seconds_sum{instance=\"$instance\"}[1m])",
                     "legendFormat": "{{handler}}"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Graph - Bars Hidden Axis",
+            "gridPos": {
+                "x": 0,
+                "y": 16,
+                "w": 8,
+                "h": 8
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "custom": {
+                        "drawStyle": "bars",
+                        "axisPlacement": "hidden"
+                    }
+                }
+            },
+            "targets": [
+                {
+                    "expr": "rate(prometheus_http_requests_total{instance=\"$instance\"}[1m])",
+                    "legendFormat": "{{code}}"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Graph - Area Fill",
+            "gridPos": {
+                "x": 8,
+                "y": 16,
+                "w": 8,
+                "h": 8
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "custom": {
+                        "drawStyle": "line",
+                        "fillOpacity": 30,
+                        "showPoints": "never"
+                    }
+                }
+            },
+            "targets": [
+                {
+                    "expr": "rate(prometheus_http_requests_total{instance=\"$instance\"}[1m])",
+                    "legendFormat": "{{handler}}"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Graph - Points",
+            "gridPos": {
+                "x": 16,
+                "y": 16,
+                "w": 8,
+                "h": 8
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "custom": {
+                        "drawStyle": "points",
+                        "showPoints": "always"
+                    }
+                }
+            },
+            "targets": [
+                {
+                    "expr": "up{instance=\"$instance\"}",
+                    "legendFormat": "{{job}}"
                 }
             ]
         }
