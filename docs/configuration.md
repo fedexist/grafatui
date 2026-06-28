@@ -8,6 +8,7 @@ Grafatui can be configured with CLI options, a TOML configuration file, or both.
 |---|---|---|
 | `--prometheus-url <URL>` | Prometheus server URL | `http://localhost:9090` |
 | `--grafana-json <FILE>` | Grafana dashboard JSON file | none |
+| `--validate` | Check the Grafana dashboard import and exit without starting the TUI | `false` |
 | `--range <DURATION>` | Time range window, such as `5m`, `1h`, or `24h` | `5m` |
 | `--step <DURATION>` | Query step resolution, such as `5s` or `30s` | `5s` |
 | `--var <KEY=VALUE>` | Override a dashboard variable | none |
