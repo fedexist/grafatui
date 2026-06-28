@@ -118,7 +118,7 @@ This document provides a comprehensive feature-parity table between the [Grafana
 | `targets[].intervalFactor` | ❌ Not Implemented | |
 | `targets[].instant` | ✅ Supported | Uses Prometheus instant `query` when true; Gauge, BarGauge, and Table default to instant |
 | `targets[].format` | ❌ Not Implemented | Always treated as time_series |
-| `targets[].hide` | ❌ Not Implemented | All targets are visible |
+| `targets[].hide` | ❌ Not Implemented | All targets are visible; import diagnostics warn when hidden targets are ignored |
 | `targets[].exemplar` | ❌ Not Implemented | |
 | `targets[].editorMode` | ⛔ Not Applicable | UI-only setting |
 
@@ -190,7 +190,7 @@ major gaps.
 | `fieldConfig.defaults.max` | ✅ Supported | Used for Graph y-axis upper bounds, gauge scaling, and threshold boundaries |
 | `fieldConfig.defaults.decimals` | ✅ Supported | Controls numeric precision in panel values, graph axes, legends, and exports |
 | `fieldConfig.defaults.color` | ❌ Not Implemented | Uses theme palette instead |
-| `fieldConfig.defaults.mappings` | ❌ Not Implemented | Value mappings not supported |
+| `fieldConfig.defaults.mappings` | ❌ Not Implemented | Value mappings not supported; import diagnostics warn when mappings are ignored |
 | `fieldConfig.defaults.noValue` | 🔶 Partial | Used for null Stat/Table values and exports; empty panels still show Grafatui's `No data` state |
 | `fieldConfig.defaults.displayName` | ❌ Not Implemented | |
 | `fieldConfig.defaults.custom` | 🔶 Partial | Used for graph draw style, fill/points, axis placement, stacking metadata, threshold style, and axis grid visibility |
@@ -231,7 +231,7 @@ tooltips.
 | `options.tooltip` | ❌ Not Implemented | Inspect mode serves as tooltip substitute |
 | `options.tooltip.mode` | ❌ Not Implemented | |
 | `options.orientation` | ❌ Not Implemented | |
-| `options.reduceOptions` | ❌ Not Implemented | Stat/Gauge always use last value |
+| `options.reduceOptions` | ❌ Not Implemented | Stat/Gauge always use last value; import diagnostics warn when reduce options are ignored |
 | `options.reduceOptions.calcs` | ❌ Not Implemented | |
 | `options.reduceOptions.fields` | ❌ Not Implemented | |
 | `options.textMode` | ❌ Not Implemented | |

@@ -41,6 +41,10 @@ pub(crate) struct Args {
     #[arg(long, value_name = "FILE")]
     pub(crate) grafana_json: Option<PathBuf>,
 
+    /// Validate a Grafana dashboard import without starting the TUI
+    #[arg(long)]
+    pub(crate) validate: bool,
+
     /// Legacy UI tick rate in milliseconds; redraws now happen on input and data refresh
     #[arg(long, default_value = "250")]
     pub(crate) tick_rate: u64,
@@ -114,4 +118,18 @@ where
         .find('=')
         .ok_or_else(|| format!("invalid KEY=value: no `=` found in `{}`", s))?;
     Ok((s[..pos].parse()?, s[pos + 1..].parse()?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn test_parse_validate_with_grafana_json() {
+        let args = Args::parse_from(["grafatui", "--validate", "--grafana-json", "dashboard.json"]);
+
+        assert!(args.validate);
+        assert_eq!(args.grafana_json, Some(PathBuf::from("dashboard.json")));
+    }
 }
