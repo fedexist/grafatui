@@ -88,7 +88,7 @@ This is the main backlog, ordered by Grafana parity domain.
 |---|---|---|---|---|
 | **Compatibility matrix automation** | Documentation generated or checked against current code | Keeps users and contributors aligned with reality | 🟢 | 📋 |
 | **Unsupported panel warnings** | Unsupported `panels[].type` and ignored high-impact fields | Makes import degradation visible instead of silent | 🟢 | ✅ |
-| **Import validation** | Non-interactive `--validate --grafana-json` import checks | Lets users check dashboards before launching the TUI | 🟢 | 🔶 |
+| **Import validation** | `--validate`, `--strict`, and JSON import checks | Lets users check dashboards before launching the TUI | 🟢 | 🔶 |
 | **Better JSON/import errors** | Parse errors with path/context where possible | Faster debugging for broken exports | 🟢 | 📋 |
 | **Variable substitution diagnostics** | Missing variables, unsupported format modifiers | Explains empty panels caused by unresolved variables | 🟢 | ✅ |
 
@@ -184,9 +184,9 @@ Goal: imported dashboards should be more readable and less silently degraded.
 | Value mappings | Makes status/stat panels useful instead of numeric-only | 🟡 | 🔜 |
 | Broader unit formatting | Expands the shipped common-unit subset to more Grafana dashboards | 🟡 | 📋 |
 | Additional no-value coverage | Completes the shipped fallback behavior where terminal rendering can use it | 🟢 | 📋 |
-| Hidden targets | Prevents helper queries from appearing as normal series | 🟢 | 🔜 |
+| Hidden targets | Prevents helper queries from appearing as normal series | 🟢 | ✅ |
 | Unsupported panel warnings | Builds trust in imported results | 🟢 | ✅ |
-| `--validate` import diagnostics | Gives users a non-interactive dashboard check | 🟢 | 🔶 |
+| `--validate` import diagnostics | Gives users text, JSON, and strict non-interactive dashboard checks | 🟢 | 🔶 |
 
 ### v0.3 - Panel Semantics
 
