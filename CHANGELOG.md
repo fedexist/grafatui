@@ -4,6 +4,41 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.1.10] - 2026-06-30
+
+### ⛰️  Features
+
+- Add graph panel options model ([6783c29](https://github.com/fedexist/grafatui/commit/6783c293e0dbb969ac1fa065b9af1f8af5089b5c))
+- Import grafana timeseries options ([3f8e3ed](https://github.com/fedexist/grafatui/commit/3f8e3ed40acc396f9b05b817b6098459ac451dd6))
+- Render grafana graph styles ([3ad51de](https://github.com/fedexist/grafatui/commit/3ad51de1b43f0503741f5b74b363a9de55cdb75c))
+- Export grafana graph styles ([d70cd97](https://github.com/fedexist/grafatui/commit/d70cd97909a813ca493490d1f8670abd47f70cee))
+- Add import diagnostics ([89914b5](https://github.com/fedexist/grafatui/commit/89914b522184e44842ede0141baf6d666e1fa03e))
+
+### 🐛 Bug Fixes
+
+- Preserve graph overlay alignment ([89b3b3c](https://github.com/fedexist/grafatui/commit/89b3b3c2a7b78794cba0d41c4c6912fbb41438b9))
+- Align graph plot bounds ([7faf165](https://github.com/fedexist/grafatui/commit/7faf165363fb237a6e1b2165f46702253d90c9b1))
+- Keep graph overlays visible ([e511d30](https://github.com/fedexist/grafatui/commit/e511d30aca64e2bd8959ba21fe14eb009a0374d4))
+- Harden graph style export ([8dcf1a8](https://github.com/fedexist/grafatui/commit/8dcf1a81785880e969427492c4047f3142e4623b))
+- Align demo dashboard instance default ([44f7c66](https://github.com/fedexist/grafatui/commit/44f7c6698391252534f165fdb49d3f7e51ba8e93))
+- Keep autogrid behind area fill ([7f619e9](https://github.com/fedexist/grafatui/commit/7f619e98f9170d80f9fd7d5a4c0fb63e41166d5f))
+- Align forced graph points ([d46bcea](https://github.com/fedexist/grafatui/commit/d46bceaffe8cd98c74db6ed736916c683bb9b2f7))
+- Show aligned forced graph points ([95966d6](https://github.com/fedexist/grafatui/commit/95966d6713018b55a17a341429c72a8a2a5bec96))
+
+### 📚 Documentation
+
+- Update rust msrv references ([efbf225](https://github.com/fedexist/grafatui/commit/efbf225ec35947c28685a2d1b3a8745fce066dcc))
+- Document graph style support ([0ca3fc4](https://github.com/fedexist/grafatui/commit/0ca3fc406a0f6291d8d0026922dbdaa65a8719eb))
+- Refresh graph custom compatibility ([692073f](https://github.com/fedexist/grafatui/commit/692073feabeda9e55e71eae315fc1ac33882c488))
+- Refresh timeseries style coverage ([095abc5](https://github.com/fedexist/grafatui/commit/095abc504242c98dbeefe70a6e689f988c753938))
+
+### ⚙️ Miscellaneous Tasks
+
+- Update ratatui to 0.30.1 ([c84cd67](https://github.com/fedexist/grafatui/commit/c84cd6786407fb5baae7eb8f863223aea3792498))
+- Wire panel options through constructors ([ac2519a](https://github.com/fedexist/grafatui/commit/ac2519a45ad66645c16cb4a38f93f6096a547e18))
+- Ignore docs/superpowers directory in git tracking ([b1a7193](https://github.com/fedexist/grafatui/commit/b1a7193e33dec6e9af21fbe7025abb76cc7d95f7))
+
+
 ## [0.1.9] - 2026-06-12
 
 ### 🐛 Bug Fixes
