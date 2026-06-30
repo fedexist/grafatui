@@ -87,10 +87,10 @@ This is the main backlog, ordered by Grafana parity domain.
 | Feature | Grafana field / behavior | User value | Complexity | Status |
 |---|---|---|---|---|
 | **Compatibility matrix automation** | Documentation generated or checked against current code | Keeps users and contributors aligned with reality | 🟢 | 📋 |
-| **Unsupported panel warnings** | Unsupported `panels[].type` and skipped targets | Makes import degradation visible instead of silent | 🟢 | 🔜 |
-| **Import validation** | `schemaVersion`, panel shape, target shape, required fields | Lets users check dashboards before launching the TUI | 🟢 | 🔜 |
+| **Unsupported panel warnings** | Unsupported `panels[].type` and ignored high-impact fields | Makes import degradation visible instead of silent | 🟢 | ✅ |
+| **Import validation** | Non-interactive `--validate --grafana-json` import checks | Lets users check dashboards before launching the TUI | 🟢 | 🔶 |
 | **Better JSON/import errors** | Parse errors with path/context where possible | Faster debugging for broken exports | 🟢 | 📋 |
-| **Variable substitution diagnostics** | Missing variables, unsupported format modifiers | Explains empty panels caused by unresolved variables | 🟢 | 📋 |
+| **Variable substitution diagnostics** | Missing variables, unsupported format modifiers | Explains empty panels caused by unresolved variables | 🟢 | ✅ |
 
 ### 2. Field Config Parity
 
@@ -185,8 +185,8 @@ Goal: imported dashboards should be more readable and less silently degraded.
 | Broader unit formatting | Expands the shipped common-unit subset to more Grafana dashboards | 🟡 | 📋 |
 | Additional no-value coverage | Completes the shipped fallback behavior where terminal rendering can use it | 🟢 | 📋 |
 | Hidden targets | Prevents helper queries from appearing as normal series | 🟢 | 🔜 |
-| Unsupported panel warnings | Builds trust in imported results | 🟢 | 🔜 |
-| `--validate` import diagnostics | Gives users a non-interactive dashboard check | 🟢 | 🔜 |
+| Unsupported panel warnings | Builds trust in imported results | 🟢 | ✅ |
+| `--validate` import diagnostics | Gives users a non-interactive dashboard check | 🟢 | 🔶 |
 
 ### v0.3 - Panel Semantics
 

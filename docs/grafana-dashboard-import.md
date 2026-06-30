@@ -40,6 +40,23 @@ grafatui --grafana-json ./dash.json --var job=node --var instance=server-01
 
 Prometheus query variables such as `label_values(up, instance)` and `query_result(...)` are resolved before panel queries run.
 
+## Import Diagnostics
+
+Grafatui prints import warnings before starting the TUI when a dashboard uses
+important Grafana features that are skipped or ignored. Diagnostics include
+unsupported panel types, hidden targets, value mappings, reduce options,
+unresolved variables, and unsupported variable modifiers such as
+`${var:regex}`.
+
+Run a non-interactive check with:
+
+```bash
+grafatui --validate --grafana-json ./dash.json
+```
+
+Warnings do not make validation fail. A dashboard that can be parsed and
+imported exits successfully even if diagnostics are printed.
+
 ## Query Modes
 
 Grafatui honors `targets[].instant` from Grafana dashboard JSON. Targets marked

@@ -16,7 +16,7 @@
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Result of importing a Grafana dashboard.
 #[derive(Debug, Clone, Default)]
@@ -33,6 +33,29 @@ pub(crate) struct DashboardImport {
     pub(crate) skipped_panels: usize,
     /// Dashboard-level refresh interval in milliseconds, if provided.
     pub(crate) refresh_rate_ms: Option<u64>,
+    /// Warnings produced while importing the dashboard.
+    pub(crate) diagnostics: Vec<ImportDiagnostic>,
+}
+
+/// A warning produced while importing a Grafana dashboard.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ImportDiagnostic {
+    /// Stable diagnostic code.
+    pub(crate) code: String,
+    /// JSON-ish source path for the warning.
+    pub(crate) path: String,
+    /// Human-readable diagnostic message.
+    pub(crate) message: String,
+}
+
+impl ImportDiagnostic {
+    fn new(code: &str, path: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.to_string(),
+            path: path.into(),
+            message: message.into(),
+        }
+    }
 }
 
 /// A Prometheus-backed Grafana template variable.
@@ -44,6 +67,8 @@ pub(crate) struct TemplateQueryVar {
     pub(crate) query: String,
     /// Optional Grafana regex extractor.
     pub(crate) regex: Option<String>,
+    /// JSON-ish source path for the variable query.
+    pub(crate) query_path: String,
 }
 
 /// A single panel extracted from Grafana.
@@ -51,6 +76,7 @@ pub(crate) struct TemplateQueryVar {
 pub(crate) struct QueryPanel {
     pub(crate) title: String,
     pub(crate) exprs: Vec<String>,
+    pub(crate) expr_paths: Vec<String>,      // Parallel to exprs
     pub(crate) legends: Vec<Option<String>>, // Parallel to exprs
     pub(crate) query_modes: Vec<crate::app::QueryMode>, // Parallel to exprs
     pub(crate) grid: Option<GridPos>,
@@ -123,6 +149,13 @@ struct RawPanel {
     panels: Option<Vec<RawPanel>>, // nested rows
     #[serde(rename = "fieldConfig")]
     field_config: Option<RawFieldConfig>,
+    options: Option<RawPanelOptions>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawPanelOptions {
+    #[serde(rename = "reduceOptions")]
+    reduce_options: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,6 +173,7 @@ struct RawFieldConfigDefaults {
     max: Option<f64>,
     thresholds: Option<RawThresholds>,
     custom: Option<RawCustom>,
+    mappings: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -189,6 +223,7 @@ struct RawTarget {
     #[serde(rename = "legendFormat")]
     legend_format: Option<String>,
     instant: Option<bool>,
+    hide: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -209,7 +244,7 @@ pub(crate) fn load_grafana_dashboard(path: &std::path::Path) -> Result<Dashboard
     let mut query_vars = Vec::new();
     if let Some(templating) = raw.templating {
         if let Some(list) = templating.list {
-            for v in list {
+            for (var_idx, v) in list.into_iter().enumerate() {
                 // Heuristic: prefer 'value' over 'text', handle arrays by taking first or joining?
                 // Grafana 'current' value can be "All" or ["val1", "val2"].
                 // For simple PromQL substitution, we usually want the raw value.
@@ -255,6 +290,7 @@ pub(crate) fn load_grafana_dashboard(path: &std::path::Path) -> Result<Dashboard
                         name: v.name,
                         query,
                         regex: v.regex.filter(|regex| !regex.trim().is_empty()),
+                        query_path: format!("templating.list[{var_idx}].query"),
                     });
                 }
             }
@@ -268,10 +304,11 @@ pub(crate) fn load_grafana_dashboard(path: &std::path::Path) -> Result<Dashboard
         vars,
         query_vars,
         skipped_panels: 0,
+        diagnostics: vec![],
     };
 
     if let Some(panels) = raw.panels {
-        collect_panels(&mut out, panels)?;
+        collect_panels(&mut out, panels, "panels")?;
     }
     Ok(out)
 }
@@ -385,12 +422,14 @@ fn parse_graph_stacking_mode(value: Option<&str>) -> crate::app::GraphStackingMo
     }
 }
 
-fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()> {
-    for p in panels.into_iter() {
+fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>, path: &str) -> Result<()> {
+    for (panel_idx, p) in panels.into_iter().enumerate() {
+        let panel_path = format!("{path}[{panel_idx}]");
         if let Some(children) = p.panels {
-            collect_panels(out, children)?;
+            collect_panels(out, children, &format!("{panel_path}.panels"))?;
         }
         let kind = p.panel_type;
+        let title = p.title.unwrap_or_default();
 
         let panel_type = match kind.as_str() {
             "graph" | "timeseries" => crate::app::PanelType::Graph,
@@ -404,12 +443,22 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
 
         if panel_type != crate::app::PanelType::Unknown {
             let mut exprs = Vec::new();
+            let mut expr_paths = Vec::new();
             let mut legends = Vec::new();
             let mut query_modes = Vec::new();
 
-            for t in p.targets.unwrap_or_default() {
+            for (target_idx, t) in p.targets.unwrap_or_default().into_iter().enumerate() {
+                let target_path = format!("{panel_path}.targets[{target_idx}]");
+                if t.hide == Some(true) {
+                    out.diagnostics.push(ImportDiagnostic::new(
+                        "ignored_field",
+                        format!("{target_path}.hide"),
+                        "`targets[].hide` is not supported yet; target will be imported as visible",
+                    ));
+                }
                 if let Some(e) = t.expr {
                     exprs.push(e);
+                    expr_paths.push(format!("{target_path}.expr"));
                     legends.push(t.legend_format);
                     query_modes.push(query_mode_for_target(t.instant, panel_type));
                 }
@@ -422,8 +471,26 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
             let mut display = crate::ui::DisplayFormat::default();
             let mut graph_options = crate::app::GraphOptions::default();
 
+            if let Some(options) = p.options {
+                if options.reduce_options.is_some() {
+                    out.diagnostics.push(ImportDiagnostic::new(
+                        "ignored_field",
+                        format!("{panel_path}.options.reduceOptions"),
+                        "`options.reduceOptions` is not supported yet; Grafatui will use default value selection",
+                    ));
+                }
+            }
+
             if let Some(fc) = p.field_config {
                 if let Some(defaults) = fc.defaults {
+                    if defaults.mappings.as_ref().is_some_and(non_empty_json_value) {
+                        out.diagnostics.push(ImportDiagnostic::new(
+                            "ignored_field",
+                            format!("{panel_path}.fieldConfig.defaults.mappings"),
+                            "`fieldConfig.defaults.mappings` is not supported yet; value mappings will be ignored",
+                        ));
+                    }
+
                     graph_options = graph_options_from_custom(defaults.custom.as_ref());
                     display = crate::ui::DisplayFormat {
                         unit: defaults.unit,
@@ -492,8 +559,9 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
                     _ => crate::app::PanelOptions::None,
                 };
                 out.queries.push(QueryPanel {
-                    title: p.title.unwrap_or_default(),
+                    title,
                     exprs,
+                    expr_paths,
                     legends,
                     query_modes,
                     grid: gp,
@@ -509,9 +577,195 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>) -> Result<()
         } else if !kind.is_empty() && kind != "row" {
             // Count skipped panels (ignore rows)
             out.skipped_panels += 1;
+            out.diagnostics.push(ImportDiagnostic::new(
+                "skipped_panel",
+                panel_path,
+                format!("unsupported panel type `{kind}` skipped for panel `{title}`"),
+            ));
         }
     }
     Ok(())
+}
+
+fn non_empty_json_value(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Array(values) => !values.is_empty(),
+        serde_json::Value::Object(values) => !values.is_empty(),
+        serde_json::Value::String(value) => !value.trim().is_empty(),
+        serde_json::Value::Null => false,
+        serde_json::Value::Bool(_) | serde_json::Value::Number(_) => true,
+    }
+}
+
+pub(crate) fn variable_diagnostics(
+    dashboard: &DashboardImport,
+    vars: &HashMap<String, String>,
+) -> Vec<ImportDiagnostic> {
+    let mut known_vars: HashSet<String> = vars.keys().cloned().collect();
+    known_vars.extend(dashboard.query_vars.iter().map(|var| var.name.clone()));
+
+    let mut diagnostics = Vec::new();
+    let mut seen = HashSet::new();
+    for panel in &dashboard.queries {
+        for (expr, path) in panel.exprs.iter().zip(panel.expr_paths.iter()) {
+            collect_variable_diagnostics(expr, path, &known_vars, &mut diagnostics, &mut seen);
+        }
+    }
+    for query_var in &dashboard.query_vars {
+        collect_variable_diagnostics(
+            &query_var.query,
+            &query_var.query_path,
+            &known_vars,
+            &mut diagnostics,
+            &mut seen,
+        );
+    }
+
+    diagnostics
+}
+
+fn collect_variable_diagnostics(
+    expr: &str,
+    path: &str,
+    known_vars: &HashSet<String>,
+    diagnostics: &mut Vec<ImportDiagnostic>,
+    seen: &mut HashSet<(String, String, String)>,
+) {
+    let chars: Vec<(usize, char)> = expr.char_indices().collect();
+    let mut idx = 0;
+    while idx < chars.len() {
+        if chars[idx].1 != '$' {
+            idx += 1;
+            continue;
+        }
+
+        if idx + 1 >= chars.len() {
+            idx += 1;
+            continue;
+        }
+
+        if chars[idx + 1].1 == '{' {
+            let start = chars[idx].0;
+            let inner_start = chars[idx + 1].0 + 1;
+            let mut end_idx = idx + 2;
+            while end_idx < chars.len() && chars[end_idx].1 != '}' {
+                end_idx += 1;
+            }
+            if end_idx >= chars.len() {
+                idx += 1;
+                continue;
+            }
+
+            let end = chars[end_idx].0;
+            let token_end = end + 1;
+            let inner = &expr[inner_start..end];
+            let token = &expr[start..token_end];
+            let (name, modifier) = inner.split_once(':').unwrap_or((inner, ""));
+            if !modifier.is_empty() {
+                push_variable_diagnostic(
+                    diagnostics,
+                    seen,
+                    ImportDiagnostic::new(
+                        "unsupported_variable_modifier",
+                        path,
+                        format!(
+                            "unsupported Grafana variable modifier `{token}`; Grafatui expands only unmodified variables"
+                        ),
+                    ),
+                );
+            }
+            if is_valid_variable_name(name)
+                && !is_builtin_variable(name)
+                && !known_vars.contains(name)
+            {
+                push_variable_diagnostic(
+                    diagnostics,
+                    seen,
+                    ImportDiagnostic::new(
+                        "unresolved_variable",
+                        path,
+                        format!(
+                            "unresolved variable `{token}`; provide it with --var or dashboard templating"
+                        ),
+                    ),
+                );
+            }
+            idx = end_idx + 1;
+            continue;
+        }
+
+        let name_start = chars[idx + 1].0;
+        let mut end_idx = idx + 1;
+        while end_idx < chars.len() && is_variable_name_char(chars[end_idx].1) {
+            end_idx += 1;
+        }
+        if end_idx == idx + 1 {
+            idx += 1;
+            continue;
+        }
+
+        let name_end = chars
+            .get(end_idx)
+            .map(|(byte_idx, _)| *byte_idx)
+            .unwrap_or(expr.len());
+        let name = &expr[name_start..name_end];
+        if is_valid_variable_name(name) && !is_builtin_variable(name) && !known_vars.contains(name)
+        {
+            let token = &expr[chars[idx].0..name_end];
+            push_variable_diagnostic(
+                diagnostics,
+                seen,
+                ImportDiagnostic::new(
+                    "unresolved_variable",
+                    path,
+                    format!(
+                        "unresolved variable `{token}`; provide it with --var or dashboard templating"
+                    ),
+                ),
+            );
+        }
+        idx = end_idx;
+    }
+}
+
+fn push_variable_diagnostic(
+    diagnostics: &mut Vec<ImportDiagnostic>,
+    seen: &mut HashSet<(String, String, String)>,
+    diagnostic: ImportDiagnostic,
+) {
+    let key = (
+        diagnostic.code.clone(),
+        diagnostic.path.clone(),
+        diagnostic.message.clone(),
+    );
+    if seen.insert(key) {
+        diagnostics.push(diagnostic);
+    }
+}
+
+fn is_builtin_variable(name: &str) -> bool {
+    matches!(
+        name,
+        "__interval"
+            | "__interval_ms"
+            | "__range"
+            | "__range_s"
+            | "__range_ms"
+            | "__rate_interval"
+            | "__rate_interval_ms"
+    )
+}
+
+fn is_valid_variable_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|ch| ch == '_' || ch.is_ascii_alphabetic())
+        && chars.all(is_variable_name_char)
+}
+
+fn is_variable_name_char(ch: char) -> bool {
+    ch == '_' || ch.is_ascii_alphanumeric()
 }
 
 fn parse_refresh_rate_ms(value: &serde_json::Value) -> Option<u64> {
@@ -820,9 +1074,10 @@ mod tests {
             vars: HashMap::new(),
             query_vars: vec![],
             skipped_panels: 0,
+            diagnostics: vec![],
         };
 
-        collect_panels(&mut out, raw.panels.unwrap()).unwrap();
+        collect_panels(&mut out, raw.panels.unwrap(), "panels").unwrap();
 
         let options = match &out.queries[0].options {
             crate::app::PanelOptions::Graph(options) => options,
@@ -876,9 +1131,10 @@ mod tests {
             vars: HashMap::new(),
             query_vars: vec![],
             skipped_panels: 0,
+            diagnostics: vec![],
         };
 
-        collect_panels(&mut out, raw.panels.unwrap()).unwrap();
+        collect_panels(&mut out, raw.panels.unwrap(), "panels").unwrap();
 
         let graph_options = match &out.queries[0].options {
             crate::app::PanelOptions::Graph(options) => options,
@@ -896,5 +1152,147 @@ mod tests {
             crate::app::GraphStackingMode::Percent
         );
         assert_eq!(out.queries[1].options, crate::app::PanelOptions::None);
+    }
+
+    #[test]
+    fn test_import_diagnostics_report_skipped_panel_type() {
+        let json = r#"{
+            "title": "Skipped",
+            "panels": [
+                { "type": "text", "title": "Notes" }
+            ]
+        }"#;
+        let path = std::env::temp_dir().join("grafatui-skipped-panel-diagnostics.json");
+        std::fs::write(&path, json).unwrap();
+
+        let dashboard = load_grafana_dashboard(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        assert_eq!(dashboard.skipped_panels, 1);
+        assert_eq!(dashboard.diagnostics.len(), 1);
+        assert_eq!(dashboard.diagnostics[0].code, "skipped_panel");
+        assert_eq!(dashboard.diagnostics[0].path, "panels[0]");
+        assert!(
+            dashboard.diagnostics[0]
+                .message
+                .contains("unsupported panel type `text`")
+        );
+        assert!(dashboard.diagnostics[0].message.contains("Notes"));
+    }
+
+    #[test]
+    fn test_import_diagnostics_report_ignored_high_impact_fields() {
+        let json = r#"{
+            "title": "Ignored Fields",
+            "panels": [
+                {
+                    "type": "stat",
+                    "title": "CPU",
+                    "targets": [
+                        { "expr": "up", "hide": true }
+                    ],
+                    "fieldConfig": {
+                        "defaults": {
+                            "mappings": [
+                                { "type": "value", "options": { "0": { "text": "Down" } } }
+                            ]
+                        }
+                    },
+                    "options": {
+                        "reduceOptions": {
+                            "calcs": ["mean"]
+                        }
+                    }
+                }
+            ]
+        }"#;
+        let path = std::env::temp_dir().join("grafatui-ignored-fields-diagnostics.json");
+        std::fs::write(&path, json).unwrap();
+
+        let dashboard = load_grafana_dashboard(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        let diagnostics: Vec<_> = dashboard
+            .diagnostics
+            .iter()
+            .map(|diagnostic| (diagnostic.code.as_str(), diagnostic.path.as_str()))
+            .collect();
+
+        assert!(diagnostics.contains(&("ignored_field", "panels[0].targets[0].hide")));
+        assert!(
+            diagnostics.contains(&("ignored_field", "panels[0].fieldConfig.defaults.mappings"))
+        );
+        assert!(diagnostics.contains(&("ignored_field", "panels[0].options.reduceOptions")));
+    }
+
+    #[test]
+    fn test_import_diagnostics_preserve_nested_row_paths() {
+        let json = r#"{
+            "title": "Rows",
+            "panels": [
+                {
+                    "type": "row",
+                    "title": "Group",
+                    "panels": [
+                        { "type": "piechart", "title": "Pie" }
+                    ]
+                }
+            ]
+        }"#;
+        let path = std::env::temp_dir().join("grafatui-nested-row-diagnostics.json");
+        std::fs::write(&path, json).unwrap();
+
+        let dashboard = load_grafana_dashboard(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        assert_eq!(dashboard.diagnostics[0].code, "skipped_panel");
+        assert_eq!(dashboard.diagnostics[0].path, "panels[0].panels[0]");
+    }
+
+    #[test]
+    fn test_variable_diagnostics_report_modifiers_and_unresolved_variables() {
+        let json = r#"{
+            "title": "Variables",
+            "templating": {
+                "list": [
+                    { "name": "job", "current": { "text": "node", "value": "node" } },
+                    { "name": "instance", "current": { "text": "server", "value": "server" } },
+                    {
+                        "name": "query_var",
+                        "type": "query",
+                        "query": "label_values(up{job=\"$job\"}, instance)",
+                        "current": { "text": "server", "value": "server" }
+                    }
+                ]
+            },
+            "panels": [
+                {
+                    "type": "timeseries",
+                    "title": "CPU",
+                    "targets": [
+                        { "expr": "up{job=\"$job\", instance=\"${instance}\"}" },
+                        { "expr": "up{job=~\"${job:regex}\", cluster=\"$cluster\", interval=\"$__interval\", range=\"$__range_s\"}" }
+                    ]
+                }
+            ]
+        }"#;
+        let path = std::env::temp_dir().join("grafatui-variable-diagnostics.json");
+        std::fs::write(&path, json).unwrap();
+
+        let dashboard = load_grafana_dashboard(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        let diagnostics = variable_diagnostics(&dashboard, &dashboard.vars);
+        assert_eq!(diagnostics.len(), 2);
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "unsupported_variable_modifier"
+                && diagnostic.path == "panels[0].targets[1].expr"
+                && diagnostic.message.contains("${job:regex}")
+        }));
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "unresolved_variable"
+                && diagnostic.path == "panels[0].targets[1].expr"
+                && diagnostic.message.contains("$cluster")
+        }));
     }
 }

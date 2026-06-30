@@ -25,7 +25,7 @@ mod ui;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use config::Config;
 use crossterm::{
@@ -70,6 +70,25 @@ async fn main() -> Result<()> {
         Some(path) => Config::load(Some(path))?,
         None => Config::load(None).unwrap_or_default(),
     };
+    let dashboard_path = args
+        .grafana_json
+        .clone()
+        .or_else(|| config.grafana_json.clone())
+        .map(|p| config::expand_path(&p));
+
+    if args.validate {
+        let path = dashboard_path.ok_or_else(|| {
+            anyhow!("--validate requires --grafana-json or grafana_json in config")
+        })?;
+        let dashboard = grafana::load_grafana_dashboard(&path)?;
+        let summary = validate_dashboard_import(dashboard, config.vars.clone(), &args.var);
+        print_import_diagnostics(&summary.diagnostics);
+        println!(
+            "Grafana dashboard is importable: {} ({} panel(s))",
+            summary.title, summary.panel_count
+        );
+        return Ok(());
+    }
 
     let prometheus_url = args
         .prometheus_url
@@ -116,18 +135,13 @@ async fn main() -> Result<()> {
     let prom = prom::PromClient::new(prometheus_url);
 
     // Build panels from Grafana import or simple queries.
-    let (title, panels, skipped_panels) = if let Some(path) = args
-        .grafana_json
-        .or(config.grafana_json)
-        .map(|p| config::expand_path(&p))
-    {
+    let (title, panels, skipped_panels) = if let Some(path) = dashboard_path {
         let d = grafana::load_grafana_dashboard(&path)?;
+        let import_context = build_import_context(&d, config.vars.clone(), &args.var);
+        print_import_diagnostics(&import_context.diagnostics);
         dashboard_refresh_rate_ms = d.refresh_rate_ms;
-        // Seed vars from dashboard defaults
-        for (k, v) in d.vars {
-            vars.insert(k, v);
-        }
-        query_vars = d.query_vars;
+        vars = import_context.vars;
+        query_vars = import_context.query_vars;
 
         let ps = d
             .queries
@@ -159,24 +173,9 @@ async fn main() -> Result<()> {
             .collect();
         (format!("{} (imported)", d.title), ps, d.skipped_panels)
     } else {
+        merge_user_vars(&mut vars, config.vars.clone(), &args.var);
         ("grafatui".to_string(), app::default_queries(args.query), 0)
     };
-
-    // Merge config vars (if any)
-    let mut pinned_vars = HashSet::new();
-    if let Some(config_vars) = config.vars {
-        for (k, v) in config_vars {
-            pinned_vars.insert(k.clone());
-            vars.insert(k, v);
-        }
-    }
-
-    // CLI vars override dashboard defaults and config vars
-    for (k, v) in &args.var {
-        pinned_vars.insert(k.clone());
-        vars.insert(k.clone(), v.clone());
-    }
-    query_vars.retain(|var| !pinned_vars.contains(&var.name));
 
     // Determine theme
     let theme_name = args
@@ -261,6 +260,95 @@ fn resolve_refresh_rate_ms(
         .unwrap_or(1000)
 }
 
+#[derive(Debug)]
+struct ImportContext {
+    vars: HashMap<String, String>,
+    query_vars: Vec<grafana::TemplateQueryVar>,
+    diagnostics: Vec<grafana::ImportDiagnostic>,
+}
+
+#[derive(Debug)]
+struct ImportValidationSummary {
+    title: String,
+    panel_count: usize,
+    diagnostics: Vec<grafana::ImportDiagnostic>,
+}
+
+fn validate_dashboard_import(
+    dashboard: grafana::DashboardImport,
+    config_vars: Option<HashMap<String, String>>,
+    cli_vars: &[(String, String)],
+) -> ImportValidationSummary {
+    let import_context = build_import_context(&dashboard, config_vars, cli_vars);
+    ImportValidationSummary {
+        title: dashboard.title,
+        panel_count: dashboard.queries.len(),
+        diagnostics: import_context.diagnostics,
+    }
+}
+
+fn build_import_context(
+    dashboard: &grafana::DashboardImport,
+    config_vars: Option<HashMap<String, String>>,
+    cli_vars: &[(String, String)],
+) -> ImportContext {
+    let mut vars = dashboard.vars.clone();
+    let pinned_vars = merge_user_vars(&mut vars, config_vars, cli_vars);
+
+    let query_vars = dashboard
+        .query_vars
+        .iter()
+        .filter(|var| !pinned_vars.contains(&var.name))
+        .cloned()
+        .collect();
+    let mut diagnostics = dashboard.diagnostics.clone();
+    diagnostics.extend(grafana::variable_diagnostics(dashboard, &vars));
+
+    ImportContext {
+        vars,
+        query_vars,
+        diagnostics,
+    }
+}
+
+fn merge_user_vars(
+    vars: &mut HashMap<String, String>,
+    config_vars: Option<HashMap<String, String>>,
+    cli_vars: &[(String, String)],
+) -> HashSet<String> {
+    let mut pinned_vars = HashSet::new();
+    if let Some(config_vars) = config_vars {
+        for (k, v) in config_vars {
+            pinned_vars.insert(k.clone());
+            vars.insert(k, v);
+        }
+    }
+
+    for (k, v) in cli_vars {
+        pinned_vars.insert(k.clone());
+        vars.insert(k.clone(), v.clone());
+    }
+
+    pinned_vars
+}
+
+fn print_import_diagnostics(diagnostics: &[grafana::ImportDiagnostic]) {
+    if diagnostics.is_empty() {
+        return;
+    }
+
+    eprintln!(
+        "Grafana import diagnostics: {} warning(s)",
+        diagnostics.len()
+    );
+    for diagnostic in diagnostics {
+        eprintln!(
+            "warning[grafana.import.{}] {}: {}",
+            diagnostic.code, diagnostic.path, diagnostic.message
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,5 +362,54 @@ mod tests {
         assert_eq!(resolve_refresh_rate_ms(None, Some(3000), Some(4000)), 3000);
         assert_eq!(resolve_refresh_rate_ms(None, None, Some(4000)), 4000);
         assert_eq!(resolve_refresh_rate_ms(None, None, None), 1000);
+    }
+
+    #[test]
+    fn test_validate_dashboard_import_adds_variable_diagnostics_without_prometheus() {
+        let json = r#"{
+            "title": "Validate",
+            "panels": [
+                {
+                    "type": "timeseries",
+                    "title": "CPU",
+                    "targets": [
+                        { "expr": "up{job=\"$job\", cluster=\"$cluster\"}" }
+                    ]
+                }
+            ]
+        }"#;
+        let path = std::env::temp_dir().join("grafatui-validate-helper-test.json");
+        std::fs::write(&path, json).unwrap();
+        let dashboard = grafana::load_grafana_dashboard(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        let summary =
+            validate_dashboard_import(dashboard, None, &[("job".to_string(), "node".to_string())]);
+
+        assert_eq!(summary.title, "Validate");
+        assert_eq!(summary.panel_count, 1);
+        assert_eq!(summary.diagnostics.len(), 1);
+        assert_eq!(summary.diagnostics[0].code, "unresolved_variable");
+        assert!(summary.diagnostics[0].message.contains("$cluster"));
+    }
+
+    #[test]
+    fn test_merge_user_vars_applies_config_and_cli_overrides() {
+        let mut vars = HashMap::new();
+        vars.insert("job".to_string(), "dashboard".to_string());
+        let mut config_vars = HashMap::new();
+        config_vars.insert("job".to_string(), "config".to_string());
+        config_vars.insert("instance".to_string(), "config-instance".to_string());
+
+        let pinned = merge_user_vars(
+            &mut vars,
+            Some(config_vars),
+            &[("job".to_string(), "cli".to_string())],
+        );
+
+        assert_eq!(vars.get("job"), Some(&"cli".to_string()));
+        assert_eq!(vars.get("instance"), Some(&"config-instance".to_string()));
+        assert!(pinned.contains("job"));
+        assert!(pinned.contains("instance"));
     }
 }
