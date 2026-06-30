@@ -118,7 +118,7 @@ This document provides a comprehensive feature-parity table between the [Grafana
 | `targets[].intervalFactor` | ❌ Not Implemented | |
 | `targets[].instant` | ✅ Supported | Uses Prometheus instant `query` when true; Gauge, BarGauge, and Table default to instant |
 | `targets[].format` | ❌ Not Implemented | Always treated as time_series |
-| `targets[].hide` | ❌ Not Implemented | All targets are visible; import diagnostics warn when hidden targets are ignored |
+| `targets[].hide` | ✅ Supported | Hidden targets are skipped during import |
 | `targets[].exemplar` | ❌ Not Implemented | |
 | `targets[].editorMode` | ⛔ Not Applicable | UI-only setting |
 
@@ -314,8 +314,7 @@ Based on user feedback, the following missing features are most commonly expecte
 2. **Broader unit formatting** (`fieldConfig.defaults.unit`) — Extend the current common-unit subset to more Grafana unit families
 3. **Reduce options** (`options.reduceOptions`) — Use min/max/mean/total instead of always using the latest value
 4. **Import diagnostics** — Warn clearly about skipped panel types and ignored high-impact fields
-5. **Hidden targets** (`targets[].hide`) — Hide helper queries that should not render as visible series
-6. **Additional panel types** — `text`, `piechart`, `histogram`, `logs`
+5. **Additional panel types** — `text`, `piechart`, `histogram`, `logs`
 
 ---
 

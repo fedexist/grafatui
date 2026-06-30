@@ -44,9 +44,8 @@ Prometheus query variables such as `label_values(up, instance)` and `query_resul
 
 Grafatui prints import warnings before starting the TUI when a dashboard uses
 important Grafana features that are skipped or ignored. Diagnostics include
-unsupported panel types, hidden targets, value mappings, reduce options,
-unresolved variables, and unsupported variable modifiers such as
-`${var:regex}`.
+unsupported panel types, value mappings, reduce options, unresolved variables,
+and unsupported variable modifiers such as `${var:regex}`.
 
 Run a non-interactive check with:
 
@@ -56,6 +55,20 @@ grafatui --validate --grafana-json ./dash.json
 
 Warnings do not make validation fail. A dashboard that can be parsed and
 imported exits successfully even if diagnostics are printed.
+
+Use `--strict` to make warnings fail validation, or `--format json` to emit a
+machine-readable summary:
+
+```bash
+grafatui --validate --strict --grafana-json ./dash.json
+grafatui --validate --format json --grafana-json ./dash.json
+```
+
+## Hidden Targets
+
+Grafatui honors `targets[].hide` by skipping hidden targets during import.
+Panels with a mix of hidden and visible targets render only the visible target
+queries.
 
 ## Query Modes
 
