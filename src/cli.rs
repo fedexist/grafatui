@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 
 /// Command-line arguments for Grafatui.
@@ -44,6 +44,14 @@ pub(crate) struct Args {
     /// Validate a Grafana dashboard import without starting the TUI
     #[arg(long)]
     pub(crate) validate: bool,
+
+    /// Fail validation when import diagnostics contain warnings
+    #[arg(long, requires = "validate")]
+    pub(crate) strict: bool,
+
+    /// Output format for --validate
+    #[arg(long, value_enum, default_value = "text", requires = "validate")]
+    pub(crate) format: ValidateFormat,
 
     /// Legacy UI tick rate in milliseconds; redraws now happen on input and data refresh
     #[arg(long, default_value = "250")]
@@ -104,6 +112,13 @@ pub(crate) enum Commands {
     Man,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+pub(crate) enum ValidateFormat {
+    #[default]
+    Text,
+    Json,
+}
+
 /// Helper to parse key=value pairs for CLI arguments.
 pub(crate) fn parse_key_val<T, U>(
     s: &str,
@@ -131,5 +146,22 @@ mod tests {
 
         assert!(args.validate);
         assert_eq!(args.grafana_json, Some(PathBuf::from("dashboard.json")));
+    }
+
+    #[test]
+    fn test_parse_validate_strict_and_json_format() {
+        let args = Args::parse_from([
+            "grafatui",
+            "--validate",
+            "--strict",
+            "--format",
+            "json",
+            "--grafana-json",
+            "dashboard.json",
+        ]);
+
+        assert!(args.validate);
+        assert!(args.strict);
+        assert_eq!(args.format, crate::cli::ValidateFormat::Json);
     }
 }

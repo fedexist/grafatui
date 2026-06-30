@@ -25,7 +25,7 @@ mod ui;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::Parser;
 use config::Config;
 use crossterm::{
@@ -34,6 +34,7 @@ use crossterm::{
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use serde::Serialize;
 use theme::Theme;
 
 mod cli;
@@ -82,11 +83,7 @@ async fn main() -> Result<()> {
         })?;
         let dashboard = grafana::load_grafana_dashboard(&path)?;
         let summary = validate_dashboard_import(dashboard, config.vars.clone(), &args.var);
-        print_import_diagnostics(&summary.diagnostics);
-        println!(
-            "Grafana dashboard is importable: {} ({} panel(s))",
-            summary.title, summary.panel_count
-        );
+        print_validation_summary(&summary, args.format, args.strict)?;
         return Ok(());
     }
 
@@ -267,7 +264,7 @@ struct ImportContext {
     diagnostics: Vec<grafana::ImportDiagnostic>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 struct ImportValidationSummary {
     title: String,
     panel_count: usize,
@@ -347,6 +344,39 @@ fn print_import_diagnostics(diagnostics: &[grafana::ImportDiagnostic]) {
             diagnostic.code, diagnostic.path, diagnostic.message
         );
     }
+}
+
+fn print_validation_summary(
+    summary: &ImportValidationSummary,
+    format: cli::ValidateFormat,
+    strict: bool,
+) -> Result<()> {
+    match format {
+        cli::ValidateFormat::Text => {
+            print_import_diagnostics(&summary.diagnostics);
+            if strict && !summary.diagnostics.is_empty() {
+                bail!(
+                    "validation failed with {} warning(s)",
+                    summary.diagnostics.len()
+                );
+            }
+            println!(
+                "Grafana dashboard is importable: {} ({} panel(s))",
+                summary.title, summary.panel_count
+            );
+        }
+        cli::ValidateFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(summary)?);
+            if strict && !summary.diagnostics.is_empty() {
+                bail!(
+                    "validation failed with {} warning(s)",
+                    summary.diagnostics.len()
+                );
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

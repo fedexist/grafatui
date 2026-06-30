@@ -15,7 +15,7 @@
  */
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 /// Result of importing a Grafana dashboard.
@@ -38,7 +38,7 @@ pub(crate) struct DashboardImport {
 }
 
 /// A warning produced while importing a Grafana dashboard.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct ImportDiagnostic {
     /// Stable diagnostic code.
     pub(crate) code: String,
@@ -450,11 +450,7 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>, path: &str) 
             for (target_idx, t) in p.targets.unwrap_or_default().into_iter().enumerate() {
                 let target_path = format!("{panel_path}.targets[{target_idx}]");
                 if t.hide == Some(true) {
-                    out.diagnostics.push(ImportDiagnostic::new(
-                        "ignored_field",
-                        format!("{target_path}.hide"),
-                        "`targets[].hide` is not supported yet; target will be imported as visible",
-                    ));
+                    continue;
                 }
                 if let Some(e) = t.expr {
                     exprs.push(e);
@@ -1189,7 +1185,7 @@ mod tests {
                     "type": "stat",
                     "title": "CPU",
                     "targets": [
-                        { "expr": "up", "hide": true }
+                        { "expr": "up" }
                     ],
                     "fieldConfig": {
                         "defaults": {
@@ -1218,11 +1214,45 @@ mod tests {
             .map(|diagnostic| (diagnostic.code.as_str(), diagnostic.path.as_str()))
             .collect();
 
-        assert!(diagnostics.contains(&("ignored_field", "panels[0].targets[0].hide")));
         assert!(
             diagnostics.contains(&("ignored_field", "panels[0].fieldConfig.defaults.mappings"))
         );
         assert!(diagnostics.contains(&("ignored_field", "panels[0].options.reduceOptions")));
+    }
+
+    #[test]
+    fn test_hidden_targets_are_not_imported_or_warned() {
+        let json = r#"{
+            "title": "Hidden Targets",
+            "panels": [
+                {
+                    "type": "timeseries",
+                    "title": "CPU",
+                    "targets": [
+                        { "expr": "helper_query", "hide": true },
+                        { "expr": "visible_query" }
+                    ]
+                }
+            ]
+        }"#;
+        let path = std::env::temp_dir().join("grafatui-hidden-targets-test.json");
+        std::fs::write(&path, json).unwrap();
+
+        let dashboard = load_grafana_dashboard(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        assert_eq!(dashboard.queries.len(), 1);
+        assert_eq!(dashboard.queries[0].exprs, vec!["visible_query"]);
+        assert_eq!(
+            dashboard.queries[0].expr_paths,
+            vec!["panels[0].targets[1].expr"]
+        );
+        assert!(
+            dashboard
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.path != "panels[0].targets[0].hide")
+        );
     }
 
     #[test]
