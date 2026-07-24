@@ -617,9 +617,11 @@ mod tests {
 
     #[test]
     fn test_should_overlay_points() {
-        let mut options = GraphOptions::default();
-        options.draw_style = GraphDrawStyle::Line;
-        options.show_points = GraphPointMode::Auto;
+        let mut options = GraphOptions {
+            draw_style: GraphDrawStyle::Line,
+            show_points: GraphPointMode::Auto,
+            ..GraphOptions::default()
+        };
         assert!(!should_overlay_points(&options));
 
         options.show_points = GraphPointMode::Always;

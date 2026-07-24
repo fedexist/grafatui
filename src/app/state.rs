@@ -79,16 +79,11 @@ pub(crate) enum PanelType {
 }
 
 /// Renderer-specific options carried by a generic panel.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) enum PanelOptions {
+    #[default]
     None,
     Graph(GraphOptions),
-}
-
-impl Default for PanelOptions {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 /// Graph/timeseries rendering options imported from Grafana.
@@ -411,18 +406,18 @@ impl AppState {
 
     /// Automatically scroll to ensure the selected panel is visible.
     pub(crate) fn scroll_to_selected_panel(&mut self) {
-        if let Some(panel) = self.panels.get(self.selected_panel) {
-            if let Some(grid) = panel.grid {
-                let py = grid.y;
-                let ph = grid.h;
-                let scroll_y = self.vertical_scroll as i32;
-                let visible_height = 20;
+        if let Some(panel) = self.panels.get(self.selected_panel)
+            && let Some(grid) = panel.grid
+        {
+            let py = grid.y;
+            let ph = grid.h;
+            let scroll_y = self.vertical_scroll as i32;
+            let visible_height = 20;
 
-                if py < scroll_y {
-                    self.vertical_scroll = py as usize;
-                } else if py + ph > scroll_y + visible_height {
-                    self.vertical_scroll = (py + ph - visible_height).max(0) as usize;
-                }
+            if py < scroll_y {
+                self.vertical_scroll = py as usize;
+            } else if py + ph > scroll_y + visible_height {
+                self.vertical_scroll = (py + ph - visible_height).max(0) as usize;
             }
         }
     }
@@ -596,10 +591,10 @@ impl AppState {
 
                         let mut pts = Vec::with_capacity(s.values.len());
                         for (ts, val) in s.values {
-                            if let Ok(y) = val.parse::<f64>() {
-                                if y.is_finite() {
-                                    pts.push((ts, y));
-                                }
+                            if let Ok(y) = val.parse::<f64>()
+                                && y.is_finite()
+                            {
+                                pts.push((ts, y));
                             }
                         }
                         panel_results.push(SeriesView {

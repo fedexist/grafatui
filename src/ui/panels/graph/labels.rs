@@ -207,7 +207,7 @@ fn centered_label_start(center: u16, label_width: u16, min_x: u16, max_x: u16) -
     // For even-length labels, bias one cell right so the visual midpoint better matches
     // the target chart column instead of consistently leaning left.
     let mut start_x = center.checked_sub(half_width)?;
-    if label_width % 2 == 0 {
+    if label_width.is_multiple_of(2) {
         start_x = start_x.saturating_add(1);
     }
     let end_x_exclusive = start_x.saturating_add(label_width);
