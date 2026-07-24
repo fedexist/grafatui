@@ -1,9 +1,11 @@
 use std::path::PathBuf;
 
+mod details;
 mod jsonl;
 mod model;
 mod projection;
 
+pub(crate) use details::format_cluster_detail_lines;
 pub(crate) use jsonl::{JsonlFileSource, SourcePoll};
 pub(crate) use model::{
     AnnotationEvent, AnnotationPanelContext, AnnotationSnapshot, AnnotationTarget,

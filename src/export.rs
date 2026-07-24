@@ -14,7 +14,9 @@
  * limitations under the License.
  */
 
-use crate::annotations::{AnnotationCluster, AnnotationPanelContext, cluster_events_by};
+use crate::annotations::{
+    AnnotationCluster, AnnotationPanelContext, cluster_events_by, format_cluster_detail_lines,
+};
 use crate::app::{AppMode, AppState, PanelState, PanelType, SeriesView, ThresholdMode};
 use crate::theme::Theme;
 use crate::ui;
@@ -664,6 +666,7 @@ fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
             cluster,
             plot.left,
             legend_top,
+            plot.width,
             &color_hex(app.theme.border_selected, "#f0d000"),
             out,
         );
@@ -740,10 +743,16 @@ fn render_annotation_details(
     cluster: &AnnotationCluster<'_>,
     left: f64,
     top: f64,
+    width: f64,
     color: &str,
     out: &mut String,
 ) {
-    let [heading, details] = annotation_detail_lines(cluster);
+    let character_budget = if width.is_finite() && width > 0.0 {
+        (width / SMALL_FONT_SIZE).floor() as usize
+    } else {
+        0
+    };
+    let [heading, details] = format_cluster_detail_lines(cluster, character_budget);
     for (row, line) in [heading, details].iter().enumerate() {
         write!(
             out,
@@ -753,38 +762,6 @@ fn render_annotation_details(
         )
         .unwrap();
     }
-}
-
-fn annotation_detail_lines(cluster: &AnnotationCluster<'_>) -> [String; 2] {
-    let first = cluster.events[0];
-    let details = cluster
-        .events
-        .iter()
-        .map(|event| {
-            if event.tags.is_empty() {
-                event.text.clone()
-            } else {
-                format!("{} [{}]", event.text, event.tags.join(", "))
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" · ");
-
-    let heading = if cluster.events.len() == 1 {
-        if first.time.timestamp_subsec_millis() == 0 {
-            first.time.format("%Y-%m-%d %H:%M:%S UTC").to_string()
-        } else {
-            first.time.format("%Y-%m-%d %H:%M:%S%.3f UTC").to_string()
-        }
-    } else {
-        format!(
-            "{} events near {}",
-            cluster.events.len(),
-            first.time.format("%Y-%m-%d %H:%M:%S UTC")
-        )
-    };
-
-    [heading, details]
 }
 
 fn render_stat_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &mut String) {
@@ -1618,12 +1595,31 @@ fn indexed_color_hex(value: u8) -> &'static str {
 }
 
 fn escape_xml(input: &str) -> String {
-    input
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
+    let mut escaped = String::with_capacity(input.len());
+    for character in input.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&apos;"),
+            character if is_valid_xml_1_0_character(character) => escaped.push(character),
+            _ => escaped.push(char::REPLACEMENT_CHARACTER),
+        }
+    }
+    escaped
+}
+
+fn is_valid_xml_1_0_character(character: char) -> bool {
+    matches!(
+        character,
+        '\u{9}'
+            | '\u{a}'
+            | '\u{d}'
+            | '\u{20}'..='\u{d7ff}'
+            | '\u{e000}'..='\u{fffd}'
+            | '\u{10000}'..='\u{10ffff}'
+    )
 }
 
 fn timestamp_id() -> String {
@@ -1715,6 +1711,16 @@ mod tests {
     }
 
     #[test]
+    fn test_escape_xml_replaces_invalid_xml_1_0_characters() {
+        assert_eq!(
+            escape_xml(
+                "\u{0}\u{1}\t\n\r \u{d7ff}\u{e000}\u{fffd}\u{fffe}\u{ffff}\u{10000}\u{10ffff}&"
+            ),
+            "��\t\n\r \u{d7ff}\u{e000}\u{fffd}��\u{10000}\u{10ffff}&amp;"
+        );
+    }
+
+    #[test]
     fn test_map_coordinates_respect_bounds() {
         let plot = PlotRect {
             left: 10.0,
@@ -1803,6 +1809,46 @@ mod tests {
         assert_eq!(svg.matches(r#"data-role="annotation-detail""#).count(), 2);
         assert!(svg.contains("3 events near 1970-01-01 00:00:50 UTC"));
         assert!(svg.contains("deploy · rollback · resolved"));
+    }
+
+    #[test]
+    fn graph_export_bounds_large_annotation_details_with_ellipsis() {
+        let mut app = test_app_with_panel_type(PanelType::Graph);
+        app.view_end_ts = 100;
+        app.range = std::time::Duration::from_secs(100);
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(
+            (0..100)
+                .map(|index| {
+                    crate::annotations::test_event_at(
+                        50.0,
+                        &format!("event-{index:03}-{}", "x".repeat(200)),
+                    )
+                })
+                .collect(),
+        );
+        app.cursor_x = Some(50.0);
+
+        let svg = render_svg(&app, Rect::new(0, 0, 120, 50));
+        let detail_lines = svg
+            .split(r#"data-role="annotation-detail""#)
+            .skip(1)
+            .map(|suffix| {
+                suffix
+                    .split_once('>')
+                    .unwrap()
+                    .1
+                    .split_once("</text>")
+                    .unwrap()
+                    .0
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(detail_lines.len(), 2);
+        assert!(detail_lines[0].starts_with("100 events near"));
+        assert!(detail_lines[1].starts_with("event-000-"));
+        assert!(detail_lines[1].ends_with('…'));
+        assert!(!detail_lines[1].contains("event-001-"));
+        assert!(detail_lines.iter().all(|line| line.chars().count() <= 120));
     }
 
     #[test]
@@ -2077,6 +2123,60 @@ mod tests {
         write_png(&svg, &path).unwrap();
 
         assert!(fs::metadata(&path).unwrap().len() > 0);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn annotation_xml_controls_are_safe_for_svg_png_and_recording() {
+        let dir = test_export_dir("annotation-xml");
+        let export = ExportOptions {
+            dir: dir.clone(),
+            format: ExportFormat::Both,
+            record_max_frames: 10,
+        };
+        let mut app = test_app(export);
+        app.view_end_ts = 100;
+        app.range = std::time::Duration::from_secs(100);
+        let mut event = crate::annotations::test_event_at(
+            50.0,
+            "deploy\t\n\r Ω😀\u{0}\u{1}\u{fffe}\u{ffff} complete",
+        );
+        event.tags = vec!["valid\u{10000}".to_string(), "bad\u{8}".to_string()];
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![event]);
+        app.cursor_x = Some(50.0);
+        let viewport = Rect::new(0, 0, 120, 50);
+
+        let svg = render_svg(&app, viewport);
+        assert!(!svg.chars().any(|character| {
+            matches!(
+                character,
+                '\u{0}' | '\u{1}' | '\u{8}' | '\u{fffe}' | '\u{ffff}'
+            )
+        }));
+        assert!(svg.contains("\t\n\r Ω😀"));
+        assert!(svg.contains("valid\u{10000}"));
+        assert!(svg.contains('�'));
+        let options = resvg::usvg::Options::default();
+        resvg::usvg::Tree::from_data(svg.as_bytes(), &options).unwrap();
+
+        toggle_recording(&mut app, viewport).unwrap();
+        let recording = app.recording.as_ref().unwrap();
+        assert_eq!(recording.frame_count, 1);
+        assert_eq!(recording.frames[0].files.len(), 2);
+        assert!(
+            fs::metadata(recording.dir.join("frame-000001.svg"))
+                .unwrap()
+                .len()
+                > 0
+        );
+        assert!(
+            fs::metadata(recording.dir.join("frame-000001.png"))
+                .unwrap()
+                .len()
+                > 0
+        );
+        toggle_recording(&mut app, viewport).unwrap();
+
         fs::remove_dir_all(dir).unwrap();
     }
 

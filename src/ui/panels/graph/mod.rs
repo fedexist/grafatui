@@ -21,9 +21,7 @@ mod labels;
 mod overlay;
 mod thresholds;
 
-use annotations::{
-    active_cluster, cluster_detail_lines, render_annotation_clusters, terminal_clusters,
-};
+use annotations::{active_cluster, render_annotation_clusters, terminal_clusters};
 use autogrid::{build_autogrid_datasets, calculate_time_grid_ticks, calculate_value_grid_ticks};
 use labels::{
     PlotBounds, YLabelArea, YLabelContext, render_autogrid_time_labels,
@@ -32,6 +30,7 @@ use labels::{
 use overlay::{merge_overlay_buffer, merge_overlay_buffer_preserving_data};
 use thresholds::{prepare_thresholds, render_raw_threshold_lines, threshold_marker};
 
+use crate::annotations::format_cluster_detail_lines;
 use crate::app::{AppState, PanelState};
 use crate::ui::format::{format_axis_time, get_hash_color};
 use ratatui::{
@@ -282,20 +281,19 @@ pub(super) fn render_graph_panel(
             .graph_type(graph_type_for_draw_style(graph_options.draw_style))
             .style(Style::default().fg(color))
             .data(data);
+        strong_data_datasets.push(
+            Dataset::default()
+                .name("")
+                .marker(ratatui::symbols::Marker::Braille)
+                .graph_type(graph_type_for_draw_style(graph_options.draw_style))
+                .style(Style::default().fg(color))
+                .data(data),
+        );
 
         let is_area_filled = graph_options.fill_opacity.unwrap_or(0) > 0
             && graph_options.draw_style == crate::app::GraphDrawStyle::Line;
 
         if is_area_filled {
-            strong_data_datasets.push(
-                Dataset::default()
-                    .name("")
-                    .marker(ratatui::symbols::Marker::Braille)
-                    .graph_type(GraphType::Line)
-                    .style(Style::default().fg(color))
-                    .data(data),
-            );
-
             dataset = dataset
                 .graph_type(GraphType::Area)
                 .fill_to_y(area_fill_baseline(y_bounds));
@@ -321,17 +319,14 @@ pub(super) fn render_graph_panel(
                 .style(Style::default().fg(Color::White))
                 .data(&cursor_dataset),
         );
-
-        if !strong_data_datasets.is_empty() {
-            strong_data_datasets.push(
-                Dataset::default()
-                    .name("")
-                    .marker(ratatui::symbols::Marker::Braille)
-                    .graph_type(GraphType::Line)
-                    .style(Style::default().fg(Color::White))
-                    .data(&cursor_dataset),
-            );
-        }
+        strong_data_datasets.push(
+            Dataset::default()
+                .name("")
+                .marker(ratatui::symbols::Marker::Braille)
+                .graph_type(GraphType::Line)
+                .style(Style::default().fg(Color::White))
+                .data(&cursor_dataset),
+        );
     }
 
     let time_range_secs = now - start;
@@ -404,9 +399,8 @@ pub(super) fn render_graph_panel(
 
     frame.render_widget(chart, chart_area);
 
-    let strong_data_buf = if strong_data_datasets.is_empty() {
-        None
-    } else {
+    let mut strong_data_buf = ratatui::buffer::Buffer::empty(chart_area);
+    if !strong_data_datasets.is_empty() {
         let strong_data_chart = Chart::new(strong_data_datasets)
             .x_axis(
                 Axis::default()
@@ -420,10 +414,8 @@ pub(super) fn render_graph_panel(
                     .bounds(y_bounds)
                     .labels(chart_y_labels.clone()),
             );
-        let mut buf = ratatui::buffer::Buffer::empty(chart_area);
-        strong_data_chart.render(chart_area, &mut buf);
-        Some(buf)
-    };
+        strong_data_chart.render(chart_area, &mut strong_data_buf);
+    }
 
     let chart_left = chart_plot_left(
         chart_area,
@@ -462,16 +454,7 @@ pub(super) fn render_graph_panel(
         let mut threshold_buf = ratatui::buffer::Buffer::empty(chart_area);
         threshold_chart.render(chart_area, &mut threshold_buf);
 
-        if let Some(strong_data_buf) = strong_data_buf.as_ref() {
-            merge_overlay_buffer_preserving_data(
-                frame,
-                &threshold_buf,
-                strong_data_buf,
-                plot_bounds,
-            );
-        } else {
-            merge_overlay_buffer(frame, &threshold_buf, plot_bounds);
-        }
+        merge_overlay_buffer_preserving_data(frame, &threshold_buf, &strong_data_buf, plot_bounds);
     }
 
     render_raw_threshold_lines(
@@ -480,7 +463,7 @@ pub(super) fn render_graph_panel(
         &threshold_data.labels,
         y_bounds,
         plot_bounds,
-        strong_data_buf.as_ref(),
+        Some(&strong_data_buf),
     );
 
     if show_autogrid && chart_top <= chart_bottom {
@@ -558,7 +541,7 @@ pub(super) fn render_graph_panel(
         frame,
         &annotation_clusters,
         plot_bounds,
-        strong_data_buf.as_ref(),
+        &strong_data_buf,
         theme.border_selected,
     );
 
@@ -573,11 +556,12 @@ pub(super) fn render_graph_panel(
     // Render custom legend
     if legend_height > 0 {
         if let Some(cluster) = active_annotation {
-            let details = cluster_detail_lines(cluster);
+            let [heading, details] =
+                format_cluster_detail_lines(cluster, usize::from(legend_area.width));
             let detail_style = Style::default().fg(theme.border_selected);
             let annotation_detail = Paragraph::new(vec![
-                Line::styled(details[0].clone(), detail_style),
-                Line::styled(details[1].clone(), detail_style),
+                Line::styled(heading, detail_style),
+                Line::styled(details, detail_style),
             ]);
             frame.render_widget(annotation_detail, legend_area);
         } else {
@@ -916,6 +900,92 @@ mod tests {
     }
 
     #[test]
+    fn annotation_replaces_vertical_autogrid_but_preserves_standard_line_data() {
+        let mut panel = area_fill_panel();
+        panel.series[0].points = vec![(0.0, 8.0), (60.0, 8.0), (100.0, 8.0)];
+        panel.options = PanelOptions::Graph(GraphOptions {
+            draw_style: GraphDrawStyle::Line,
+            show_points: GraphPointMode::Never,
+            fill_opacity: None,
+            axis_placement: GraphAxisPlacement::Visible,
+            line_interpolation: None,
+            stacking: GraphStackingMode::Off,
+        });
+        let mut app = area_fill_app(panel);
+        let mut baseline = Terminal::new(TestBackend::new(80, 20)).unwrap();
+        baseline
+            .draw(|frame| {
+                render_graph_panel(frame, Rect::new(0, 0, 80, 20), &app.panels[0], &app, None);
+            })
+            .unwrap();
+
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![
+            crate::annotations::test_event_at(60.0, "deploy"),
+        ]);
+        let mut annotated = Terminal::new(TestBackend::new(80, 20)).unwrap();
+        annotated
+            .draw(|frame| {
+                render_graph_panel(frame, Rect::new(0, 0, 80, 20), &app.panels[0], &app, None);
+            })
+            .unwrap();
+
+        let panel = &app.panels[0];
+        let y_bounds = calculate_y_bounds(panel);
+        let chart_area = Rect::new(0, 0, 80, 18);
+        let x_labels = vec![Span::raw("00:00:00"), Span::raw("00:01:40")];
+        let chart_y_labels = vec![Span::raw("0"), Span::raw("10")];
+        let plot = PlotBounds {
+            left: chart_plot_left(
+                chart_area,
+                chart_y_label_width(&chart_y_labels),
+                &x_labels,
+                true,
+            ),
+            right: chart_area.right(),
+            top: chart_area.top(),
+            bottom: chart_area.bottom().saturating_sub(2),
+        };
+        let marker_x = labels::value_to_plot_x(60.0, [0.0, 100.0], plot).unwrap();
+        let strong_cell = point_to_braille_cell(60.0, 8.0, [0.0, 100.0], y_bounds, plot).unwrap();
+        assert_eq!(
+            baseline
+                .backend()
+                .buffer()
+                .cell(strong_cell)
+                .unwrap()
+                .style()
+                .fg,
+            Some(app.theme.palette[0]),
+            "the collision cell must contain standard-line series data"
+        );
+
+        assert_eq!(
+            annotated
+                .backend()
+                .buffer()
+                .cell((marker_x, plot.top))
+                .unwrap()
+                .symbol(),
+            "•"
+        );
+        assert!(
+            (plot.top.saturating_add(1)..=plot.bottom).any(|y| {
+                annotated
+                    .backend()
+                    .buffer()
+                    .cell((marker_x, y))
+                    .is_some_and(|cell| cell.symbol() == "┊")
+            }),
+            "annotation marker should replace vertical autogrid cells"
+        );
+        assert_eq!(
+            annotated.backend().buffer().cell(strong_cell),
+            baseline.backend().buffer().cell(strong_cell),
+            "the standard line cell must remain visually dominant"
+        );
+    }
+
+    #[test]
     fn annotation_details_keep_one_logical_line_per_reserved_row() {
         let mut app = area_fill_app(area_fill_panel());
         app.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![
@@ -947,5 +1017,55 @@ mod tests {
             .collect::<String>();
         assert!(rendered.contains("3 events near"));
         assert!(rendered.contains("deploy"));
+    }
+
+    #[test]
+    fn annotation_details_are_bounded_by_terminal_legend_width() {
+        let mut app = area_fill_app(area_fill_panel());
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(
+            (0..100)
+                .map(|index| {
+                    crate::annotations::test_event_at(
+                        50.0,
+                        &format!("event-{index:03}-{}", "x".repeat(80)),
+                    )
+                })
+                .collect(),
+        );
+        app.cursor_x = Some(50.0);
+        let width = 36;
+        let height = 12;
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+
+        terminal
+            .draw(|frame| {
+                render_graph_panel(
+                    frame,
+                    Rect::new(0, 0, width, height),
+                    &app.panels[0],
+                    &app,
+                    app.cursor_x,
+                );
+            })
+            .unwrap();
+
+        let row_text = |y| {
+            (0..width)
+                .filter_map(|x| terminal.backend().buffer().cell((x, y)))
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        };
+        let heading = row_text(height - 2);
+        let details = row_text(height - 1);
+
+        assert!(heading.starts_with("100 events near"));
+        assert!(heading.ends_with('…'));
+        assert!(details.starts_with("event-000-"));
+        assert!(details.ends_with('…'));
+        assert!(!details.contains("event-001-"));
+        assert!(heading.chars().count() <= usize::from(width));
+        assert!(details.chars().count() <= usize::from(width));
     }
 }
