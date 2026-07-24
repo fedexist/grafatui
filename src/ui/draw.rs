@@ -181,13 +181,13 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &AppState) {
 fn build_footer_detail(app: &AppState) -> String {
     let mut parts = Vec::new();
 
-    if matches!(app.mode, AppMode::Inspect | AppMode::FullscreenInspect) {
-        if let Some(cx) = app.cursor_x {
-            let cursor_time = chrono::DateTime::from_timestamp(cx as i64, 0)
-                .map(|dt| dt.format("%H:%M:%S").to_string())
-                .unwrap_or_default();
-            parts.push(format!("Cursor: {cursor_time}"));
-        }
+    if matches!(app.mode, AppMode::Inspect | AppMode::FullscreenInspect)
+        && let Some(cx) = app.cursor_x
+    {
+        let cursor_time = chrono::DateTime::from_timestamp(cx as i64, 0)
+            .map(|dt| dt.format("%H:%M:%S").to_string())
+            .unwrap_or_default();
+        parts.push(format!("Cursor: {cursor_time}"));
     }
 
     if let Some(warning) = app.annotations.warning() {

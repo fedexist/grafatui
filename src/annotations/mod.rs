@@ -4,14 +4,15 @@ mod jsonl;
 mod model;
 mod projection;
 
-pub(crate) use jsonl::{AnnotationLoadError, JsonlFileSource, SourcePoll, parse_jsonl};
+pub(crate) use jsonl::{JsonlFileSource, SourcePoll};
 pub(crate) use model::{
     AnnotationEvent, AnnotationPanelContext, AnnotationSnapshot, AnnotationTarget,
 };
-pub(crate) use projection::{AnnotationCluster, cluster_events_by, events_for_panel};
+pub(crate) use projection::{AnnotationCluster, cluster_events_by};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AnnotationSourceStatus {
+    #[cfg(test)]
     Disabled,
     Loaded(usize),
     Warning(String),
@@ -76,6 +77,7 @@ impl AnnotationState {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn snapshot(&self) -> Option<&AnnotationSnapshot> {
         match self {
             Self::Disabled => None,
@@ -83,6 +85,7 @@ impl AnnotationState {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn status(&self) -> AnnotationSourceStatus {
         match self {
             Self::Disabled => AnnotationSourceStatus::Disabled,
@@ -100,10 +103,12 @@ impl AnnotationState {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn is_configured(&self) -> bool {
         matches!(self, Self::Active { .. })
     }
 
+    #[cfg(test)]
     pub(crate) fn is_visible(&self) -> bool {
         matches!(self, Self::Active { visible: true, .. })
     }

@@ -74,11 +74,11 @@ fn format_prom_duration(duration: Duration) -> String {
     const HOUR: u64 = 60 * 60;
     const MINUTE: u64 = 60;
 
-    if secs % DAY == 0 {
+    if secs.is_multiple_of(DAY) {
         format!("{}d", secs / DAY)
-    } else if secs % HOUR == 0 {
+    } else if secs.is_multiple_of(HOUR) {
         format!("{}h", secs / HOUR)
-    } else if secs % MINUTE == 0 {
+    } else if secs.is_multiple_of(MINUTE) {
         format!("{}m", secs / MINUTE)
     } else {
         format!("{}s", secs)

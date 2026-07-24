@@ -242,57 +242,57 @@ pub(crate) fn load_grafana_dashboard(path: &std::path::Path) -> Result<Dashboard
 
     let mut vars = HashMap::new();
     let mut query_vars = Vec::new();
-    if let Some(templating) = raw.templating {
-        if let Some(list) = templating.list {
-            for (var_idx, v) in list.into_iter().enumerate() {
-                // Heuristic: prefer 'value' over 'text', handle arrays by taking first or joining?
-                // Grafana 'current' value can be "All" or ["val1", "val2"].
-                // For simple PromQL substitution, we usually want the raw value.
-                // If it's "All", it might be $__all, which is tricky.
-                // Let's try to get a string representation.
-                let val = v
-                    .current
-                    .as_ref()
-                    .and_then(|c| c.value.as_ref())
-                    .or(v.current.as_ref().and_then(|c| c.text.as_ref()));
+    if let Some(templating) = raw.templating
+        && let Some(list) = templating.list
+    {
+        for (var_idx, v) in list.into_iter().enumerate() {
+            // Heuristic: prefer 'value' over 'text', handle arrays by taking first or joining?
+            // Grafana 'current' value can be "All" or ["val1", "val2"].
+            // For simple PromQL substitution, we usually want the raw value.
+            // If it's "All", it might be $__all, which is tricky.
+            // Let's try to get a string representation.
+            let val = v
+                .current
+                .as_ref()
+                .and_then(|c| c.value.as_ref())
+                .or(v.current.as_ref().and_then(|c| c.text.as_ref()));
 
-                if let Some(val) = val {
-                    let mut s = match val {
-                        serde_json::Value::String(s) => s.clone(),
-                        serde_json::Value::Array(arr) => {
-                            // If array, maybe join with pipe for regex? or just take first?
-                            // For now, let's take the first string we find.
-                            arr.iter()
-                                .find_map(|x| x.as_str())
-                                .unwrap_or("")
-                                .to_string()
-                        }
-                        serde_json::Value::Number(n) => n.to_string(),
-                        _ => String::new(),
-                    };
-
-                    // Handle $__all
-                    if s == "$__all" {
-                        // Use allValue if present, otherwise permissive regex
-                        s = v.all_value.clone().unwrap_or_else(|| ".*".to_string());
+            if let Some(val) = val {
+                let mut s = match val {
+                    serde_json::Value::String(s) => s.clone(),
+                    serde_json::Value::Array(arr) => {
+                        // If array, maybe join with pipe for regex? or just take first?
+                        // For now, let's take the first string we find.
+                        arr.iter()
+                            .find_map(|x| x.as_str())
+                            .unwrap_or("")
+                            .to_string()
                     }
+                    serde_json::Value::Number(n) => n.to_string(),
+                    _ => String::new(),
+                };
 
-                    if !s.is_empty() {
-                        vars.insert(v.name.clone(), s);
-                    }
+                // Handle $__all
+                if s == "$__all" {
+                    // Use allValue if present, otherwise permissive regex
+                    s = v.all_value.clone().unwrap_or_else(|| ".*".to_string());
                 }
 
-                if v.var_type.as_deref() == Some("query")
-                    && !v.current_is_all()
-                    && let Some(query) = v.query_string()
-                {
-                    query_vars.push(TemplateQueryVar {
-                        name: v.name,
-                        query,
-                        regex: v.regex.filter(|regex| !regex.trim().is_empty()),
-                        query_path: format!("templating.list[{var_idx}].query"),
-                    });
+                if !s.is_empty() {
+                    vars.insert(v.name.clone(), s);
                 }
+            }
+
+            if v.var_type.as_deref() == Some("query")
+                && !v.current_is_all()
+                && let Some(query) = v.query_string()
+            {
+                query_vars.push(TemplateQueryVar {
+                    name: v.name,
+                    query,
+                    regex: v.regex.filter(|regex| !regex.trim().is_empty()),
+                    query_path: format!("templating.list[{var_idx}].query"),
+                });
             }
         }
     }
@@ -467,78 +467,78 @@ fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>, path: &str) 
             let mut display = crate::ui::DisplayFormat::default();
             let mut graph_options = crate::app::GraphOptions::default();
 
-            if let Some(options) = p.options {
-                if options.reduce_options.is_some() {
-                    out.diagnostics.push(ImportDiagnostic::new(
-                        "ignored_field",
-                        format!("{panel_path}.options.reduceOptions"),
-                        "`options.reduceOptions` is not supported yet; Grafatui will use default value selection",
-                    ));
-                }
+            if let Some(options) = p.options
+                && options.reduce_options.is_some()
+            {
+                out.diagnostics.push(ImportDiagnostic::new(
+                    "ignored_field",
+                    format!("{panel_path}.options.reduceOptions"),
+                    "`options.reduceOptions` is not supported yet; Grafatui will use default value selection",
+                ));
             }
 
-            if let Some(fc) = p.field_config {
-                if let Some(defaults) = fc.defaults {
-                    if defaults.mappings.as_ref().is_some_and(non_empty_json_value) {
-                        out.diagnostics.push(ImportDiagnostic::new(
-                            "ignored_field",
-                            format!("{panel_path}.fieldConfig.defaults.mappings"),
-                            "`fieldConfig.defaults.mappings` is not supported yet; value mappings will be ignored",
-                        ));
+            if let Some(fc) = p.field_config
+                && let Some(defaults) = fc.defaults
+            {
+                if defaults.mappings.as_ref().is_some_and(non_empty_json_value) {
+                    out.diagnostics.push(ImportDiagnostic::new(
+                        "ignored_field",
+                        format!("{panel_path}.fieldConfig.defaults.mappings"),
+                        "`fieldConfig.defaults.mappings` is not supported yet; value mappings will be ignored",
+                    ));
+                }
+
+                graph_options = graph_options_from_custom(defaults.custom.as_ref());
+                display = crate::ui::DisplayFormat {
+                    unit: defaults.unit,
+                    decimals: defaults.decimals,
+                    no_value: defaults.no_value,
+                };
+                min = defaults.min;
+                max = defaults.max;
+                autogrid = defaults
+                    .custom
+                    .as_ref()
+                    .and_then(|custom| custom.axis_grid_show);
+
+                if let Some(th) = defaults.thresholds {
+                    let mode = match th.mode.as_deref() {
+                        Some("percentage") => crate::app::ThresholdMode::Percentage,
+                        _ => crate::app::ThresholdMode::Absolute,
+                    };
+
+                    let mut steps = Vec::new();
+                    if let Some(raw_steps) = th.steps {
+                        for s in raw_steps {
+                            let color = s.color.unwrap_or_else(|| "green".to_string());
+                            let parsed_color = crate::theme::parse_grafana_color(&color);
+                            steps.push(crate::app::ThresholdStep {
+                                value: s.value,
+                                color: parsed_color,
+                            });
+                        }
+                        steps.sort_by(|a, b| {
+                            let a_val = a.value.unwrap_or(f64::NEG_INFINITY);
+                            let b_val = b.value.unwrap_or(f64::NEG_INFINITY);
+                            a_val
+                                .partial_cmp(&b_val)
+                                .unwrap_or(std::cmp::Ordering::Equal)
+                        });
                     }
 
-                    graph_options = graph_options_from_custom(defaults.custom.as_ref());
-                    display = crate::ui::DisplayFormat {
-                        unit: defaults.unit,
-                        decimals: defaults.decimals,
-                        no_value: defaults.no_value,
-                    };
-                    min = defaults.min;
-                    max = defaults.max;
-                    autogrid = defaults
-                        .custom
-                        .as_ref()
-                        .and_then(|custom| custom.axis_grid_show);
+                    if !steps.is_empty() {
+                        let style = defaults
+                            .custom
+                            .as_ref()
+                            .and_then(|c| c.thresholds_style.as_ref())
+                            .and_then(|t| t.mode.clone())
+                            .unwrap_or_else(|| "line".to_string());
 
-                    if let Some(th) = defaults.thresholds {
-                        let mode = match th.mode.as_deref() {
-                            Some("percentage") => crate::app::ThresholdMode::Percentage,
-                            _ => crate::app::ThresholdMode::Absolute,
-                        };
-
-                        let mut steps = Vec::new();
-                        if let Some(raw_steps) = th.steps {
-                            for s in raw_steps {
-                                let color = s.color.unwrap_or_else(|| "green".to_string());
-                                let parsed_color = crate::theme::parse_grafana_color(&color);
-                                steps.push(crate::app::ThresholdStep {
-                                    value: s.value,
-                                    color: parsed_color,
-                                });
-                            }
-                            steps.sort_by(|a, b| {
-                                let a_val = a.value.unwrap_or(f64::NEG_INFINITY);
-                                let b_val = b.value.unwrap_or(f64::NEG_INFINITY);
-                                a_val
-                                    .partial_cmp(&b_val)
-                                    .unwrap_or(std::cmp::Ordering::Equal)
-                            });
-                        }
-
-                        if !steps.is_empty() {
-                            let style = defaults
-                                .custom
-                                .as_ref()
-                                .and_then(|c| c.thresholds_style.as_ref())
-                                .and_then(|t| t.mode.clone())
-                                .unwrap_or_else(|| "line".to_string());
-
-                            thresholds = Some(crate::app::Thresholds {
-                                mode,
-                                steps,
-                                style: Some(style),
-                            });
-                        }
+                        thresholds = Some(crate::app::Thresholds {
+                            mode,
+                            steps,
+                            style: Some(style),
+                        });
                     }
                 }
             }

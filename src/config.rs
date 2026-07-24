@@ -44,12 +44,12 @@ impl Config {
         let config_path = cli_path
             .map(|p| expand_path(&p))
             .or_else(Self::get_config_path);
-        if let Some(path) = config_path {
-            if path.exists() {
-                let content = fs::read_to_string(path)?;
-                let config: Config = toml::from_str(&content)?;
-                return Ok(config);
-            }
+        if let Some(path) = config_path
+            && path.exists()
+        {
+            let content = fs::read_to_string(path)?;
+            let config: Config = toml::from_str(&content)?;
+            return Ok(config);
         }
         Ok(Config::default())
     }
@@ -78,15 +78,15 @@ impl Config {
 /// Expands a path starting with `~` to the user's home directory.
 pub(crate) fn expand_path(path: &std::path::Path) -> PathBuf {
     let path_str = path.to_string_lossy();
-    if path_str.starts_with("~") {
-        if let Some(dirs) = directories::UserDirs::new() {
-            let home = dirs.home_dir();
-            if path_str == "~" {
-                return home.to_path_buf();
-            }
-            if path_str.starts_with("~/") || path_str.starts_with("~\\") {
-                return home.join(&path_str[2..]);
-            }
+    if path_str.starts_with("~")
+        && let Some(dirs) = directories::UserDirs::new()
+    {
+        let home = dirs.home_dir();
+        if path_str == "~" {
+            return home.to_path_buf();
+        }
+        if path_str.starts_with("~/") || path_str.starts_with("~\\") {
+            return home.join(&path_str[2..]);
         }
     }
     path.to_path_buf()

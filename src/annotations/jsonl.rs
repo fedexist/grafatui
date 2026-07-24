@@ -22,6 +22,7 @@ pub(crate) struct AnnotationLoadError {
 }
 
 impl AnnotationLoadError {
+    #[cfg(test)]
     pub(crate) fn line(&self) -> Option<usize> {
         self.line
     }

@@ -591,15 +591,15 @@ fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
     }
 
     // Area fills remain behind annotations so marker lines stay legible.
-    if graph_options.draw_style == crate::app::GraphDrawStyle::Line {
-        if let Some(opacity) = graph_area_opacity(&graph_options) {
-            for (index, series) in panel.series.iter().enumerate() {
-                if !series.visible {
-                    continue;
-                }
-                let color = color_hex(series_color(panel, &app.theme, index), "#00ff88");
-                render_graph_area(series, plot, y_bounds, x_bounds, &color, opacity, out);
+    if graph_options.draw_style == crate::app::GraphDrawStyle::Line
+        && let Some(opacity) = graph_area_opacity(&graph_options)
+    {
+        for (index, series) in panel.series.iter().enumerate() {
+            if !series.visible {
+                continue;
             }
+            let color = color_hex(series_color(panel, &app.theme, index), "#00ff88");
+            render_graph_area(series, plot, y_bounds, x_bounds, &color, opacity, out);
         }
     }
 
@@ -639,20 +639,21 @@ fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
         }
     }
 
-    if let Some(cursor_x) = app.cursor_x {
-        if cursor_x >= x_min && cursor_x <= x_max {
-            let x = map_x(cursor_x, x_bounds, plot);
-            draw_line(
-                out,
-                (x, plot.top),
-                (x, plot.bottom()),
-                LineStyle {
-                    color: "#ffffff",
-                    dash: Some("4 4"),
-                    width: 1.0,
-                },
-            );
-        }
+    if let Some(cursor_x) = app.cursor_x
+        && cursor_x >= x_min
+        && cursor_x <= x_max
+    {
+        let x = map_x(cursor_x, x_bounds, plot);
+        draw_line(
+            out,
+            (x, plot.top),
+            (x, plot.bottom()),
+            LineStyle {
+                color: "#ffffff",
+                dash: Some("4 4"),
+                width: 1.0,
+            },
+        );
     }
 
     let active_annotation =
@@ -1242,10 +1243,10 @@ fn cursor_values(panel: &PanelState, app: &AppState) -> std::collections::HashMa
             let db = (b.0 - cursor_x).abs();
             da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
         });
-        if let Some((ts, value)) = closest {
-            if (ts - cursor_x).abs() <= app.step.as_secs_f64() * 2.0 {
-                values.insert(series.name.clone(), *value);
-            }
+        if let Some((ts, value)) = closest
+            && (ts - cursor_x).abs() <= app.step.as_secs_f64() * 2.0
+        {
+            values.insert(series.name.clone(), *value);
         }
     }
     values
