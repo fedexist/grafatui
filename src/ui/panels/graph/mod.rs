@@ -66,6 +66,22 @@ fn is_y_axis_hidden(options: &crate::app::GraphOptions) -> bool {
     options.axis_placement == crate::app::GraphAxisPlacement::Hidden
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StrongDataMaskMode {
+    AreaFillOnly,
+    AllDrawStyles,
+}
+
+fn strong_data_mask_mode(
+    annotation_events: &[&crate::annotations::AnnotationEvent],
+) -> StrongDataMaskMode {
+    if annotation_events.is_empty() {
+        StrongDataMaskMode::AreaFillOnly
+    } else {
+        StrongDataMaskMode::AllDrawStyles
+    }
+}
+
 fn chart_plot_left(
     chart_area: Rect,
     y_label_width: u16,
@@ -171,6 +187,7 @@ pub(super) fn render_graph_panel(
         crate::annotations::AnnotationPanelContext { title: &p.title },
         [start, now],
     );
+    let strong_data_mask_mode = strong_data_mask_mode(&annotation_events);
 
     // If inspecting, find values at cursor
     let cursor_values: HashMap<String, f64> = if let Some(cx) = cursor_x {
@@ -281,17 +298,18 @@ pub(super) fn render_graph_panel(
             .graph_type(graph_type_for_draw_style(graph_options.draw_style))
             .style(Style::default().fg(color))
             .data(data);
-        strong_data_datasets.push(
-            Dataset::default()
-                .name("")
-                .marker(ratatui::symbols::Marker::Braille)
-                .graph_type(graph_type_for_draw_style(graph_options.draw_style))
-                .style(Style::default().fg(color))
-                .data(data),
-        );
-
         let is_area_filled = graph_options.fill_opacity.unwrap_or(0) > 0
             && graph_options.draw_style == crate::app::GraphDrawStyle::Line;
+        if is_area_filled || strong_data_mask_mode == StrongDataMaskMode::AllDrawStyles {
+            strong_data_datasets.push(
+                Dataset::default()
+                    .name("")
+                    .marker(ratatui::symbols::Marker::Braille)
+                    .graph_type(graph_type_for_draw_style(graph_options.draw_style))
+                    .style(Style::default().fg(color))
+                    .data(data),
+            );
+        }
 
         if is_area_filled {
             dataset = dataset
@@ -319,14 +337,18 @@ pub(super) fn render_graph_panel(
                 .style(Style::default().fg(Color::White))
                 .data(&cursor_dataset),
         );
-        strong_data_datasets.push(
-            Dataset::default()
-                .name("")
-                .marker(ratatui::symbols::Marker::Braille)
-                .graph_type(GraphType::Line)
-                .style(Style::default().fg(Color::White))
-                .data(&cursor_dataset),
-        );
+        if !strong_data_datasets.is_empty()
+            || strong_data_mask_mode == StrongDataMaskMode::AllDrawStyles
+        {
+            strong_data_datasets.push(
+                Dataset::default()
+                    .name("")
+                    .marker(ratatui::symbols::Marker::Braille)
+                    .graph_type(GraphType::Line)
+                    .style(Style::default().fg(Color::White))
+                    .data(&cursor_dataset),
+            );
+        }
     }
 
     let time_range_secs = now - start;
@@ -399,8 +421,10 @@ pub(super) fn render_graph_panel(
 
     frame.render_widget(chart, chart_area);
 
-    let mut strong_data_buf = ratatui::buffer::Buffer::empty(chart_area);
-    if !strong_data_datasets.is_empty() {
+    let strong_data_buf = if strong_data_datasets.is_empty() {
+        None
+    } else {
+        let mut strong_data_buf = ratatui::buffer::Buffer::empty(chart_area);
         let strong_data_chart = Chart::new(strong_data_datasets)
             .x_axis(
                 Axis::default()
@@ -415,7 +439,8 @@ pub(super) fn render_graph_panel(
                     .labels(chart_y_labels.clone()),
             );
         strong_data_chart.render(chart_area, &mut strong_data_buf);
-    }
+        Some(strong_data_buf)
+    };
 
     let chart_left = chart_plot_left(
         chart_area,
@@ -454,7 +479,16 @@ pub(super) fn render_graph_panel(
         let mut threshold_buf = ratatui::buffer::Buffer::empty(chart_area);
         threshold_chart.render(chart_area, &mut threshold_buf);
 
-        merge_overlay_buffer_preserving_data(frame, &threshold_buf, &strong_data_buf, plot_bounds);
+        if let Some(strong_data_buf) = strong_data_buf.as_ref() {
+            merge_overlay_buffer_preserving_data(
+                frame,
+                &threshold_buf,
+                strong_data_buf,
+                plot_bounds,
+            );
+        } else {
+            merge_overlay_buffer(frame, &threshold_buf, plot_bounds);
+        }
     }
 
     render_raw_threshold_lines(
@@ -463,7 +497,7 @@ pub(super) fn render_graph_panel(
         &threshold_data.labels,
         y_bounds,
         plot_bounds,
-        Some(&strong_data_buf),
+        strong_data_buf.as_ref(),
     );
 
     if show_autogrid && chart_top <= chart_bottom {
@@ -541,7 +575,7 @@ pub(super) fn render_graph_panel(
         frame,
         &annotation_clusters,
         plot_bounds,
-        &strong_data_buf,
+        strong_data_buf.as_ref(),
         theme.border_selected,
     );
 
@@ -640,6 +674,51 @@ mod tests {
             stacking: GraphStackingMode::Normal,
         };
         assert!(is_y_axis_hidden(&hidden));
+    }
+
+    #[test]
+    fn comprehensive_strong_data_mask_requires_visible_routed_annotations() {
+        let mut disabled = area_fill_app(area_fill_panel());
+        disabled.annotations = crate::annotations::AnnotationState::from_path(None);
+        let disabled_events = routed_annotation_events(&disabled);
+        assert!(disabled_events.is_empty());
+        assert_eq!(
+            strong_data_mask_mode(&disabled_events),
+            StrongDataMaskMode::AreaFillOnly
+        );
+
+        let mut hidden = area_fill_app(area_fill_panel());
+        hidden.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![
+            crate::annotations::test_event_at(50.0, "hidden"),
+        ]);
+        hidden.annotations.toggle_visibility();
+        let hidden_events = routed_annotation_events(&hidden);
+        assert!(hidden_events.is_empty());
+        assert_eq!(
+            strong_data_mask_mode(&hidden_events),
+            StrongDataMaskMode::AreaFillOnly
+        );
+
+        let mut outside = area_fill_app(area_fill_panel());
+        outside.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![
+            crate::annotations::test_event_at(101.0, "outside"),
+        ]);
+        let outside_events = routed_annotation_events(&outside);
+        assert!(outside_events.is_empty());
+        assert_eq!(
+            strong_data_mask_mode(&outside_events),
+            StrongDataMaskMode::AreaFillOnly
+        );
+
+        let mut visible = area_fill_app(area_fill_panel());
+        visible.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![
+            crate::annotations::test_event_at(50.0, "visible"),
+        ]);
+        let visible_events = routed_annotation_events(&visible);
+        assert_eq!(
+            strong_data_mask_mode(&visible_events),
+            StrongDataMaskMode::AllDrawStyles
+        );
     }
 
     #[test]
@@ -760,6 +839,16 @@ mod tests {
         app.view_end_ts = 100;
         app.autogrid_color = Color::Red;
         app
+    }
+
+    fn routed_annotation_events(app: &AppState) -> Vec<&crate::annotations::AnnotationEvent> {
+        let (start, end) = app.time_bounds();
+        app.annotations.events_for_panel(
+            crate::annotations::AnnotationPanelContext {
+                title: &app.panels[0].title,
+            },
+            [start, end],
+        )
     }
 
     #[test]

@@ -42,7 +42,7 @@ pub(super) fn render_annotation_clusters(
     frame: &mut Frame,
     clusters: &[AnnotationCluster<'_>],
     plot: PlotBounds,
-    strong_data: &ratatui::buffer::Buffer,
+    strong_data: Option<&ratatui::buffer::Buffer>,
     color: Color,
 ) {
     for cluster in clusters {
@@ -69,7 +69,7 @@ pub(super) fn render_annotation_clusters(
 
 fn render_marker_cell(
     frame: &mut Frame,
-    strong_data: &ratatui::buffer::Buffer,
+    strong_data: Option<&ratatui::buffer::Buffer>,
     x: u16,
     y: u16,
     marker: char,
@@ -78,9 +78,10 @@ fn render_marker_cell(
     let Some(destination) = frame.buffer_mut().cell_mut((x, y)) else {
         return;
     };
-    let Some(strong) = strong_data.cell((x, y)) else {
-        return;
-    };
+    let empty_strong = ratatui::buffer::Cell::default();
+    let strong = strong_data
+        .and_then(|buffer| buffer.cell((x, y)))
+        .unwrap_or(&empty_strong);
     overlay_marker_cell(destination, strong, marker, color);
 }
 
