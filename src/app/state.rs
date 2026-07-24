@@ -277,6 +277,8 @@ pub(crate) enum AppMode {
 pub(crate) struct AppState {
     /// Prometheus client for making requests.
     pub(crate) prometheus: prom::PromClient,
+    /// Optional external point-event state.
+    pub(crate) annotations: crate::annotations::AnnotationState,
     /// Current time range window.
     pub(crate) range: Duration,
     /// Query step resolution.
@@ -357,6 +359,7 @@ impl AppState {
     ) -> Self {
         Self {
             prometheus,
+            annotations: crate::annotations::AnnotationState::from_path(None),
             range,
             step,
             refresh_every,
@@ -487,6 +490,8 @@ impl AppState {
     }
 
     pub(crate) async fn refresh(&mut self) -> Result<()> {
+        self.annotations.refresh_if_changed().await;
+
         let range = self.range;
         let step = self.step;
 
@@ -625,6 +630,17 @@ impl AppState {
 mod tests {
     use super::*;
 
+    fn temp_annotation_path(name: &str) -> std::path::PathBuf {
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "grafatui-app-{name}-{}-{suffix}.jsonl",
+            std::process::id()
+        ))
+    }
+
     fn create_test_app() -> AppState {
         AppState::new(
             prom::PromClient::new("http://localhost:9090".to_string()),
@@ -650,6 +666,23 @@ mod tests {
         assert_eq!(app.selected_panel, 0);
 
         app.move_cursor(1);
+    }
+
+    #[tokio::test]
+    async fn refresh_reloads_annotations_without_panels() {
+        let path = temp_annotation_path("app-refresh");
+        std::fs::write(
+            &path,
+            "{\"time\":\"2026-07-23T14:30:00Z\",\"text\":\"deploy\"}\n",
+        )
+        .unwrap();
+        let mut app = create_test_app();
+        app.annotations = crate::annotations::AnnotationState::from_path(Some(path.clone()));
+
+        app.refresh().await.unwrap();
+
+        assert_eq!(app.annotations.snapshot().unwrap().len(), 1);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
