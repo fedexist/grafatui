@@ -122,41 +122,7 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &AppState) {
         if app.debug_bar { "on" } else { "off" }
     );
 
-    let mut detail = String::new();
-    if let Some(status) = &app.export_status {
-        detail = status.clone();
-    }
-    if app.debug_bar {
-        // Choose a debug panel: if we have grid, pick the top-left grid panel; otherwise pick the first panel
-        let debug_panel: Option<&PanelState> = if app.panels.iter().any(|p| p.grid.is_some()) {
-            app.panels
-                .iter()
-                .filter(|p| p.grid.is_some())
-                .min_by_key(|p| {
-                    let g = p.grid.unwrap();
-                    (g.y, g.x)
-                })
-        } else {
-            app.panels.first()
-        };
-
-        if let Some(p) = debug_panel {
-            let url = p.last_url.as_deref().unwrap_or("-");
-            detail = format!(
-                "last panel: {} | samples={} | url={} ",
-                p.title, p.last_samples, url
-            );
-        }
-    }
-
-    if app.mode == AppMode::Inspect {
-        if let Some(cx) = app.cursor_x {
-            let cursor_time = chrono::DateTime::from_timestamp(cx as i64, 0)
-                .map(|dt| dt.format("%H:%M:%S").to_string())
-                .unwrap_or_default();
-            detail = format!("Cursor: {} | {}", cursor_time, detail);
-        }
-    }
+    let detail = build_footer_detail(app);
 
     let footer = Paragraph::new(format!("{}\n{}", summary, detail)).wrap(Wrap { trim: true });
     frame.render_widget(footer, chunks[2]);
@@ -212,6 +178,52 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &AppState) {
     }
 }
 
+fn build_footer_detail(app: &AppState) -> String {
+    let mut parts = Vec::new();
+
+    if matches!(app.mode, AppMode::Inspect | AppMode::FullscreenInspect) {
+        if let Some(cx) = app.cursor_x {
+            let cursor_time = chrono::DateTime::from_timestamp(cx as i64, 0)
+                .map(|dt| dt.format("%H:%M:%S").to_string())
+                .unwrap_or_default();
+            parts.push(format!("Cursor: {cursor_time}"));
+        }
+    }
+
+    if let Some(warning) = app.annotations.warning() {
+        parts.push(format!("Annotations: {warning}"));
+    }
+
+    if let Some(status) = &app.export_status {
+        parts.push(status.clone());
+    }
+
+    if app.debug_bar {
+        // Choose a debug panel: if we have grid, pick the top-left grid panel; otherwise pick the first panel
+        let debug_panel: Option<&PanelState> = if app.panels.iter().any(|p| p.grid.is_some()) {
+            app.panels
+                .iter()
+                .filter(|p| p.grid.is_some())
+                .min_by_key(|p| {
+                    let g = p.grid.unwrap();
+                    (g.y, g.x)
+                })
+        } else {
+            app.panels.first()
+        };
+
+        if let Some(p) = debug_panel {
+            let url = p.last_url.as_deref().unwrap_or("-");
+            parts.push(format!(
+                "last panel: {} | samples={} | url={}",
+                p.title, p.last_samples, url
+            ));
+        }
+    }
+
+    parts.join(" | ")
+}
+
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
     let popup_layout = Layout::default()
         .direction(Direction::Vertical)
@@ -230,4 +242,47 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{export::ExportOptions, prom::PromClient, theme::Theme};
+
+    fn test_app() -> AppState {
+        AppState::new(
+            PromClient::new("http://localhost:9090".to_string()),
+            std::time::Duration::from_secs(300),
+            std::time::Duration::from_secs(5),
+            std::time::Duration::from_secs(1),
+            "Test".to_string(),
+            vec![],
+            0,
+            Theme::default(),
+            "dashed-line".to_string(),
+            ExportOptions::default(),
+        )
+    }
+
+    #[test]
+    fn footer_composes_annotation_warning_with_export_and_inspect_status() {
+        let mut app = test_app();
+        app.export_status = Some("Exported frame.svg".to_string());
+        app.mode = AppMode::Inspect;
+        app.cursor_x = Some(1_700_000_000.0);
+        app.annotations =
+            crate::annotations::AnnotationState::warning_for_test("events.jsonl:2: invalid time");
+
+        let detail = build_footer_detail(&app);
+
+        assert!(detail.contains("Cursor:"));
+        assert!(detail.contains("Annotations: events.jsonl:2: invalid time"));
+        assert!(detail.contains("Exported frame.svg"));
+    }
+
+    #[test]
+    fn footer_omits_annotation_status_when_disabled() {
+        let app = test_app();
+        assert!(!build_footer_detail(&app).contains("Annotations:"));
+    }
 }

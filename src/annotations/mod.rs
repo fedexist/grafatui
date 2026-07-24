@@ -140,6 +140,16 @@ impl AnnotationState {
             status: AnnotationSourceStatus::Loaded(event_count),
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn warning_for_test(message: &str) -> Self {
+        Self::Active {
+            source: None,
+            snapshot: AnnotationSnapshot::new(Vec::new()),
+            visible: true,
+            status: AnnotationSourceStatus::Warning(message.to_string()),
+        }
+    }
 }
 
 #[cfg(test)]
