@@ -15,7 +15,8 @@ pub(crate) struct AnnotationEvent {
 
 impl AnnotationEvent {
     pub(crate) fn timestamp_secs(&self) -> f64 {
-        self.time.timestamp_millis() as f64 / 1000.0
+        self.time.timestamp() as f64
+            + f64::from(self.time.timestamp_subsec_nanos()) / 1_000_000_000.0
     }
 }
 
@@ -82,5 +83,13 @@ mod tests {
             .collect();
 
         assert_eq!(texts, vec!["earlier", "first", "second"]);
+    }
+
+    #[test]
+    fn timestamp_secs_preserves_fraction_beyond_milliseconds() {
+        let event = event("2026-07-23T14:30:00.123456789Z", "deploy");
+        let expected = event.time.timestamp() as f64 + 0.123_456_789;
+
+        assert!((event.timestamp_secs() - expected).abs() < 1e-7);
     }
 }
