@@ -25,8 +25,9 @@ read-only; Grafatui does not create, edit, or otherwise write the file.
 ## JSONL Event Format
 
 The file contains one JSON object per line. Blank lines are ignored. Each event
-requires an RFC 3339 `time` and non-empty `text`; `tags` is optional, but every
-provided tag must be a non-empty string.
+requires `time` to be an RFC3339 string with an explicit timezone or offset
+(numeric timestamps are rejected) and non-empty `text`. `tags` is an optional
+array of non-empty strings.
 
 ```json
 {"time":"2026-07-23T14:30:00Z","text":"Deployed v2.4","tags":["deploy","production"]}
@@ -39,18 +40,22 @@ display shows less precision.
 
 ## Automatic Reload
 
-Grafatui checks the file during each normal refresh and reloads it when its
-metadata changes. You can therefore update the JSONL file while Grafatui is
-running without restarting it. Annotation loading is independent of Prometheus:
-annotation failures never fail startup or a Prometheus refresh.
+Grafatui checks the file metadata during each normal refresh, including while
+markers are hidden. When it changes, Grafatui reads, parses, and validates the
+full candidate file before atomically replacing the snapshot. A zero-byte file
+is a valid update that clears all events. You can therefore update the JSONL
+file while Grafatui is running without restarting it. Annotation loading is
+independent of Prometheus: annotation failures never fail startup or a
+Prometheus refresh.
 
 ## Rendering and Inspection
 
 Only `graph` and `timeseries` panels receive annotation markers. Press `a` to
 toggle external annotation marker visibility. Events that project to the same
-terminal column are shown as one counted marker; in inspection mode, moving the
-cursor onto that column shows the clustered events' timestamp, text, and tags
-inline.
+terminal column are shown as one counted marker: `•` for one event, decimal
+`2`–`9` for two through nine events, and `+` for 10 or more. In inspection
+mode, moving the cursor onto that column shows the clustered events' timestamp,
+text, and tags inline; multi-event details report the exact cluster count.
 
 Visible markers and active inline annotation details are included in SVG/PNG
 exports and changed-frame recordings.
