@@ -143,8 +143,8 @@ fn value_to_y_label_row(value: f64, y_bounds: [f64; 2], plot: PlotBounds) -> Opt
     value_to_plot_y(value, y_bounds, plot)
 }
 
-fn value_to_plot_x(value: f64, x_bounds: [f64; 2], plot: PlotBounds) -> Option<u16> {
-    if value <= x_bounds[0] || value >= x_bounds[1] || x_bounds[1] <= x_bounds[0] {
+pub(super) fn value_to_plot_x(value: f64, x_bounds: [f64; 2], plot: PlotBounds) -> Option<u16> {
+    if value < x_bounds[0] || value > x_bounds[1] || x_bounds[1] <= x_bounds[0] {
         return None;
     }
 
@@ -277,8 +277,23 @@ mod tests {
         };
 
         assert_eq!(value_to_plot_x(5.0, [0.0, 10.0], plot), Some(15));
-        assert_eq!(value_to_plot_x(0.0, [0.0, 10.0], plot), None);
-        assert_eq!(value_to_plot_x(10.0, [0.0, 10.0], plot), None);
+        assert_eq!(value_to_plot_x(0.0, [0.0, 10.0], plot), Some(10));
+        assert_eq!(value_to_plot_x(10.0, [0.0, 10.0], plot), Some(20));
+    }
+
+    #[test]
+    fn test_value_to_plot_x_includes_window_boundaries() {
+        let plot = PlotBounds {
+            left: 10,
+            right: 21,
+            top: 0,
+            bottom: 5,
+        };
+
+        assert_eq!(value_to_plot_x(0.0, [0.0, 100.0], plot), Some(10));
+        assert_eq!(value_to_plot_x(100.0, [0.0, 100.0], plot), Some(20));
+        assert_eq!(value_to_plot_x(-1.0, [0.0, 100.0], plot), None);
+        assert_eq!(value_to_plot_x(101.0, [0.0, 100.0], plot), None);
     }
 
     #[test]
