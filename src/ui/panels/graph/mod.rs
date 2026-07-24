@@ -14,12 +14,16 @@
  * limitations under the License.
  */
 
+mod annotations;
 mod autogrid;
 mod bounds;
 mod labels;
 mod overlay;
 mod thresholds;
 
+use annotations::{
+    active_cluster, cluster_detail_lines, render_annotation_clusters, terminal_clusters,
+};
 use autogrid::{build_autogrid_datasets, calculate_time_grid_ticks, calculate_value_grid_ticks};
 use labels::{
     PlotBounds, YLabelArea, YLabelContext, render_autogrid_time_labels,
@@ -162,6 +166,12 @@ pub(super) fn render_graph_panel(
 ) {
     let theme = &app.theme;
     let use_hash_colors = p.series.len() > theme.palette.len();
+    // Determine x bounds from the last refreshed query window.
+    let (start, now) = app.time_bounds();
+    let annotation_events = app.annotations.events_for_panel(
+        crate::annotations::AnnotationPanelContext { title: &p.title },
+        [start, now],
+    );
 
     // If inspecting, find values at cursor
     let cursor_values: HashMap<String, f64> = if let Some(cx) = cursor_x {
@@ -192,12 +202,13 @@ pub(super) fn render_graph_panel(
     };
 
     // Split inner area into chart and legend
-    // If we have series, reserve space for legend
-    let legend_height = if !p.series.is_empty() && area.height > 5 {
-        2
-    } else {
-        0
-    };
+    // If we have series or annotations, reserve space for legend or annotation details.
+    let legend_height =
+        if (!p.series.is_empty() || !annotation_events.is_empty()) && area.height > 5 {
+            2
+        } else {
+            0
+        };
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -206,9 +217,6 @@ pub(super) fn render_graph_panel(
 
     let chart_area = chunks[0];
     let legend_area = chunks[1];
-
-    // Determine x bounds from the last refreshed query window.
-    let (start, now) = app.time_bounds();
 
     // Calculate y_bounds once
     let y_bounds = calculate_y_bounds(p);
@@ -430,6 +438,9 @@ pub(super) fn render_graph_panel(
         top: chart_top,
         bottom: chart_bottom,
     };
+    let annotation_clusters = terminal_clusters(annotation_events, [start, now], plot_bounds);
+    let active_annotation =
+        active_cluster(&annotation_clusters, cursor_x, [start, now], plot_bounds);
 
     // Render threshold markers after chart rendering by merging only onto blank cells.
     // This guarantees data curves keep precedence wherever both map to the same terminal cell.
@@ -543,6 +554,14 @@ pub(super) fn render_graph_panel(
         );
     }
 
+    render_annotation_clusters(
+        frame,
+        &annotation_clusters,
+        plot_bounds,
+        strong_data_buf.as_ref(),
+        theme.border_selected,
+    );
+
     render_forced_point_markers(
         frame,
         &forced_point_markers,
@@ -553,8 +572,18 @@ pub(super) fn render_graph_panel(
 
     // Render custom legend
     if legend_height > 0 {
-        let legend = Paragraph::new(Line::from(legend_items)).wrap(Wrap { trim: true });
-        frame.render_widget(legend, legend_area);
+        if let Some(cluster) = active_annotation {
+            let details = cluster_detail_lines(cluster);
+            let detail_style = Style::default().fg(theme.border_selected);
+            let annotation_detail = Paragraph::new(vec![
+                Line::styled(details[0].clone(), detail_style),
+                Line::styled(details[1].clone(), detail_style),
+            ]);
+            frame.render_widget(annotation_detail, legend_area);
+        } else {
+            let legend = Paragraph::new(Line::from(legend_items)).wrap(Wrap { trim: true });
+            frame.render_widget(legend, legend_area);
+        }
     }
 }
 
@@ -848,5 +877,73 @@ mod tests {
 
         assert!(!visible_point_cells.is_empty());
         assert_eq!(visible_point_cells, expected_cells);
+    }
+
+    #[test]
+    fn annotation_cluster_renders_and_inspects_on_same_column() {
+        let mut app = area_fill_app(area_fill_panel());
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![
+            crate::annotations::test_event_at(50.0, "deploy"),
+            crate::annotations::test_event_at(50.1, "rollback"),
+            crate::annotations::test_event_at(50.2, "resolved"),
+        ]);
+        app.cursor_x = Some(50.0);
+        let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
+
+        terminal
+            .draw(|frame| {
+                render_graph_panel(
+                    frame,
+                    Rect::new(0, 0, 80, 20),
+                    &app.panels[0],
+                    &app,
+                    app.cursor_x,
+                );
+            })
+            .unwrap();
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("3 events near"));
+        assert!(rendered.contains("deploy"));
+    }
+
+    #[test]
+    fn annotation_details_keep_one_logical_line_per_reserved_row() {
+        let mut app = area_fill_app(area_fill_panel());
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![
+            crate::annotations::test_event_at(50.0, "deploy"),
+            crate::annotations::test_event_at(50.1, "rollback"),
+            crate::annotations::test_event_at(50.2, "resolved"),
+        ]);
+        app.cursor_x = Some(50.0);
+        let mut terminal = Terminal::new(TestBackend::new(30, 12)).unwrap();
+
+        terminal
+            .draw(|frame| {
+                render_graph_panel(
+                    frame,
+                    Rect::new(0, 0, 30, 12),
+                    &app.panels[0],
+                    &app,
+                    app.cursor_x,
+                );
+            })
+            .unwrap();
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("3 events near"));
+        assert!(rendered.contains("deploy"));
     }
 }
