@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+mod annotations;
 mod app;
 mod config;
 mod export;
