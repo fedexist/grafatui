@@ -247,6 +247,10 @@ tooltips.
 | `annotations` | ❌ Not Implemented | |
 | `annotations.list` | ❌ Not Implemented | |
 
+Grafatui external JSONL events are a separate, opt-in read-only source. They do
+not imply compatibility with Grafana annotation queries, APIs, `annotations`, or
+`annotations.list`.
+
 ---
 
 ## Data Links & Transformations

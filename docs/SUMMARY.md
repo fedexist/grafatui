@@ -5,6 +5,7 @@
 - [Installation](installation.md)
 - [Quick Start](quick-start.md)
 - [Configuration](configuration.md)
+- [External Annotations](annotations.md)
 - [Grafana Dashboard Import](grafana-dashboard-import.md)
 - [Exporting and Recording](exporting-and-recording.md)
 - [Keyboard and Mouse](keyboard-and-mouse.md)
