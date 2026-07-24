@@ -103,11 +103,99 @@ pub(crate) fn parse_jsonl(
     Ok(AnnotationSnapshot::new(events))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SourceFingerprint {
+    Missing,
+    Present {
+        len: u64,
+        modified: std::time::SystemTime,
+    },
+}
+
+#[derive(Debug)]
+pub(crate) enum SourcePoll {
+    Unchanged,
+    Loaded(AnnotationSnapshot),
+    Failed(AnnotationLoadError),
+}
+
+#[derive(Debug)]
+pub(crate) struct JsonlFileSource {
+    path: PathBuf,
+    last_seen: Option<SourceFingerprint>,
+}
+
+impl JsonlFileSource {
+    pub(crate) fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            last_seen: None,
+        }
+    }
+
+    pub(crate) async fn poll(&mut self) -> SourcePoll {
+        let fingerprint = match tokio::fs::metadata(&self.path).await {
+            Ok(metadata) => match metadata.modified() {
+                Ok(modified) => SourceFingerprint::Present {
+                    len: metadata.len(),
+                    modified,
+                },
+                Err(error) => return SourcePoll::Failed(self.io_error(error)),
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                SourceFingerprint::Missing
+            }
+            Err(error) => return SourcePoll::Failed(self.io_error(error)),
+        };
+
+        if self.last_seen.as_ref() == Some(&fingerprint) {
+            return SourcePoll::Unchanged;
+        }
+        self.last_seen = Some(fingerprint.clone());
+
+        match fingerprint {
+            SourceFingerprint::Missing => SourcePoll::Failed(AnnotationLoadError {
+                path: self.path.clone(),
+                line: None,
+                reason: "annotation file does not exist".to_string(),
+            }),
+            SourceFingerprint::Present { .. } => {
+                match tokio::fs::read_to_string(&self.path).await {
+                    Ok(input) => match parse_jsonl(&self.path, &input) {
+                        Ok(snapshot) => SourcePoll::Loaded(snapshot),
+                        Err(error) => SourcePoll::Failed(error),
+                    },
+                    Err(error) => SourcePoll::Failed(self.io_error(error)),
+                }
+            }
+        }
+    }
+
+    fn io_error(&self, error: std::io::Error) -> AnnotationLoadError {
+        AnnotationLoadError {
+            path: self.path.clone(),
+            line: None,
+            reason: format!("could not read annotation file: {error}"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
-    use super::parse_jsonl;
+    use super::{JsonlFileSource, SourcePoll, parse_jsonl};
+
+    fn temp_path(name: &str) -> PathBuf {
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "grafatui-annotations-{name}-{}-{suffix}.jsonl",
+            std::process::id()
+        ))
+    }
 
     #[test]
     fn parses_valid_jsonl_and_ignores_blank_lines_and_unknown_fields() {
@@ -159,5 +247,62 @@ mod tests {
                 .to_string()
                 .contains("tags must not contain empty strings")
         );
+    }
+
+    #[tokio::test]
+    async fn loads_only_after_metadata_changes() {
+        let path = temp_path("changed");
+        tokio::fs::write(
+            &path,
+            "{\"time\":\"2026-07-23T14:30:00Z\",\"text\":\"deploy\"}\n",
+        )
+        .await
+        .unwrap();
+        let mut source = JsonlFileSource::new(path.clone());
+
+        assert!(matches!(source.poll().await, SourcePoll::Loaded(snapshot) if snapshot.len() == 1));
+        assert!(matches!(source.poll().await, SourcePoll::Unchanged));
+
+        tokio::fs::write(&path, "").await.unwrap();
+        assert!(matches!(source.poll().await, SourcePoll::Loaded(snapshot) if snapshot.len() == 0));
+
+        tokio::fs::remove_file(path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn reports_missing_then_loads_when_file_appears() {
+        let path = temp_path("appears");
+        let mut source = JsonlFileSource::new(path.clone());
+
+        assert!(matches!(source.poll().await, SourcePoll::Failed(_)));
+        assert!(matches!(source.poll().await, SourcePoll::Unchanged));
+
+        tokio::fs::write(
+            &path,
+            "{\"time\":\"2026-07-23T14:30:00Z\",\"text\":\"deploy\"}\n",
+        )
+        .await
+        .unwrap();
+        assert!(matches!(source.poll().await, SourcePoll::Loaded(snapshot) if snapshot.len() == 1));
+
+        tokio::fs::remove_file(path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn invalid_replacement_is_reported_as_failed() {
+        let path = temp_path("invalid");
+        tokio::fs::write(
+            &path,
+            "{\"time\":\"2026-07-23T14:30:00Z\",\"text\":\"deploy\"}\n",
+        )
+        .await
+        .unwrap();
+        let mut source = JsonlFileSource::new(path.clone());
+        assert!(matches!(source.poll().await, SourcePoll::Loaded(_)));
+
+        tokio::fs::write(&path, "{\"time\":").await.unwrap();
+        assert!(matches!(source.poll().await, SourcePoll::Failed(_)));
+
+        tokio::fs::remove_file(path).await.unwrap();
     }
 }
