@@ -33,6 +33,9 @@ grafatui-recording-<timestamp>/
 
 If `--export-format png` or `both` is selected, matching PNG files are written too.
 
+When external annotations are visible, their markers and any active inline
+annotation details are included in exports and changed-frame recordings.
+
 ## Recording Limits
 
 Limit the number of changed frames in one recording:
