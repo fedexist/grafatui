@@ -29,6 +29,7 @@ pub(crate) struct Config {
     pub(crate) step: Option<String>,
     pub(crate) theme: Option<String>,
     pub(crate) grafana_json: Option<PathBuf>,
+    pub(crate) annotations_file: Option<PathBuf>,
     pub(crate) threshold_marker: Option<String>,
     pub(crate) export_dir: Option<PathBuf>,
     pub(crate) export_format: Option<crate::export::ExportFormat>,
@@ -104,6 +105,7 @@ mod tests {
             export_format = "svg"
             autogrid = false
             autogrid_color = "gray"
+            annotations_file = "~/events.jsonl"
         "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(
@@ -115,6 +117,10 @@ mod tests {
         assert_eq!(config.export_format, Some(crate::export::ExportFormat::Svg));
         assert_eq!(config.autogrid, Some(false));
         assert_eq!(config.autogrid_color, Some("gray".to_string()));
+        assert_eq!(
+            config.annotations_file,
+            Some(PathBuf::from("~/events.jsonl"))
+        );
     }
 
     #[test]
