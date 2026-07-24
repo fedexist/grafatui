@@ -196,6 +196,29 @@ mod tests {
     }
 
     #[test]
+    fn test_capture_recording_after_annotation_change_writes_frame() {
+        let dir = test_export_dir("annotation-recording");
+        let export = ExportOptions {
+            dir: dir.clone(),
+            format: ExportFormat::Svg,
+            record_max_frames: 10,
+        };
+        let mut app = test_app(export);
+        let backend = TestBackend::new(100, 40);
+        let terminal = Terminal::new(backend).unwrap();
+
+        export::toggle_recording(&mut app, Rect::new(0, 0, 100, 40)).unwrap();
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![
+            crate::annotations::test_event_at(app.view_end_ts as f64, "deploy"),
+        ]);
+
+        capture_recording_after_change(&terminal, &mut app).unwrap();
+
+        assert_eq!(app.recording.as_ref().unwrap().frame_count, 2);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn test_finalize_recording_before_quit_writes_manifest() {
         let dir = test_export_dir("quit-recording");
         let export = ExportOptions {
