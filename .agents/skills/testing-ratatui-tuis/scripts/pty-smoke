@@ -11,7 +11,6 @@ import pty
 import select
 import signal
 import struct
-import subprocess
 import sys
 import termios
 import time
@@ -28,6 +27,9 @@ KEYS = {
 }
 # Keep ANSI transcripts deterministic and bounded even when a child writes forever.
 MAX_TRANSCRIPT_BYTES = 1_048_576
+# Yield to deadline and child-status handling after a deterministic read slice.
+MAX_READS_PER_ITERATION = 4
+MAX_READ_BYTES_PER_ITERATION = 65_536
 
 
 class ScenarioError(ValueError):
@@ -126,11 +128,13 @@ def append_transcript(output: bytearray, chunk: bytes) -> bool:
 
 
 def read_available(fd: int, output: bytearray) -> tuple[bool, bool]:
-    """Drain nonblocking PTY data; return (is_open, transcript_truncated)."""
+    """Read one bounded nonblocking PTY slice and report its state."""
     truncated = False
-    while True:
+    reads = 0
+    remaining_bytes = MAX_READ_BYTES_PER_ITERATION
+    while reads < MAX_READS_PER_ITERATION and remaining_bytes > 0:
         try:
-            chunk = os.read(fd, 65536)
+            chunk = os.read(fd, min(65536, remaining_bytes))
         except BlockingIOError:
             return True, truncated
         except OSError as error:
@@ -139,67 +143,23 @@ def read_available(fd: int, output: bytearray) -> tuple[bool, bool]:
             raise
         if not chunk:
             return False, truncated
+        reads += 1
+        remaining_bytes -= len(chunk)
         truncated = append_transcript(output, chunk) or truncated
 
-
-def descendant_pids(root_pid: int) -> list[int]:
-    """Return only processes whose current parent chain leads to root_pid."""
-    if root_pid <= 0:
-        return []
-    process_table = subprocess.run(
-        ["ps", "-axo", "pid=,ppid="],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if process_table.returncode != 0:
-        return []
-    children = {}
-    for line in process_table.stdout.splitlines():
-        fields = line.split()
-        if len(fields) != 2:
-            continue
-        try:
-            pid, parent_pid = (int(field) for field in fields)
-        except ValueError:
-            continue
-        if pid > 0 and parent_pid > 0:
-            children.setdefault(parent_pid, []).append(pid)
-
-    descendants = []
-    pending = [root_pid]
-    seen = {root_pid}
-    while pending:
-        parent_pid = pending.pop()
-        for child_pid in children.get(parent_pid, []):
-            if child_pid in seen:
-                continue
-            seen.add(child_pid)
-            descendants.append(child_pid)
-            pending.append(child_pid)
-    return descendants
+    return True, truncated
 
 
-def signal_timeout_targets(root_pid: int, signal_number: int) -> None:
-    """Signal the live child group and its currently verified descendant tree."""
+def signal_child_process_group(root_pid: int, signal_number: int) -> None:
+    """Signal only the live PTY child session; detached daemons are excluded."""
     if root_pid <= 0:
         raise RuntimeError("invalid child PID")
-    # Snapshot immediately before signalling: every individual target has a
-    # current parent chain to root_pid, while killpg is safe because root_pid
-    # is still the live PTY child's process-group leader.
-    descendants = descendant_pids(root_pid)
-    for descendant_pid in reversed(descendants):
-        try:
-            os.kill(descendant_pid, signal_number)
-        except ProcessLookupError:
-            pass
     try:
+        if os.getsid(root_pid) != root_pid or os.getpgid(root_pid) != root_pid:
+            raise RuntimeError("PTY child is not its session and process-group leader")
         os.killpg(root_pid, signal_number)
     except ProcessLookupError:
-        try:
-            os.kill(root_pid, signal_number)
-        except ProcessLookupError:
-            pass
+        pass
 
 
 def status_exit_code(status: int) -> int:
@@ -255,7 +215,7 @@ def run_scenario(scenario: dict, command: list[str]) -> tuple[bytes, dict]:
 
             if child_status is None and not timed_out and now >= deadline:
                 timed_out = True
-                signal_timeout_targets(pid, signal.SIGTERM)
+                signal_child_process_group(pid, signal.SIGTERM)
                 terminate_deadline = now + 1
             elif (
                 child_status is None
@@ -263,7 +223,7 @@ def run_scenario(scenario: dict, command: list[str]) -> tuple[bytes, dict]:
                 and terminate_deadline is not None
                 and now >= terminate_deadline
             ):
-                signal_timeout_targets(pid, signal.SIGKILL)
+                signal_child_process_group(pid, signal.SIGKILL)
                 terminate_deadline = None
 
             waited_pid, status = os.waitpid(pid, os.WNOHANG)
@@ -299,7 +259,7 @@ def run_scenario(scenario: dict, command: list[str]) -> tuple[bytes, dict]:
         if child_status is None:
             waited_pid, status = os.waitpid(pid, os.WNOHANG)
             if waited_pid == 0:
-                os.kill(pid, signal.SIGKILL)
+                signal_child_process_group(pid, signal.SIGKILL)
                 _, status = os.waitpid(pid, 0)
             child_status = status
         os.close(master_fd)

@@ -31,7 +31,6 @@ import pathlib, subprocess, sys, time
 pid_path = pathlib.Path(sys.argv[1])
 descendant = subprocess.Popen(
     [sys.executable, "-c", "import time; time.sleep(30)"],
-    start_new_session=True,
 )
 pid_path.write_text(str(descendant.pid), encoding="utf-8")
 time.sleep(30)
@@ -77,7 +76,7 @@ class PtySmokeTests(unittest.TestCase):
         path.write_text(json.dumps(scenario), encoding="utf-8")
         return path
 
-    def run_runner(self, scenario_path, output_ansi, output_result, command):
+    def run_runner(self, scenario_path, output_ansi, output_result, command, timeout=None):
         return subprocess.run(
             [
                 str(SCRIPT),
@@ -93,6 +92,7 @@ class PtySmokeTests(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
+            timeout=timeout,
         )
 
     def test_runs_child_at_requested_size_and_records_ansi_lifecycle(self):
@@ -165,7 +165,7 @@ class PtySmokeTests(unittest.TestCase):
 
         self.assertIn(b"BYTE=13", raw)
 
-    def test_timeout_terminates_new_session_descendant(self):
+    def test_timeout_terminates_process_group_descendant(self):
         scenario = {"cols": 80, "rows": 24, "timeout_ms": 300, "steps": []}
         with tempfile.TemporaryDirectory() as directory:
             scenario_path = self.write_scenario(directory, scenario)
@@ -189,6 +189,42 @@ class PtySmokeTests(unittest.TestCase):
             finally:
                 terminate_pid(descendant_pid)
 
+    def test_timeout_is_not_starved_by_continuous_pty_output(self):
+        scenario = {"cols": 80, "rows": 24, "timeout_ms": 250, "steps": []}
+        with tempfile.TemporaryDirectory() as directory:
+            scenario_path = self.write_scenario(directory, scenario)
+            output_ansi = pathlib.Path(directory) / "session.ansi"
+            output_result = pathlib.Path(directory) / "result.json"
+            child_pid_path = pathlib.Path(directory) / "writer.pid"
+            started = time.monotonic()
+            try:
+                result = self.run_runner(
+                    scenario_path,
+                    output_ansi,
+                    output_result,
+                    [
+                        "/bin/sh",
+                        "-c",
+                        'echo "$$" > "$1"; exec yes',
+                        "pty-writer",
+                        str(child_pid_path),
+                    ],
+                    timeout=1.5,
+                )
+            except subprocess.TimeoutExpired:
+                self.fail("runner did not return while the PTY remained readable")
+            finally:
+                if child_pid_path.exists():
+                    terminate_pid(int(child_pid_path.read_text(encoding="utf-8")))
+            duration = time.monotonic() - started
+
+            self.assertEqual(result.returncode, 124, result.stderr)
+            recorded = json.loads(output_result.read_text(encoding="utf-8"))
+
+        self.assertLess(duration, 1.0)
+        self.assertTrue(recorded["timed_out"])
+        self.assertTrue(recorded["transcript_truncated"])
+
     def test_truncates_noisy_transcript_at_documented_limit(self):
         runner = load_runner_module()
         scenario = {"cols": 80, "rows": 24, "timeout_ms": 3000, "steps": []}
@@ -210,6 +246,28 @@ class PtySmokeTests(unittest.TestCase):
         self.assertTrue(recorded["transcript_truncated"])
         self.assertEqual(len(raw), runner.MAX_TRANSCRIPT_BYTES)
 
+    def test_limits_reads_per_iteration_when_pty_stays_readable(self):
+        runner = load_runner_module()
+        reads = 0
+        original_read = runner.os.read
+
+        def readable_until_budget(fd, size):
+            nonlocal reads
+            reads += 1
+            if reads > 10:
+                raise BlockingIOError()
+            return b"x" * min(size, 1024)
+
+        runner.os.read = readable_until_budget
+        try:
+            is_open, truncated = runner.read_available(1, bytearray())
+        finally:
+            runner.os.read = original_read
+
+        self.assertTrue(is_open)
+        self.assertFalse(truncated)
+        self.assertLessEqual(reads, 4)
+
     def test_encodes_named_keys(self):
         runner = load_runner_module()
         expected = {
@@ -225,6 +283,12 @@ class PtySmokeTests(unittest.TestCase):
         for key, encoded in expected.items():
             with self.subTest(key=key):
                 self.assertEqual(runner.encode_step({"after_ms": 0, "key": key}), encoded)
+
+    def test_does_not_import_process_table_for_timeout_cleanup(self):
+        runner = load_runner_module()
+
+        self.assertFalse(hasattr(runner, "descendant_pids"))
+        self.assertFalse(hasattr(runner, "subprocess"))
 
 
 if __name__ == "__main__":
