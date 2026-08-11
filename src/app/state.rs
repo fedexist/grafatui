@@ -485,7 +485,16 @@ impl AppState {
     }
 
     pub(crate) async fn refresh(&mut self) -> Result<()> {
-        self.annotations.refresh_if_changed().await;
+        let annotations_changed = self.annotations.refresh_if_changed().await;
+        if annotations_changed {
+            let eligible_titles = self
+                .panels
+                .iter()
+                .filter(|panel| panel.panel_type == PanelType::Graph)
+                .map(|panel| panel.title.clone())
+                .collect::<Vec<_>>();
+            self.annotations.reconcile_targets(&eligible_titles);
+        }
 
         let range = self.range;
         let step = self.step;
@@ -651,6 +660,28 @@ mod tests {
         )
     }
 
+    fn test_panel(title: &str, panel_type: PanelType) -> PanelState {
+        PanelState {
+            title: title.to_string(),
+            exprs: vec![],
+            legends: vec![],
+            query_modes: vec![],
+            series: vec![],
+            last_error: None,
+            last_url: None,
+            last_samples: 0,
+            grid: None,
+            y_axis_mode: YAxisMode::Auto,
+            panel_type,
+            thresholds: None,
+            min: None,
+            max: None,
+            autogrid: None,
+            display: crate::ui::DisplayFormat::default(),
+            options: PanelOptions::None,
+        }
+    }
+
     #[tokio::test]
     async fn test_empty_panels() {
         let mut app = create_test_app();
@@ -677,6 +708,41 @@ mod tests {
         app.refresh().await.unwrap();
 
         assert_eq!(app.annotations.snapshot().unwrap().len(), 1);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn refresh_reconciles_annotation_targets() {
+        let path = temp_annotation_path("target-reconciliation");
+        std::fs::write(
+            &path,
+            concat!(
+                r#"{"time":"2026-08-11T14:30:00Z","text":"cpu","panel_titles":["CPU"]}"#,
+                "\n",
+                r#"{"time":"2026-08-11T14:31:00Z","text":"stat","panel_titles":["OnlyStat"]}"#,
+                "\n",
+                r#"{"time":"2026-08-11T14:32:00Z","text":"missing","panel_titles":["Missing"]}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+        let mut app = create_test_app();
+        app.panels = vec![
+            test_panel("CPU", PanelType::Graph),
+            test_panel("CPU", PanelType::Graph),
+            test_panel("OnlyStat", PanelType::Stat),
+        ];
+        app.annotations = crate::annotations::AnnotationState::from_path(Some(path.clone()));
+
+        app.refresh().await.unwrap();
+
+        assert_eq!(
+            app.annotations.footer_status(),
+            Some(
+                "target \"CPU\" matches 2 graph/timeseries panels; applied to all (+2 more)"
+                    .to_string()
+            )
+        );
         std::fs::remove_file(path).unwrap();
     }
 
