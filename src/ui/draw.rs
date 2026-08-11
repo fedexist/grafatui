@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-use super::layout::{calculate_grid_layout, calculate_two_column_layout};
+use super::layout::{calculate_grid_layout, calculate_two_column_layout, centered_rect};
 use super::panels::render_panel;
 use crate::app::{AppMode, AppState, PanelState};
 use humantime::format_duration;
@@ -190,6 +190,8 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
         }
         frame.render_stateful_widget(list, chunks[1], &mut list_state);
     }
+
+    super::render_annotation_modal(frame, app);
 }
 
 fn build_footer_detail(app: &AppState) -> String {
@@ -236,26 +238,6 @@ fn build_footer_detail(app: &AppState) -> String {
     }
 
     parts.join(" | ")
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
 }
 
 #[cfg(test)]
