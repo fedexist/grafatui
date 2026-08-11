@@ -300,7 +300,7 @@ pub(crate) fn render_svg(app: &AppState, viewport: Rect) -> String {
         };
         let selected = index == app.selected_panel;
         let panel_rect = scaled_rect(rect);
-        render_panel(app, panel, panel_rect, selected, &mut out);
+        render_panel(app, index, panel, panel_rect, selected, &mut out);
     }
 
     render_footer(app, &mut out, width, height, &text, &border);
@@ -366,6 +366,7 @@ fn render_footer(
 
 fn render_panel(
     app: &AppState,
+    panel_index: usize,
     panel: &PanelState,
     rect: PlotRect,
     selected: bool,
@@ -417,7 +418,9 @@ fn render_panel(
     }
 
     match panel.panel_type {
-        PanelType::Graph | PanelType::Unknown => render_graph_panel(app, panel, inner, out),
+        PanelType::Graph | PanelType::Unknown => {
+            render_graph_panel(app, panel_index, panel, inner, out)
+        }
         PanelType::Stat => render_stat_panel(app, panel, inner, out),
         PanelType::Gauge => render_gauge_panel(app, panel, inner, out),
         PanelType::BarGauge => render_bar_gauge_panel(app, panel, inner, out),
@@ -426,7 +429,13 @@ fn render_panel(
     }
 }
 
-fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &mut String) {
+fn render_graph_panel(
+    app: &AppState,
+    panel_index: usize,
+    panel: &PanelState,
+    rect: PlotRect,
+    out: &mut String,
+) {
     if rect.width < 120.0 || rect.height < 80.0 {
         return;
     }
@@ -438,6 +447,7 @@ fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
             .annotations
             .events_for_panel(
                 AnnotationPanelContext {
+                    index: panel_index,
                     title: &panel.title,
                 },
                 [x_min, x_max],
@@ -606,7 +616,7 @@ fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
     }
 
     let annotation_clusters = if annotations_enabled {
-        render_graph_annotations(app, panel, plot, x_bounds, out)
+        render_graph_annotations(app, panel_index, panel, plot, x_bounds, out)
     } else {
         Vec::new()
     };
@@ -677,6 +687,7 @@ fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
 
 fn render_graph_annotations<'a>(
     app: &'a AppState,
+    panel_index: usize,
     panel: &PanelState,
     plot: PlotRect,
     x_bounds: [f64; 2],
@@ -684,6 +695,7 @@ fn render_graph_annotations<'a>(
 ) -> Vec<AnnotationCluster<'a>> {
     let events = app.annotations.events_for_panel(
         AnnotationPanelContext {
+            index: panel_index,
             title: &panel.title,
         },
         x_bounds,

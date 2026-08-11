@@ -274,6 +274,8 @@ pub(crate) struct AppState {
     pub(crate) prometheus: prom::PromClient,
     /// Optional external point-event state.
     pub(crate) annotations: crate::annotations::AnnotationState,
+    /// Owned active annotation cluster produced by the selected panel's latest draw.
+    pub(crate) rendered_annotation_cluster: Option<Vec<crate::annotations::AnnotationEvent>>,
     /// Current time range window.
     pub(crate) range: Duration,
     /// Query step resolution.
@@ -355,6 +357,7 @@ impl AppState {
         Self {
             prometheus,
             annotations: crate::annotations::AnnotationState::from_path(None),
+            rendered_annotation_cluster: None,
             range,
             step,
             refresh_every,

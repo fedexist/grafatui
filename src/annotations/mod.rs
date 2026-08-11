@@ -150,10 +150,8 @@ impl AnnotationState {
         }
     }
 
-    pub(crate) fn effective_filter(
-        &self,
-        _panel: AnnotationPanelContext<'_>,
-    ) -> Option<&TagFilter> {
+    pub(crate) fn effective_filter(&self, panel: AnnotationPanelContext<'_>) -> Option<&TagFilter> {
+        let _panel_index = panel.index;
         self.applied_filter()
     }
 
@@ -378,14 +376,23 @@ mod tests {
         assert_eq!(state.applied_filter().unwrap().summary(), "deploy");
         assert_eq!(
             state
-                .effective_filter(AnnotationPanelContext { title: "CPU" })
+                .effective_filter(AnnotationPanelContext {
+                    index: 0,
+                    title: "CPU",
+                })
                 .unwrap()
                 .summary(),
             "deploy"
         );
         assert_eq!(
             state
-                .events_for_panel(AnnotationPanelContext { title: "CPU" }, [0.0, 100.0])
+                .events_for_panel(
+                    AnnotationPanelContext {
+                        index: 0,
+                        title: "CPU",
+                    },
+                    [0.0, 100.0],
+                )
                 .iter()
                 .map(|event| event.text.as_str())
                 .collect::<Vec<_>>(),
@@ -393,7 +400,13 @@ mod tests {
         );
         assert!(
             state
-                .events_for_panel(AnnotationPanelContext { title: "Memory" }, [0.0, 100.0])
+                .events_for_panel(
+                    AnnotationPanelContext {
+                        index: 1,
+                        title: "Memory",
+                    },
+                    [0.0, 100.0],
+                )
                 .is_empty()
         );
     }

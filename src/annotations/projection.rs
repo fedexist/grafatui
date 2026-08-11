@@ -67,7 +67,10 @@ mod tests {
         let events = events_for_panel(
             &snapshot,
             &TagFilter::default(),
-            AnnotationPanelContext { title: "CPU" },
+            AnnotationPanelContext {
+                index: 0,
+                title: "CPU",
+            },
             [0.0, 100.0],
         );
 
@@ -94,13 +97,19 @@ mod tests {
         let cpu = events_for_panel(
             &snapshot,
             &filter,
-            AnnotationPanelContext { title: "CPU" },
+            AnnotationPanelContext {
+                index: 0,
+                title: "CPU",
+            },
             [0.0, 100.0],
         );
         let memory = events_for_panel(
             &snapshot,
             &filter,
-            AnnotationPanelContext { title: "Memory" },
+            AnnotationPanelContext {
+                index: 1,
+                title: "Memory",
+            },
             [0.0, 100.0],
         );
 
@@ -131,7 +140,10 @@ mod tests {
         let events = events_for_panel(
             &snapshot,
             &TagFilter::default(),
-            AnnotationPanelContext { title: "CPU" },
+            AnnotationPanelContext {
+                index: 0,
+                title: "CPU",
+            },
             [0.0, 100.0],
         );
 
