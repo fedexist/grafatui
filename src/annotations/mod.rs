@@ -4,13 +4,21 @@ mod details;
 mod diagnostics;
 mod filter;
 mod jsonl;
+mod modal;
 mod model;
 mod projection;
 
 pub(crate) use details::format_cluster_detail_lines;
+#[allow(unused_imports)]
+pub(crate) use details::format_event_time;
 pub(crate) use diagnostics::{AnnotationTargetWarning, target_warnings};
-pub(crate) use filter::{TagCatalogueEntry, TagFilter, tag_catalogue};
+#[allow(unused_imports)]
+pub(crate) use filter::tag_catalogue;
+pub(crate) use filter::{TagCatalogueEntry, TagFilter};
 pub(crate) use jsonl::{JsonlFileSource, SourcePoll};
+pub(crate) use modal::TagFilterModalState;
+#[allow(unused_imports)]
+pub(crate) use modal::{AnnotationModal, ClusterModalState, visible_range};
 pub(crate) use model::{
     AnnotationEvent, AnnotationPanelContext, AnnotationSnapshot, AnnotationTarget,
 };
@@ -137,6 +145,7 @@ impl AnnotationState {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn set_filter(&mut self, next: TagFilter) {
         if let Self::Active { filter, .. } = self {
             *filter = next;
@@ -147,6 +156,19 @@ impl AnnotationState {
         match self {
             Self::Active { filter, .. } => Some(filter),
             Self::Disabled => None,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn new_tag_filter_modal(&self) -> Option<TagFilterModalState> {
+        match self {
+            Self::Disabled => None,
+            Self::Active {
+                snapshot, filter, ..
+            } => Some(TagFilterModalState::new(
+                filter::tag_catalogue(snapshot, filter),
+                filter.clone(),
+            )),
         }
     }
 

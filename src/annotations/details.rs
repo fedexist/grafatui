@@ -25,7 +25,7 @@ pub(crate) fn format_cluster_detail_lines(
     ]
 }
 
-fn format_event_time(event: &AnnotationEvent) -> String {
+pub(crate) fn format_event_time(event: &AnnotationEvent) -> String {
     if event.time.timestamp_subsec_millis() == 0 {
         event.time.format("%Y-%m-%d %H:%M:%S UTC").to_string()
     } else {
