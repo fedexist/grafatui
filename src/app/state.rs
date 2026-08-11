@@ -276,6 +276,8 @@ pub(crate) struct AppState {
     pub(crate) annotations: crate::annotations::AnnotationState,
     /// Owned active annotation cluster produced by the selected panel's latest draw.
     pub(crate) rendered_annotation_cluster: Option<Vec<crate::annotations::AnnotationEvent>>,
+    /// Active annotation exploration modal, if any.
+    pub(crate) annotation_modal: Option<crate::annotations::AnnotationModal>,
     /// Current time range window.
     pub(crate) range: Duration,
     /// Query step resolution.
@@ -358,6 +360,7 @@ impl AppState {
             prometheus,
             annotations: crate::annotations::AnnotationState::from_path(None),
             rendered_annotation_cluster: None,
+            annotation_modal: None,
             range,
             step,
             refresh_every,
@@ -484,6 +487,21 @@ impl AppState {
             self.cursor_x = Some(new_x.max(start_ts).min(end_ts));
         } else {
             self.cursor_x = Some((start_ts + end_ts) / 2.0);
+        }
+    }
+
+    pub(crate) fn open_rendered_annotation_cluster(&mut self) {
+        let Some(events) = self.rendered_annotation_cluster.clone() else {
+            return;
+        };
+        if let Some(modal) = crate::annotations::ClusterModalState::new(events) {
+            self.annotation_modal = Some(crate::annotations::AnnotationModal::Cluster(modal));
+        }
+    }
+
+    pub(crate) fn open_tag_filter_modal(&mut self) {
+        if let Some(modal) = self.annotations.new_tag_filter_modal() {
+            self.annotation_modal = Some(crate::annotations::AnnotationModal::TagFilter(modal));
         }
     }
 
@@ -711,6 +729,41 @@ mod tests {
         app.refresh().await.unwrap();
 
         assert_eq!(app.annotations.snapshot().unwrap().len(), 1);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn reload_preserves_open_cluster_modal() {
+        let path = temp_annotation_path("open-cluster-reload");
+        std::fs::write(
+            &path,
+            "{\"time\":\"2026-07-23T14:30:00Z\",\"text\":\"initial\"}\n",
+        )
+        .unwrap();
+        let mut app = create_test_app();
+        app.annotations = crate::annotations::AnnotationState::from_path(Some(path.clone()));
+        app.refresh().await.unwrap();
+        app.rendered_annotation_cluster =
+            Some(app.annotations.snapshot().unwrap().events().to_vec());
+        app.open_rendered_annotation_cluster();
+
+        std::fs::write(
+            &path,
+            "{\"time\":\"2026-07-23T14:31:00Z\",\"text\":\"replacement event\"}\n",
+        )
+        .unwrap();
+        app.refresh().await.unwrap();
+
+        assert_eq!(
+            app.annotations.snapshot().unwrap().events()[0].text,
+            "replacement event"
+        );
+        let Some(crate::annotations::AnnotationModal::Cluster(modal)) =
+            app.annotation_modal.as_ref()
+        else {
+            panic!("cluster modal should remain open");
+        };
+        assert_eq!(modal.events()[0].text, "initial");
         std::fs::remove_file(path).unwrap();
     }
 

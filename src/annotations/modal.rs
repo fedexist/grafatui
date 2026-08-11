@@ -3,20 +3,17 @@ use std::ops::Range;
 use super::{AnnotationEvent, TagCatalogueEntry, TagFilter};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) enum AnnotationModal {
     Cluster(ClusterModalState),
     TagFilter(TagFilterModalState),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) struct ClusterModalState {
     events: Vec<AnnotationEvent>,
     selected: usize,
 }
 
-#[allow(dead_code)]
 impl ClusterModalState {
     pub(crate) fn new(events: Vec<AnnotationEvent>) -> Option<Self> {
         (!events.is_empty()).then_some(Self {
@@ -55,14 +52,12 @@ impl ClusterModalState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) struct TagFilterModalState {
     entries: Vec<TagCatalogueEntry>,
     selected: usize,
     draft: TagFilter,
 }
 
-#[allow(dead_code)]
 impl TagFilterModalState {
     pub(crate) fn new(entries: Vec<TagCatalogueEntry>, draft: TagFilter) -> Self {
         Self {
@@ -99,7 +94,6 @@ impl TagFilterModalState {
     }
 }
 
-#[allow(dead_code)]
 pub(crate) fn visible_range(total: usize, selected: usize, rows: usize) -> Range<usize> {
     if total == 0 || rows == 0 {
         return 0..0;
@@ -109,7 +103,6 @@ pub(crate) fn visible_range(total: usize, selected: usize, rows: usize) -> Range
     start..start.saturating_add(rows).min(total)
 }
 
-#[allow(dead_code)]
 fn moved_index(current: usize, len: usize, delta: isize) -> usize {
     if len == 0 {
         return 0;

@@ -23,7 +23,6 @@ impl TagFilter {
         self.selected.is_empty()
     }
 
-    #[allow(dead_code)]
     pub(crate) fn selected(&self) -> &BTreeSet<String> {
         &self.selected
     }
@@ -32,27 +31,23 @@ impl TagFilter {
         self.selected.iter().cloned().collect::<Vec<_>>().join("|")
     }
 
-    #[allow(dead_code)]
     pub(crate) fn toggle(&mut self, tag: &str) {
         if !self.selected.remove(tag) {
             self.selected.insert(tag.to_string());
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn clear(&mut self) {
         self.selected.clear();
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) struct TagCatalogueEntry {
     pub(crate) tag: String,
     pub(crate) count: usize,
 }
 
-#[allow(dead_code)]
 pub(crate) fn tag_catalogue(
     snapshot: &AnnotationSnapshot,
     filter: &TagFilter,
