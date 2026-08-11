@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+"""Render a normalized Ratatui buffer capture as deterministic SVG or PNG."""
+
+import argparse
+import html
+import json
+import pathlib
+import re
+import shutil
+import subprocess
+import sys
+from typing import Optional
+
+
+COLOR = re.compile(r"#[0-9a-fA-F]{6}\Z")
+MODIFIERS = {"bold", "dim", "italic", "underlined", "reversed", "crossed_out"}
+
+
+class CaptureError(ValueError):
+    """Raised when a capture does not meet the normalized buffer contract."""
+
+
+def load_capture(path: pathlib.Path) -> dict:
+    with path.open(encoding="utf-8") as source:
+        capture = json.load(source)
+    if not isinstance(capture, dict):
+        raise CaptureError("capture must be a JSON object")
+    return capture
+
+
+def require_positive_integer(value, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise CaptureError(f"{name} must be a positive integer")
+    return value
+
+
+def require_coordinate(value, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise CaptureError(f"{name} must be an integer")
+    return value
+
+
+def require_color(value, name: str) -> str:
+    if not isinstance(value, str) or not COLOR.fullmatch(value):
+        raise CaptureError(f"{name} must be a #rrggbb color")
+    return value
+
+
+def validate_capture(capture: dict) -> None:
+    if not isinstance(capture, dict):
+        raise CaptureError("capture must be an object")
+    if capture.get("version") != 1:
+        raise CaptureError("version must be 1")
+
+    width = require_positive_integer(capture.get("width"), "width")
+    height = require_positive_integer(capture.get("height"), "height")
+    require_positive_integer(capture.get("cell_width"), "cell_width")
+    require_positive_integer(capture.get("cell_height"), "cell_height")
+    require_color(capture.get("default_fg"), "default_fg")
+    require_color(capture.get("default_bg"), "default_bg")
+
+    cells = capture.get("cells")
+    if not isinstance(cells, list):
+        raise CaptureError("cells must be a list")
+
+    coordinates = set()
+    for cell in cells:
+        if not isinstance(cell, dict):
+            raise CaptureError("cell must be an object")
+        x = require_coordinate(cell.get("x"), "cell x")
+        y = require_coordinate(cell.get("y"), "cell y")
+        coordinate = (x, y)
+        if not 0 <= x < width or not 0 <= y < height:
+            raise CaptureError(f"cell coordinate out of bounds: ({x}, {y})")
+        if coordinate in coordinates:
+            raise CaptureError(f"duplicate cell coordinate: ({x}, {y})")
+        coordinates.add(coordinate)
+        if not isinstance(cell.get("symbol"), str):
+            raise CaptureError("cell symbol must be a string")
+        require_color(cell.get("fg"), "cell fg")
+        require_color(cell.get("bg"), "cell bg")
+        modifiers = cell.get("modifiers")
+        if not isinstance(modifiers, list) or any(
+            not isinstance(modifier, str) or modifier not in MODIFIERS
+            for modifier in modifiers
+        ):
+            raise CaptureError("cell modifiers must contain only supported modifiers")
+
+    cursor = capture.get("cursor")
+    if cursor is not None:
+        if not isinstance(cursor, dict):
+            raise CaptureError("cursor must be an object")
+        x = require_coordinate(cursor.get("x"), "cursor x")
+        y = require_coordinate(cursor.get("y"), "cursor y")
+        if not 0 <= x < width or not 0 <= y < height:
+            raise CaptureError(f"cursor coordinate out of bounds: ({x}, {y})")
+
+
+def text_attributes(cell: dict) -> str:
+    modifiers = set(cell["modifiers"])
+    foreground = cell["fg"]
+    background = cell["bg"]
+    if "reversed" in modifiers:
+        foreground, background = background, foreground
+    attributes = [f'fill="{foreground}"']
+    if "bold" in modifiers:
+        attributes.append('font-weight="bold"')
+    if "dim" in modifiers:
+        attributes.append('opacity="0.6"')
+    if "italic" in modifiers:
+        attributes.append('font-style="italic"')
+    decorations = []
+    if "underlined" in modifiers:
+        decorations.append("underline")
+    if "crossed_out" in modifiers:
+        decorations.append("line-through")
+    if decorations:
+        attributes.append(f'text-decoration="{" ".join(decorations)}"')
+    return " ".join(attributes)
+
+
+def render_capture(capture: dict, font_family: str) -> str:
+    validate_capture(capture)
+    width = capture["width"]
+    height = capture["height"]
+    cell_width = capture["cell_width"]
+    cell_height = capture["cell_height"]
+    pixel_width = width * cell_width
+    pixel_height = height * cell_height
+    font = html.escape(font_family, quote=True)
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        (
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{pixel_width}" '
+            f'height="{pixel_height}" viewBox="0 0 {pixel_width} {pixel_height}">'
+        ),
+        f'<rect x="0" y="0" width="{pixel_width}" height="{pixel_height}" fill="{capture["default_bg"]}"/>',
+        f'<g font-family="{font}" font-size="{cell_height}" xml:space="preserve">',
+    ]
+    for cell in sorted(capture["cells"], key=lambda item: (item["y"], item["x"])):
+        x = cell["x"] * cell_width
+        y = cell["y"] * cell_height
+        foreground = cell["fg"]
+        background = cell["bg"]
+        if "reversed" in cell["modifiers"]:
+            foreground, background = background, foreground
+        lines.append(
+            f'<rect x="{x}" y="{y}" width="{cell_width}" height="{cell_height}" fill="{background}"/>'
+        )
+        lines.append(
+            f'<text x="{x}" y="{(cell["y"] + 1) * cell_height - 4}" '
+            f'{text_attributes(cell)}>{html.escape(cell["symbol"], quote=True)}</text>'
+        )
+    lines.append("</g>")
+    cursor = capture.get("cursor")
+    if cursor is not None:
+        lines.append(
+            f'<rect class="cursor" x="{cursor["x"] * cell_width + 0.5}" '
+            f'y="{cursor["y"] * cell_height + 0.5}" width="{cell_width - 1}" '
+            f'height="{cell_height - 1}" fill="none" stroke="{capture["default_fg"]}" '
+            'stroke-width="1"/>'
+        )
+    lines.append("</svg>")
+    return "\n".join(lines) + "\n"
+
+
+def find_chromium(explicit: Optional[str]) -> Optional[str]:
+    if explicit:
+        return shutil.which(explicit)
+    for name in ("chromium", "chromium-browser", "google-chrome"):
+        chromium = shutil.which(name)
+        if chromium:
+            return chromium
+    return None
+
+
+def rasterize(
+    svg_path: pathlib.Path,
+    png_path: pathlib.Path,
+    chromium: str,
+    width: int,
+    height: int,
+) -> None:
+    subprocess.run(
+        [
+            chromium,
+            "--headless",
+            "--disable-gpu",
+            "--hide-scrollbars",
+            "--force-device-scale-factor=1",
+            f"--window-size={width},{height}",
+            f"--screenshot={png_path.resolve()}",
+            svg_path.resolve().as_uri(),
+        ],
+        check=True,
+        timeout=30,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--input", type=pathlib.Path, required=True)
+    parser.add_argument("--svg", type=pathlib.Path, required=True)
+    parser.add_argument("--png", type=pathlib.Path)
+    parser.add_argument("--chromium")
+    parser.add_argument("--font-family", default="DejaVu Sans Mono, monospace")
+    arguments = parser.parse_args()
+
+    try:
+        capture = load_capture(arguments.input)
+        validate_capture(capture)
+        arguments.svg.write_text(
+            render_capture(capture, arguments.font_family), encoding="utf-8"
+        )
+        if arguments.png:
+            chromium = find_chromium(arguments.chromium)
+            if chromium is None:
+                raise CaptureError("Chromium executable not found; cannot write PNG")
+            rasterize(
+                arguments.svg,
+                arguments.png,
+                chromium,
+                capture["width"] * capture["cell_width"],
+                capture["height"] * capture["cell_height"],
+            )
+    except (
+        CaptureError,
+        OSError,
+        json.JSONDecodeError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+    ) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
