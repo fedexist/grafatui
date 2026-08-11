@@ -1,11 +1,13 @@
 use std::path::PathBuf;
 
 mod details;
+mod filter;
 mod jsonl;
 mod model;
 mod projection;
 
 pub(crate) use details::format_cluster_detail_lines;
+pub(crate) use filter::{TagCatalogueEntry, TagFilter, tag_catalogue};
 pub(crate) use jsonl::{JsonlFileSource, SourcePoll};
 pub(crate) use model::{
     AnnotationEvent, AnnotationPanelContext, AnnotationSnapshot, AnnotationTarget,
@@ -26,6 +28,7 @@ pub(crate) enum AnnotationState {
     Active {
         source: Option<JsonlFileSource>,
         snapshot: AnnotationSnapshot,
+        filter: TagFilter,
         visible: bool,
         status: AnnotationSourceStatus,
     },
@@ -37,6 +40,7 @@ impl AnnotationState {
             Some(path) => Self::Active {
                 source: Some(JsonlFileSource::new(path)),
                 snapshot: AnnotationSnapshot::new(Vec::new()),
+                filter: TagFilter::default(),
                 visible: true,
                 status: AnnotationSourceStatus::Loaded(0),
             },
@@ -121,17 +125,41 @@ impl AnnotationState {
         }
     }
 
+    pub(crate) fn set_filter(&mut self, next: TagFilter) {
+        if let Self::Active { filter, .. } = self {
+            *filter = next;
+        }
+    }
+
+    pub(crate) fn applied_filter(&self) -> Option<&TagFilter> {
+        match self {
+            Self::Active { filter, .. } => Some(filter),
+            Self::Disabled => None,
+        }
+    }
+
+    pub(crate) fn effective_filter(
+        &self,
+        _panel: AnnotationPanelContext<'_>,
+    ) -> Option<&TagFilter> {
+        self.applied_filter()
+    }
+
     pub(crate) fn events_for_panel(
         &self,
         panel: AnnotationPanelContext<'_>,
         bounds: [f64; 2],
     ) -> Vec<&AnnotationEvent> {
+        let Some(filter) = self.effective_filter(panel) else {
+            return Vec::new();
+        };
+
         match self {
             Self::Active {
                 snapshot,
                 visible: true,
                 ..
-            } => projection::events_for_panel(snapshot, panel, bounds),
+            } => projection::events_for_panel(snapshot, filter, panel, bounds),
             Self::Disabled | Self::Active { .. } => Vec::new(),
         }
     }
@@ -143,6 +171,7 @@ impl AnnotationState {
         Self::Active {
             source: None,
             snapshot,
+            filter: TagFilter::default(),
             visible: true,
             status: AnnotationSourceStatus::Loaded(event_count),
         }
@@ -153,6 +182,7 @@ impl AnnotationState {
         Self::Active {
             source: None,
             snapshot: AnnotationSnapshot::new(Vec::new()),
+            filter: TagFilter::default(),
             visible: true,
             status: AnnotationSourceStatus::Warning(message.to_string()),
         }
@@ -174,7 +204,10 @@ pub(crate) fn test_event_at(timestamp_secs: f64, text: &str) -> AnnotationEvent 
 mod tests {
     use std::path::PathBuf;
 
-    use super::{AnnotationSourceStatus, AnnotationState};
+    use super::{
+        AnnotationPanelContext, AnnotationSourceStatus, AnnotationState, AnnotationTarget,
+        TagFilter,
+    };
 
     fn temp_path(name: &str) -> PathBuf {
         let suffix = std::time::SystemTime::now()
@@ -246,5 +279,39 @@ mod tests {
         assert_eq!(state.status(), AnnotationSourceStatus::Disabled);
         state.toggle_visibility();
         assert!(!state.is_visible());
+    }
+
+    #[test]
+    fn active_state_applies_one_global_filter_when_routing_each_panel() {
+        let mut deploy = super::test_event_at(10.0, "deploy");
+        deploy.tags = vec!["deploy".to_string()];
+        deploy.target = AnnotationTarget::PanelTitles(["CPU".to_string()].into_iter().collect());
+
+        let mut incident = super::test_event_at(20.0, "incident");
+        incident.tags = vec!["incident".to_string()];
+        let mut state = AnnotationState::from_events_for_test(vec![deploy, incident]);
+        state.set_filter(TagFilter::from_selected(["deploy".to_string()]));
+
+        assert_eq!(state.applied_filter().unwrap().summary(), "deploy");
+        assert_eq!(
+            state
+                .effective_filter(AnnotationPanelContext { title: "CPU" })
+                .unwrap()
+                .summary(),
+            "deploy"
+        );
+        assert_eq!(
+            state
+                .events_for_panel(AnnotationPanelContext { title: "CPU" }, [0.0, 100.0])
+                .iter()
+                .map(|event| event.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["deploy"]
+        );
+        assert!(
+            state
+                .events_for_panel(AnnotationPanelContext { title: "Memory" }, [0.0, 100.0])
+                .is_empty()
+        );
     }
 }
