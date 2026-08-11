@@ -1,0 +1,278 @@
+#!/usr/bin/env python3
+"""Run a command in a fixed-size PTY and capture its ANSI lifecycle."""
+
+import argparse
+import errno
+import fcntl
+import json
+import os
+import pathlib
+import pty
+import select
+import signal
+import struct
+import sys
+import termios
+import time
+
+
+KEYS = {
+    "enter": b"\r",
+    "esc": b"\x1b",
+    "up": b"\x1b[A",
+    "down": b"\x1b[B",
+    "right": b"\x1b[C",
+    "left": b"\x1b[D",
+    "ctrl-e": b"\x05",
+}
+
+
+class ScenarioError(ValueError):
+    """Raised when a PTY smoke scenario is not valid."""
+
+
+def positive_integer(value, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ScenarioError(f"{name} must be a positive integer")
+    return value
+
+
+def encode_step(step: dict) -> bytes:
+    if not isinstance(step, dict):
+        raise ScenarioError("step must be an object")
+    has_send = "send" in step
+    has_key = "key" in step
+    if has_send == has_key:
+        raise ScenarioError("step must contain exactly one of send or key")
+    if has_send:
+        send = step["send"]
+        if not isinstance(send, str):
+            raise ScenarioError("step send must be a string")
+        return send.encode("utf-8")
+    key = step["key"]
+    if not isinstance(key, str) or key not in KEYS:
+        raise ScenarioError(f"unknown key: {key!r}")
+    return KEYS[key]
+
+
+def validate_scenario(scenario: dict) -> None:
+    if not isinstance(scenario, dict):
+        raise ScenarioError("scenario must be a JSON object")
+    positive_integer(scenario.get("cols"), "cols")
+    positive_integer(scenario.get("rows"), "rows")
+    positive_integer(scenario.get("timeout_ms"), "timeout_ms")
+    steps = scenario.get("steps")
+    if not isinstance(steps, list):
+        raise ScenarioError("steps must be a list")
+    previous_after_ms = 0
+    for step in steps:
+        if not isinstance(step, dict):
+            raise ScenarioError("step must be an object")
+        after_ms = step.get("after_ms")
+        if isinstance(after_ms, bool) or not isinstance(after_ms, int) or after_ms < 0:
+            raise ScenarioError("step after_ms must be a nonnegative integer")
+        if after_ms < previous_after_ms:
+            raise ScenarioError("step after_ms values must be nondecreasing")
+        previous_after_ms = after_ms
+        encode_step(step)
+    if "expect_exit" in scenario and (
+        isinstance(scenario["expect_exit"], bool)
+        or not isinstance(scenario["expect_exit"], int)
+    ):
+        raise ScenarioError("expect_exit must be an integer")
+    if "require_alternate_screen" in scenario and not isinstance(
+        scenario["require_alternate_screen"], bool
+    ):
+        raise ScenarioError("require_alternate_screen must be a boolean")
+
+
+def load_scenario(path: pathlib.Path) -> dict:
+    with path.open(encoding="utf-8") as source:
+        scenario = json.load(source)
+    validate_scenario(scenario)
+    return scenario
+
+
+def set_window_size(fd: int, rows: int, cols: int) -> None:
+    fcntl.ioctl(
+        fd,
+        termios.TIOCSWINSZ,
+        struct.pack("HHHH", rows, cols, 0, 0),
+    )
+
+
+def set_single_key_input(fd: int) -> None:
+    attributes = termios.tcgetattr(fd)
+    attributes[3] &= ~(termios.ICANON | termios.ECHO)
+    attributes[6][termios.VMIN] = 1
+    attributes[6][termios.VTIME] = 0
+    termios.tcsetattr(fd, termios.TCSANOW, attributes)
+
+
+def read_available(fd: int, output: bytearray) -> bool:
+    """Drain nonblocking PTY data; return False when the PTY is closed."""
+    while True:
+        try:
+            chunk = os.read(fd, 65536)
+        except BlockingIOError:
+            return True
+        except OSError as error:
+            if error.errno == errno.EIO:
+                return False
+            raise
+        if not chunk:
+            return False
+        output.extend(chunk)
+
+
+def status_exit_code(status: int) -> int:
+    if os.WIFEXITED(status):
+        return os.WEXITSTATUS(status)
+    if os.WIFSIGNALED(status):
+        return 128 + os.WTERMSIG(status)
+    return 1
+
+
+def run_scenario(scenario: dict, command: list[str]) -> tuple[bytes, dict]:
+    validate_scenario(scenario)
+    if not command or not all(isinstance(argument, str) and argument for argument in command):
+        raise ScenarioError("command must be nonempty")
+
+    rows = scenario["rows"]
+    cols = scenario["cols"]
+    timeout_seconds = scenario["timeout_ms"] / 1000
+    steps = scenario["steps"]
+    pid, master_fd = pty.fork()
+    if pid == 0:
+        try:
+            set_window_size(sys.stdin.fileno(), rows, cols)
+            os.execvp(command[0], command)
+        except BaseException:
+            os._exit(127)
+
+    if pid <= 0:
+        raise RuntimeError("pty.fork returned an invalid child PID")
+
+    output = bytearray()
+    start = time.monotonic()
+    deadline = start + timeout_seconds
+    step_index = 0
+    pending = bytearray()
+    child_status = None
+    timed_out = False
+    terminate_deadline = None
+    master_open = True
+
+    try:
+        set_window_size(master_fd, rows, cols)
+        set_single_key_input(master_fd)
+        flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
+        fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+
+        while child_status is None or master_open:
+            now = time.monotonic()
+            while step_index < len(steps) and now >= start + steps[step_index]["after_ms"] / 1000:
+                pending.extend(encode_step(steps[step_index]))
+                step_index += 1
+
+            if child_status is None and not timed_out and now >= deadline:
+                timed_out = True
+                os.kill(pid, signal.SIGTERM)
+                terminate_deadline = now + 1
+            elif (
+                child_status is None
+                and timed_out
+                and terminate_deadline is not None
+                and now >= terminate_deadline
+            ):
+                os.kill(pid, signal.SIGKILL)
+                terminate_deadline = None
+
+            waited_pid, status = os.waitpid(pid, os.WNOHANG)
+            if waited_pid == pid:
+                child_status = status
+
+            if child_status is not None:
+                if master_open:
+                    master_open = read_available(master_fd, output)
+                if not master_open:
+                    break
+
+            next_times = [deadline]
+            if step_index < len(steps):
+                next_times.append(start + steps[step_index]["after_ms"] / 1000)
+            if terminate_deadline is not None:
+                next_times.append(terminate_deadline)
+            wait_seconds = max(0.0, min(0.05, min(next_times) - time.monotonic()))
+            readable, writable, _ = select.select(
+                [master_fd] if master_open else [],
+                [master_fd] if pending and master_open else [],
+                [],
+                wait_seconds,
+            )
+            if master_fd in readable:
+                master_open = read_available(master_fd, output)
+            if master_fd in writable and pending:
+                written = os.write(master_fd, pending)
+                del pending[:written]
+    finally:
+        if child_status is None:
+            waited_pid, status = os.waitpid(pid, os.WNOHANG)
+            if waited_pid == 0:
+                os.kill(pid, signal.SIGKILL)
+                _, status = os.waitpid(pid, 0)
+            child_status = status
+        os.close(master_fd)
+
+    duration_ms = int((time.monotonic() - start) * 1000)
+    raw = bytes(output)
+    result = {
+        "exit_code": status_exit_code(child_status),
+        "timed_out": timed_out,
+        "saw_enter_alternate_screen": b"\x1b[?1049h" in raw,
+        "saw_leave_alternate_screen": b"\x1b[?1049l" in raw,
+        "cols": cols,
+        "rows": rows,
+        "duration_ms": duration_ms,
+    }
+    return raw, result
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--scenario", type=pathlib.Path, required=True)
+    parser.add_argument("--output-ansi", type=pathlib.Path, required=True)
+    parser.add_argument("--output-result", type=pathlib.Path, required=True)
+    parser.add_argument("command", nargs=argparse.REMAINDER)
+    arguments = parser.parse_args()
+
+    try:
+        scenario = load_scenario(arguments.scenario)
+        command = arguments.command[1:] if arguments.command[:1] == ["--"] else arguments.command
+        raw, result = run_scenario(scenario, command)
+        arguments.output_ansi.write_bytes(raw)
+        arguments.output_result.write_text(
+            json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+    except (OSError, ScenarioError, ValueError, json.JSONDecodeError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+
+    if result["timed_out"]:
+        return 124
+    if result["exit_code"] != scenario.get("expect_exit", result["exit_code"]):
+        print(
+            f"error: expected exit {scenario['expect_exit']}, got {result['exit_code']}",
+            file=sys.stderr,
+        )
+        return 1
+    if scenario.get("require_alternate_screen", False) and not (
+        result["saw_enter_alternate_screen"] and result["saw_leave_alternate_screen"]
+    ):
+        print("error: alternate-screen lifecycle was incomplete", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
