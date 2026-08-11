@@ -16,18 +16,13 @@ struct RawAnnotationEvent {
     panel_titles: RawPanelTitles,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(untagged)]
 enum RawPanelTitles {
     Null(()),
     Titles(Vec<String>),
+    #[default]
     Missing,
-}
-
-impl Default for RawPanelTitles {
-    fn default() -> Self {
-        Self::Missing
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

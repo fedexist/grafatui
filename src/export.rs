@@ -1765,12 +1765,14 @@ mod tests {
         let rect = scaled_rect(rect);
         let title = &app.panels[index].title;
         let svg = render_svg(app, viewport);
-        assert!(svg.contains(&format!(
-            r#"<text x="{:.2}" y="{:.2}""#,
+        let title_element = format!(
+            r#"<text x="{:.2}" y="{:.2}" fill="{}" font-size="{FONT_SIZE:.1}" text-anchor="start">{}</text>"#,
             rect.left + 8.0,
             rect.top + 18.0,
-        )));
-        assert!(svg.contains(&format!(">{title}</text>")));
+            color_hex(app.theme.title, "#00c8ff"),
+            escape_xml(title),
+        );
+        assert!(svg.contains(&title_element));
     }
 
     #[test]

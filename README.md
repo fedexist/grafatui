@@ -42,7 +42,7 @@ cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheu
 - Keyboard-first navigation, panel search, fullscreen mode, mouse selection, and value inspection.
 - SVG/PNG export and changed-frame recording bundles.
 - TOML configuration and built-in themes.
-- Read-only external JSONL point annotations for graph and timeseries panels.
+- Read-only external JSONL point annotations with panel targeting, tag filtering, and navigable cluster details.
 
 ## Documentation
 

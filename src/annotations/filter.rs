@@ -8,7 +8,7 @@ pub(crate) struct TagFilter {
 }
 
 impl TagFilter {
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn from_selected(tags: impl IntoIterator<Item = String>) -> Self {
         Self {
             selected: tags.into_iter().collect(),
