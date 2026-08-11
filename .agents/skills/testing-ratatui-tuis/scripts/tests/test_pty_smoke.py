@@ -1,10 +1,12 @@
 import importlib.machinery
 import importlib.util
 import json
+import os
 import pathlib
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 
@@ -18,6 +20,27 @@ received = os.read(sys.stdin.fileno(), 1)
 sys.stdout.write(f"KEY={received.decode()}\n\x1b[?1049l")
 sys.stdout.flush()
 '''
+BYTE_CHILD = r'''
+import os, sys
+received = os.read(sys.stdin.fileno(), 1)
+sys.stdout.write(f"BYTE={received[0]}\n")
+sys.stdout.flush()
+'''
+DESCENDANT_CHILD = r'''
+import pathlib, subprocess, sys, time
+pid_path = pathlib.Path(sys.argv[1])
+descendant = subprocess.Popen(
+    [sys.executable, "-c", "import time; time.sleep(30)"],
+    start_new_session=True,
+)
+pid_path.write_text(str(descendant.pid), encoding="utf-8")
+time.sleep(30)
+'''
+NOISY_CHILD = r'''
+import sys
+sys.stdout.buffer.write(b"x" * 1_100_000)
+sys.stdout.flush()
+'''
 
 
 def load_runner_module():
@@ -26,6 +49,26 @@ def load_runner_module():
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
     return module
+
+
+def process_exists(pid):
+    result = subprocess.run(
+        ["ps", "-p", str(pid), "-o", "pid="],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
+def terminate_pid(pid):
+    try:
+        os.kill(pid, 15)
+    except ProcessLookupError:
+        return
+    deadline = time.monotonic() + 1
+    while process_exists(pid) and time.monotonic() < deadline:
+        time.sleep(0.02)
 
 
 class PtySmokeTests(unittest.TestCase):
@@ -96,6 +139,76 @@ class PtySmokeTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 124, result.stderr)
         self.assertTrue(recorded["timed_out"])
+        self.assertEqual(recorded["exit_code"], 124)
+
+    def test_delivers_named_enter_without_terminal_translation(self):
+        scenario = {
+            "cols": 80,
+            "rows": 24,
+            "timeout_ms": 3000,
+            "steps": [{"after_ms": 10, "key": "enter"}],
+            "expect_exit": 0,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            scenario_path = self.write_scenario(directory, scenario)
+            output_ansi = pathlib.Path(directory) / "session.ansi"
+            output_result = pathlib.Path(directory) / "result.json"
+            result = self.run_runner(
+                scenario_path,
+                output_ansi,
+                output_result,
+                [sys.executable, "-c", BYTE_CHILD],
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            raw = output_ansi.read_bytes()
+
+        self.assertIn(b"BYTE=13", raw)
+
+    def test_timeout_terminates_new_session_descendant(self):
+        scenario = {"cols": 80, "rows": 24, "timeout_ms": 300, "steps": []}
+        with tempfile.TemporaryDirectory() as directory:
+            scenario_path = self.write_scenario(directory, scenario)
+            output_ansi = pathlib.Path(directory) / "session.ansi"
+            output_result = pathlib.Path(directory) / "result.json"
+            descendant_path = pathlib.Path(directory) / "descendant.pid"
+            result = self.run_runner(
+                scenario_path,
+                output_ansi,
+                output_result,
+                [sys.executable, "-c", DESCENDANT_CHILD, str(descendant_path)],
+            )
+            self.assertEqual(result.returncode, 124, result.stderr)
+            descendant_pid = int(descendant_path.read_text(encoding="utf-8"))
+
+            deadline = time.monotonic() + 2
+            while process_exists(descendant_pid) and time.monotonic() < deadline:
+                time.sleep(0.02)
+            try:
+                self.assertFalse(process_exists(descendant_pid))
+            finally:
+                terminate_pid(descendant_pid)
+
+    def test_truncates_noisy_transcript_at_documented_limit(self):
+        runner = load_runner_module()
+        scenario = {"cols": 80, "rows": 24, "timeout_ms": 3000, "steps": []}
+        with tempfile.TemporaryDirectory() as directory:
+            scenario_path = self.write_scenario(directory, scenario)
+            output_ansi = pathlib.Path(directory) / "session.ansi"
+            output_result = pathlib.Path(directory) / "result.json"
+            result = self.run_runner(
+                scenario_path,
+                output_ansi,
+                output_result,
+                [sys.executable, "-c", NOISY_CHILD],
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            raw = output_ansi.read_bytes()
+            recorded = json.loads(output_result.read_text(encoding="utf-8"))
+
+        self.assertTrue(recorded["transcript_truncated"])
+        self.assertEqual(len(raw), runner.MAX_TRANSCRIPT_BYTES)
 
     def test_encodes_named_keys(self):
         runner = load_runner_module()

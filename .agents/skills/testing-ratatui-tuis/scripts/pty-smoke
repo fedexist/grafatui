@@ -11,6 +11,7 @@ import pty
 import select
 import signal
 import struct
+import subprocess
 import sys
 import termios
 import time
@@ -25,6 +26,8 @@ KEYS = {
     "left": b"\x1b[D",
     "ctrl-e": b"\x05",
 }
+# Keep ANSI transcripts deterministic and bounded even when a child writes forever.
+MAX_TRANSCRIPT_BYTES = 1_048_576
 
 
 class ScenarioError(ValueError):
@@ -103,26 +106,100 @@ def set_window_size(fd: int, rows: int, cols: int) -> None:
 
 def set_single_key_input(fd: int) -> None:
     attributes = termios.tcgetattr(fd)
-    attributes[3] &= ~(termios.ICANON | termios.ECHO)
+    attributes[0] = 0
+    attributes[1] = 0
+    attributes[2] &= ~termios.CSIZE
+    attributes[2] |= termios.CS8
+    attributes[3] = 0
     attributes[6][termios.VMIN] = 1
     attributes[6][termios.VTIME] = 0
     termios.tcsetattr(fd, termios.TCSANOW, attributes)
 
 
-def read_available(fd: int, output: bytearray) -> bool:
-    """Drain nonblocking PTY data; return False when the PTY is closed."""
+def append_transcript(output: bytearray, chunk: bytes) -> bool:
+    """Append up to MAX_TRANSCRIPT_BYTES and report dropped transcript bytes."""
+    remaining = MAX_TRANSCRIPT_BYTES - len(output)
+    if remaining <= 0:
+        return bool(chunk)
+    output.extend(chunk[:remaining])
+    return len(chunk) > remaining
+
+
+def read_available(fd: int, output: bytearray) -> tuple[bool, bool]:
+    """Drain nonblocking PTY data; return (is_open, transcript_truncated)."""
+    truncated = False
     while True:
         try:
             chunk = os.read(fd, 65536)
         except BlockingIOError:
-            return True
+            return True, truncated
         except OSError as error:
             if error.errno == errno.EIO:
-                return False
+                return False, truncated
             raise
         if not chunk:
-            return False
-        output.extend(chunk)
+            return False, truncated
+        truncated = append_transcript(output, chunk) or truncated
+
+
+def descendant_pids(root_pid: int) -> list[int]:
+    """Return only processes whose current parent chain leads to root_pid."""
+    if root_pid <= 0:
+        return []
+    process_table = subprocess.run(
+        ["ps", "-axo", "pid=,ppid="],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if process_table.returncode != 0:
+        return []
+    children = {}
+    for line in process_table.stdout.splitlines():
+        fields = line.split()
+        if len(fields) != 2:
+            continue
+        try:
+            pid, parent_pid = (int(field) for field in fields)
+        except ValueError:
+            continue
+        if pid > 0 and parent_pid > 0:
+            children.setdefault(parent_pid, []).append(pid)
+
+    descendants = []
+    pending = [root_pid]
+    seen = {root_pid}
+    while pending:
+        parent_pid = pending.pop()
+        for child_pid in children.get(parent_pid, []):
+            if child_pid in seen:
+                continue
+            seen.add(child_pid)
+            descendants.append(child_pid)
+            pending.append(child_pid)
+    return descendants
+
+
+def signal_timeout_targets(root_pid: int, signal_number: int) -> None:
+    """Signal the live child group and its currently verified descendant tree."""
+    if root_pid <= 0:
+        raise RuntimeError("invalid child PID")
+    # Snapshot immediately before signalling: every individual target has a
+    # current parent chain to root_pid, while killpg is safe because root_pid
+    # is still the live PTY child's process-group leader.
+    descendants = descendant_pids(root_pid)
+    for descendant_pid in reversed(descendants):
+        try:
+            os.kill(descendant_pid, signal_number)
+        except ProcessLookupError:
+            pass
+    try:
+        os.killpg(root_pid, signal_number)
+    except ProcessLookupError:
+        try:
+            os.kill(root_pid, signal_number)
+        except ProcessLookupError:
+            pass
 
 
 def status_exit_code(status: int) -> int:
@@ -162,6 +239,7 @@ def run_scenario(scenario: dict, command: list[str]) -> tuple[bytes, dict]:
     timed_out = False
     terminate_deadline = None
     master_open = True
+    transcript_truncated = False
 
     try:
         set_window_size(master_fd, rows, cols)
@@ -177,7 +255,7 @@ def run_scenario(scenario: dict, command: list[str]) -> tuple[bytes, dict]:
 
             if child_status is None and not timed_out and now >= deadline:
                 timed_out = True
-                os.kill(pid, signal.SIGTERM)
+                signal_timeout_targets(pid, signal.SIGTERM)
                 terminate_deadline = now + 1
             elif (
                 child_status is None
@@ -185,7 +263,7 @@ def run_scenario(scenario: dict, command: list[str]) -> tuple[bytes, dict]:
                 and terminate_deadline is not None
                 and now >= terminate_deadline
             ):
-                os.kill(pid, signal.SIGKILL)
+                signal_timeout_targets(pid, signal.SIGKILL)
                 terminate_deadline = None
 
             waited_pid, status = os.waitpid(pid, os.WNOHANG)
@@ -194,7 +272,8 @@ def run_scenario(scenario: dict, command: list[str]) -> tuple[bytes, dict]:
 
             if child_status is not None:
                 if master_open:
-                    master_open = read_available(master_fd, output)
+                    master_open, truncated = read_available(master_fd, output)
+                    transcript_truncated = transcript_truncated or truncated
                 if not master_open:
                     break
 
@@ -211,7 +290,8 @@ def run_scenario(scenario: dict, command: list[str]) -> tuple[bytes, dict]:
                 wait_seconds,
             )
             if master_fd in readable:
-                master_open = read_available(master_fd, output)
+                master_open, truncated = read_available(master_fd, output)
+                transcript_truncated = transcript_truncated or truncated
             if master_fd in writable and pending:
                 written = os.write(master_fd, pending)
                 del pending[:written]
@@ -226,14 +306,18 @@ def run_scenario(scenario: dict, command: list[str]) -> tuple[bytes, dict]:
 
     duration_ms = int((time.monotonic() - start) * 1000)
     raw = bytes(output)
+    child_exit_code = status_exit_code(child_status)
     result = {
-        "exit_code": status_exit_code(child_status),
+        "exit_code": 124 if timed_out else child_exit_code,
+        "child_exit_code": child_exit_code,
         "timed_out": timed_out,
         "saw_enter_alternate_screen": b"\x1b[?1049h" in raw,
         "saw_leave_alternate_screen": b"\x1b[?1049l" in raw,
         "cols": cols,
         "rows": rows,
         "duration_ms": duration_ms,
+        "transcript_limit_bytes": MAX_TRANSCRIPT_BYTES,
+        "transcript_truncated": transcript_truncated,
     }
     return raw, result
 
