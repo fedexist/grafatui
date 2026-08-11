@@ -38,6 +38,6 @@ Remaining uncertainty: state unavailable capabilities, unstable evidence, and th
 ## Common mistakes
 
 - Starting validation without written scenario expectations.
-- Stopping at deterministic-state checks, visible-content assertions, or a PTY lifecycle check instead of assembling applicable evidence layers.
+- Assemble all applicable evidence layers: deterministic state/input assertions, visible buffer checks, model-inspected screenshots, and critical PTY coverage.
 - Omitting a model-inspected buffer-derived screenshot.
 - Leaving uncertainty unstated after reporting a result.
