@@ -17,6 +17,22 @@
 use crate::app::{AppMode, AppState, PanelState};
 use ratatui::prelude::*;
 
+pub(crate) fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    let vertical = Layout::vertical([
+        Constraint::Percentage((100 - percent_y) / 2),
+        Constraint::Percentage(percent_y),
+        Constraint::Percentage((100 - percent_y) / 2),
+    ])
+    .split(area);
+
+    Layout::horizontal([
+        Constraint::Percentage((100 - percent_x) / 2),
+        Constraint::Percentage(percent_x),
+        Constraint::Percentage((100 - percent_x) / 2),
+    ])
+    .split(vertical[1])[1]
+}
+
 /// Returns a list of (Rect, panel_index) for all panels to be rendered.
 pub(crate) fn calculate_grid_layout(area: Rect, app: &AppState) -> Vec<(Rect, usize)> {
     let mut results = Vec::new();

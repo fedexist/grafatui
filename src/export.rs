@@ -300,7 +300,7 @@ pub(crate) fn render_svg(app: &AppState, viewport: Rect) -> String {
         };
         let selected = index == app.selected_panel;
         let panel_rect = scaled_rect(rect);
-        render_panel(app, panel, panel_rect, selected, &mut out);
+        render_panel(app, index, panel, panel_rect, selected, &mut out);
     }
 
     render_footer(app, &mut out, width, height, &text, &border);
@@ -366,6 +366,7 @@ fn render_footer(
 
 fn render_panel(
     app: &AppState,
+    panel_index: usize,
     panel: &PanelState,
     rect: PlotRect,
     selected: bool,
@@ -417,7 +418,9 @@ fn render_panel(
     }
 
     match panel.panel_type {
-        PanelType::Graph | PanelType::Unknown => render_graph_panel(app, panel, inner, out),
+        PanelType::Graph | PanelType::Unknown => {
+            render_graph_panel(app, panel_index, panel, inner, out)
+        }
         PanelType::Stat => render_stat_panel(app, panel, inner, out),
         PanelType::Gauge => render_gauge_panel(app, panel, inner, out),
         PanelType::BarGauge => render_bar_gauge_panel(app, panel, inner, out),
@@ -426,7 +429,13 @@ fn render_panel(
     }
 }
 
-fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &mut String) {
+fn render_graph_panel(
+    app: &AppState,
+    panel_index: usize,
+    panel: &PanelState,
+    rect: PlotRect,
+    out: &mut String,
+) {
     if rect.width < 120.0 || rect.height < 80.0 {
         return;
     }
@@ -438,6 +447,7 @@ fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
             .annotations
             .events_for_panel(
                 AnnotationPanelContext {
+                    index: panel_index,
                     title: &panel.title,
                 },
                 [x_min, x_max],
@@ -606,7 +616,7 @@ fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
     }
 
     let annotation_clusters = if annotations_enabled {
-        render_graph_annotations(app, panel, plot, x_bounds, out)
+        render_graph_annotations(app, panel_index, panel, plot, x_bounds, out)
     } else {
         Vec::new()
     };
@@ -677,6 +687,7 @@ fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
 
 fn render_graph_annotations<'a>(
     app: &'a AppState,
+    panel_index: usize,
     panel: &PanelState,
     plot: PlotRect,
     x_bounds: [f64; 2],
@@ -684,6 +695,7 @@ fn render_graph_annotations<'a>(
 ) -> Vec<AnnotationCluster<'a>> {
     let events = app.annotations.events_for_panel(
         AnnotationPanelContext {
+            index: panel_index,
             title: &panel.title,
         },
         x_bounds,
@@ -1705,6 +1717,64 @@ mod tests {
         app
     }
 
+    fn targeted(
+        timestamp: f64,
+        text: &str,
+        tags: &[&str],
+        titles: &[&str],
+    ) -> crate::annotations::AnnotationEvent {
+        crate::annotations::AnnotationEvent {
+            time: chrono::DateTime::<chrono::Utc>::from_timestamp_millis(
+                (timestamp * 1_000.0).round() as i64,
+            )
+            .unwrap(),
+            text: text.to_string(),
+            tags: tags.iter().map(|tag| (*tag).to_string()).collect(),
+            target: crate::annotations::AnnotationTarget::PanelTitles(
+                titles.iter().map(|title| (*title).to_string()).collect(),
+            ),
+        }
+    }
+
+    fn global(timestamp: f64, text: &str, tags: &[&str]) -> crate::annotations::AnnotationEvent {
+        let mut event = crate::annotations::test_event_at(timestamp, text);
+        event.tags = tags.iter().map(|tag| (*tag).to_string()).collect();
+        event
+    }
+
+    fn panel_svg_section<'a>(svg: &'a str, title: &str, next_title: Option<&str>) -> &'a str {
+        let start = svg
+            .find(&format!(">{title}</text>"))
+            .unwrap_or_else(|| panic!("missing panel title {title}"));
+        let section = &svg[start..];
+        match next_title {
+            Some(next_title) => {
+                &section[..section
+                    .find(&format!(">{next_title}</text>"))
+                    .unwrap_or_else(|| panic!("missing next panel title {next_title}"))]
+            }
+            None => section,
+        }
+    }
+
+    fn assert_panel_title_offset(app: &AppState, viewport: Rect, index: usize) {
+        let (rect, _) = ui::visible_panel_rects(viewport, app)
+            .into_iter()
+            .find(|(_, panel_index)| *panel_index == index)
+            .unwrap_or_else(|| panic!("panel {index} is not visible"));
+        let rect = scaled_rect(rect);
+        let title = &app.panels[index].title;
+        let svg = render_svg(app, viewport);
+        let title_element = format!(
+            r#"<text x="{:.2}" y="{:.2}" fill="{}" font-size="{FONT_SIZE:.1}" text-anchor="start">{}</text>"#,
+            rect.left + 8.0,
+            rect.top + 18.0,
+            color_hex(app.theme.title, "#00c8ff"),
+            escape_xml(title),
+        );
+        assert!(svg.contains(&title_element));
+    }
+
     #[test]
     fn test_escape_xml() {
         assert_eq!(escape_xml("<a&b\"c'>"), "&lt;a&amp;b&quot;c&apos;&gt;");
@@ -1788,6 +1858,126 @@ mod tests {
 
         assert!(svg.contains(&ui::format_time(1_699_999_900.0)));
         assert!(svg.contains(&ui::format_time(1_700_000_000.0)));
+    }
+
+    #[test]
+    fn annotation_target_and_filter_are_shared_by_svg() {
+        let viewport = Rect::new(0, 0, 160, 50);
+        let mut app = test_app(ExportOptions::default());
+        app.panels.push(test_panel(app.view_end_ts as f64 - 100.0));
+        app.panels[0].title = "CPU".to_string();
+        app.panels[1].title = "Memory".to_string();
+        app.view_end_ts = 100;
+        app.range = std::time::Duration::from_secs(100);
+        app.cursor_x = Some(50.0);
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![
+            targeted(50.0, "cpu deploy", &["deploy"], &["CPU"]),
+            targeted(50.0, "memory incident", &["incident"], &["Memory"]),
+            global(50.0, "global deploy", &["deploy"]),
+        ]);
+        app.annotations
+            .set_filter(crate::annotations::TagFilter::from_selected([
+                "deploy".to_string()
+            ]));
+
+        assert_panel_title_offset(&app, viewport, 0);
+        assert_panel_title_offset(&app, viewport, 1);
+        let svg = render_svg(&app, viewport);
+        let cpu = panel_svg_section(&svg, "CPU", Some("Memory"));
+        let memory = panel_svg_section(&svg, "Memory", None);
+
+        assert_eq!(cpu.matches(r#"data-role="annotation-marker""#).count(), 1);
+        assert!(cpu.contains(r#"data-role="annotation-count">2</text>"#));
+        assert!(cpu.contains("cpu deploy"));
+        assert!(cpu.contains("global deploy"));
+        assert!(!cpu.contains("memory incident"));
+
+        assert_eq!(
+            memory.matches(r#"data-role="annotation-marker""#).count(),
+            1
+        );
+        assert!(memory.contains(r#"data-role="annotation-count">•</text>"#));
+        assert!(memory.contains("global deploy"));
+        assert!(!memory.contains("cpu deploy"));
+        assert!(!memory.contains("memory incident"));
+    }
+
+    #[test]
+    fn annotation_modals_are_omitted_and_latest_snapshot_is_exported() {
+        let viewport = Rect::new(0, 0, 120, 50);
+        let mut app = test_app(ExportOptions::default());
+        app.view_end_ts = 100;
+        app.range = std::time::Duration::from_secs(100);
+        app.cursor_x = Some(50.0);
+        app.rendered_annotation_cluster = Some(vec![global(50.0, "old modal event", &[])]);
+        app.open_rendered_annotation_cluster();
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![global(
+            50.0,
+            "latest snapshot event",
+            &["draft-only-tag"],
+        )]);
+
+        let svg = render_svg(&app, viewport);
+        assert!(!svg.contains("old modal event"));
+        assert!(svg.contains("latest snapshot event"));
+        assert!(!svg.contains("annotations modal"));
+
+        app.open_tag_filter_modal();
+        let Some(crate::annotations::AnnotationModal::TagFilter(modal)) =
+            app.annotation_modal.as_mut()
+        else {
+            panic!("tag filter modal should open");
+        };
+        modal.toggle_selected();
+
+        app.cursor_x = None;
+        let svg = render_svg(&app, viewport);
+        assert!(!svg.contains("Filter annotations by tag"));
+        assert!(!svg.contains("draft-only-tag"));
+    }
+
+    #[test]
+    fn recording_changes_only_after_filter_apply_or_clear() {
+        let dir = test_export_dir("annotation-filter-recording");
+        let viewport = Rect::new(0, 0, 120, 50);
+        let export = ExportOptions {
+            dir: dir.clone(),
+            format: ExportFormat::Svg,
+            record_max_frames: 10,
+        };
+        let mut app = test_app(export);
+        app.view_end_ts = 100;
+        app.range = std::time::Duration::from_secs(100);
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![
+            global(50.0, "deploy event", &["deploy"]),
+            global(75.0, "incident event", &["incident"]),
+        ]);
+
+        toggle_recording(&mut app, viewport).unwrap();
+        assert_eq!(app.recording.as_ref().unwrap().frame_count, 1);
+
+        app.open_tag_filter_modal();
+        let draft = match app.annotation_modal.as_mut() {
+            Some(crate::annotations::AnnotationModal::TagFilter(modal)) => {
+                modal.toggle_selected();
+                modal.draft().clone()
+            }
+            _ => panic!("tag filter modal should open"),
+        };
+        capture_recording_frame(&mut app, viewport).unwrap();
+        assert_eq!(app.recording.as_ref().unwrap().frame_count, 1);
+
+        app.annotations.set_filter(draft);
+        capture_recording_frame(&mut app, viewport).unwrap();
+        assert_eq!(app.recording.as_ref().unwrap().frame_count, 2);
+
+        app.annotations
+            .set_filter(crate::annotations::TagFilter::default());
+        capture_recording_frame(&mut app, viewport).unwrap();
+        assert_eq!(app.recording.as_ref().unwrap().frame_count, 3);
+
+        toggle_recording(&mut app, viewport).unwrap();
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

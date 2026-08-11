@@ -14,11 +14,13 @@
  * limitations under the License.
  */
 
+mod annotations;
 mod draw;
 mod format;
 mod layout;
 mod panels;
 
+pub(crate) use annotations::{annotation_cluster_page_size, render_annotation_modal};
 pub(crate) use draw::draw_ui;
 pub(crate) use format::{DisplayFormat, format_time, get_hash_color, value_to_heatmap_color};
 pub(crate) use layout::{hit_test, visible_panel_rects};

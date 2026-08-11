@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-use super::layout::{calculate_grid_layout, calculate_two_column_layout};
+use super::layout::{calculate_grid_layout, calculate_two_column_layout, centered_rect};
 use super::panels::render_panel;
 use crate::app::{AppMode, AppState, PanelState};
 use humantime::format_duration;
@@ -23,7 +23,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 
-pub(crate) fn draw_ui(frame: &mut Frame, app: &AppState) {
+pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
     let size = frame.area();
 
     // Layout: title bar, charts area, footer
@@ -59,9 +59,18 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &AppState) {
         horizontal: 1,
     });
 
+    let mut selected_rendered_cluster = None;
     if app.mode == AppMode::Fullscreen || app.mode == AppMode::FullscreenInspect {
         if let Some(p) = app.panels.get(app.selected_panel) {
-            render_panel(frame, inner_area, p, app, true, app.cursor_x);
+            selected_rendered_cluster = render_panel(
+                frame,
+                inner_area,
+                app.selected_panel,
+                p,
+                app,
+                true,
+                app.cursor_x,
+            );
         }
     } else {
         let has_grid = app.panels.iter().any(|p| p.grid.is_some());
@@ -76,7 +85,11 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &AppState) {
             // eprintln!("Rendering panel {} at {:?}", panel_idx, rect);
             if let Some(p) = app.panels.get(*panel_idx) {
                 let is_selected = *panel_idx == app.selected_panel;
-                render_panel(frame, *rect, p, app, is_selected, app.cursor_x);
+                let rendered_cluster =
+                    render_panel(frame, *rect, *panel_idx, p, app, is_selected, app.cursor_x);
+                if is_selected {
+                    selected_rendered_cluster = rendered_cluster;
+                }
             }
         }
 
@@ -89,6 +102,7 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &AppState) {
             // Let's make calculate_grid_layout return extras too.
         }
     }
+    app.rendered_annotation_cluster = selected_rendered_cluster;
 
     // Footer / Status bar
     let errors = app.panels.iter().filter(|p| p.last_error.is_some()).count();
@@ -176,6 +190,8 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &AppState) {
         }
         frame.render_stateful_widget(list, chunks[1], &mut list_state);
     }
+
+    super::render_annotation_modal(frame, app);
 }
 
 fn build_footer_detail(app: &AppState) -> String {
@@ -190,8 +206,8 @@ fn build_footer_detail(app: &AppState) -> String {
         parts.push(format!("Cursor: {cursor_time}"));
     }
 
-    if let Some(warning) = app.annotations.warning() {
-        parts.push(format!("Annotations: {warning}"));
+    if let Some(status) = app.annotations.footer_status() {
+        parts.push(format!("Annotations: {status}"));
     }
 
     if let Some(status) = &app.export_status {
@@ -224,30 +240,11 @@ fn build_footer_detail(app: &AppState) -> String {
     parts.join(" | ")
 }
 
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{export::ExportOptions, prom::PromClient, theme::Theme};
+    use ratatui::{Terminal, backend::TestBackend};
 
     fn test_app() -> AppState {
         AppState::new(
@@ -264,6 +261,89 @@ mod tests {
         )
     }
 
+    fn graph_panel(title: &str) -> PanelState {
+        PanelState {
+            title: title.to_string(),
+            exprs: vec![],
+            legends: vec![],
+            query_modes: vec![],
+            series: vec![],
+            last_error: None,
+            last_url: None,
+            last_samples: 0,
+            grid: None,
+            y_axis_mode: crate::app::YAxisMode::Auto,
+            panel_type: crate::app::PanelType::Graph,
+            thresholds: None,
+            min: None,
+            max: None,
+            autogrid: None,
+            display: crate::ui::DisplayFormat::default(),
+            options: crate::app::PanelOptions::None,
+        }
+    }
+
+    #[test]
+    fn draw_caches_only_selected_panels_active_filtered_cluster() {
+        let mut cpu_deploy = crate::annotations::test_event_at(50.0, "cpu deploy");
+        cpu_deploy.tags = vec!["deploy".to_string()];
+        cpu_deploy.target = crate::annotations::AnnotationTarget::PanelTitles(
+            ["CPU".to_string()].into_iter().collect(),
+        );
+        let mut cpu_incident = crate::annotations::test_event_at(50.0, "cpu incident");
+        cpu_incident.tags = vec!["incident".to_string()];
+        cpu_incident.target = crate::annotations::AnnotationTarget::PanelTitles(
+            ["CPU".to_string()].into_iter().collect(),
+        );
+        let mut memory_incident = crate::annotations::test_event_at(50.0, "memory incident");
+        memory_incident.tags = vec!["incident".to_string()];
+        memory_incident.target = crate::annotations::AnnotationTarget::PanelTitles(
+            ["Memory".to_string()].into_iter().collect(),
+        );
+        let mut app = test_app();
+        app.panels = vec![graph_panel("CPU"), graph_panel("Memory")];
+        app.view_end_ts = 100;
+        app.range = std::time::Duration::from_secs(100);
+        app.mode = AppMode::Inspect;
+        app.cursor_x = Some(50.0);
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![
+            cpu_deploy,
+            cpu_incident,
+            memory_incident,
+        ]);
+        app.annotations
+            .set_filter(crate::annotations::TagFilter::from_selected([
+                "deploy".to_string()
+            ]));
+        let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+
+        terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+        assert_eq!(
+            app.rendered_annotation_cluster
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|event| event.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["cpu deploy"]
+        );
+
+        app.selected_panel = 1;
+        terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+        assert!(app.rendered_annotation_cluster.is_none());
+
+        let mut memory_deploy = crate::annotations::test_event_at(50.0, "memory deploy");
+        memory_deploy.tags = vec!["deploy".to_string()];
+        memory_deploy.target = crate::annotations::AnnotationTarget::PanelTitles(
+            ["Memory".to_string()].into_iter().collect(),
+        );
+        app.annotations =
+            crate::annotations::AnnotationState::from_events_for_test(vec![memory_deploy]);
+        app.panels[1].panel_type = crate::app::PanelType::Unknown;
+        terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+        assert!(app.rendered_annotation_cluster.is_none());
+    }
+
     #[test]
     fn footer_composes_annotation_warning_with_export_and_inspect_status() {
         let mut app = test_app();
@@ -278,6 +358,28 @@ mod tests {
         assert!(detail.contains("Cursor:"));
         assert!(detail.contains("Annotations: events.jsonl:2: invalid time"));
         assert!(detail.contains("Exported frame.svg"));
+    }
+
+    #[test]
+    fn footer_composes_annotation_warning_with_sorted_filter_summary() {
+        let mut event = crate::annotations::test_event_at(10.0, "deploy");
+        event.target = crate::annotations::AnnotationTarget::PanelTitles(
+            ["CPU".to_string()].into_iter().collect(),
+        );
+        let mut app = test_app();
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![event]);
+        app.annotations
+            .reconcile_targets(&["CPU".to_string(), "CPU".to_string()]);
+        app.annotations
+            .set_filter(crate::annotations::TagFilter::from_selected([
+                "incident".to_string(),
+                "deploy".to_string(),
+            ]));
+
+        assert_eq!(
+            build_footer_detail(&app),
+            "Annotations: target \"CPU\" matches 2 graph/timeseries panels; applied to all | tags deploy|incident"
+        );
     }
 
     #[test]

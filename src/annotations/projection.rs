@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use super::{AnnotationEvent, AnnotationPanelContext, AnnotationSnapshot};
+use super::{AnnotationEvent, AnnotationPanelContext, AnnotationSnapshot, TagFilter};
 
 #[derive(Debug)]
 pub(crate) struct AnnotationCluster<'a> {
@@ -10,6 +10,7 @@ pub(crate) struct AnnotationCluster<'a> {
 
 pub(crate) fn events_for_panel<'a>(
     snapshot: &'a AnnotationSnapshot,
+    filter: &TagFilter,
     panel: AnnotationPanelContext<'_>,
     bounds: [f64; 2],
 ) -> Vec<&'a AnnotationEvent> {
@@ -18,7 +19,10 @@ pub(crate) fn events_for_panel<'a>(
         .iter()
         .filter(|event| {
             let timestamp = event.timestamp_secs();
-            timestamp >= bounds[0] && timestamp <= bounds[1] && event.target.applies_to(panel)
+            timestamp >= bounds[0]
+                && timestamp <= bounds[1]
+                && filter.matches(event)
+                && event.target.applies_to(panel)
         })
         .collect()
 }
@@ -42,7 +46,10 @@ pub(crate) fn cluster_events_by<'a>(
 #[cfg(test)]
 mod tests {
     use super::{cluster_events_by, events_for_panel};
-    use crate::annotations::{AnnotationEvent, AnnotationPanelContext, AnnotationSnapshot};
+    use crate::annotations::{
+        AnnotationEvent, AnnotationPanelContext, AnnotationSnapshot, AnnotationTarget,
+        TagCatalogueEntry, TagFilter, tag_catalogue,
+    };
 
     fn event(timestamp: f64, text: &str) -> AnnotationEvent {
         crate::annotations::test_event_at(timestamp, text)
@@ -59,7 +66,11 @@ mod tests {
 
         let events = events_for_panel(
             &snapshot,
-            AnnotationPanelContext { title: "CPU" },
+            &TagFilter::default(),
+            AnnotationPanelContext {
+                index: 0,
+                title: "CPU",
+            },
             [0.0, 100.0],
         );
 
@@ -73,6 +84,53 @@ mod tests {
     }
 
     #[test]
+    fn filters_by_exact_or_tags_before_panel_routing() {
+        let mut deploy = event(10.0, "deploy");
+        deploy.tags = vec!["deploy".to_string()];
+        deploy.target = AnnotationTarget::PanelTitles(["CPU".to_string()].into_iter().collect());
+
+        let mut incident = event(20.0, "incident");
+        incident.tags = vec!["incident".to_string()];
+        let snapshot = AnnotationSnapshot::new(vec![deploy, incident]);
+        let filter = TagFilter::from_selected(["deploy".to_string()]);
+
+        let cpu = events_for_panel(
+            &snapshot,
+            &filter,
+            AnnotationPanelContext {
+                index: 0,
+                title: "CPU",
+            },
+            [0.0, 100.0],
+        );
+        let memory = events_for_panel(
+            &snapshot,
+            &filter,
+            AnnotationPanelContext {
+                index: 1,
+                title: "Memory",
+            },
+            [0.0, 100.0],
+        );
+
+        assert_eq!(
+            cpu.iter()
+                .map(|event| event.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["deploy"]
+        );
+        assert!(memory.is_empty());
+    }
+
+    #[test]
+    fn catalogue_is_available_through_annotations_facade() {
+        assert_eq!(
+            tag_catalogue(&AnnotationSnapshot::default(), &TagFilter::default()),
+            Vec::<TagCatalogueEntry>::new()
+        );
+    }
+
+    #[test]
     fn clusters_events_by_projected_coordinate_in_order() {
         let snapshot = AnnotationSnapshot::new(vec![
             event(10.0, "one"),
@@ -81,7 +139,11 @@ mod tests {
         ]);
         let events = events_for_panel(
             &snapshot,
-            AnnotationPanelContext { title: "CPU" },
+            &TagFilter::default(),
+            AnnotationPanelContext {
+                index: 0,
+                title: "CPU",
+            },
             [0.0, 100.0],
         );
 

@@ -44,7 +44,10 @@ where
 
         if event::poll(timeout)? {
             let action = match event::read()? {
-                Event::Key(key) => input::handle_key(key, app).await?,
+                Event::Key(key) => {
+                    let size = terminal.size()?;
+                    input::handle_key(key, size, app).await?
+                }
                 Event::Mouse(mouse) => {
                     let size = terminal.size()?;
                     input::handle_mouse(mouse, size, app)?
