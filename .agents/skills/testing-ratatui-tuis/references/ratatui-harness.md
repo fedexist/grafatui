@@ -41,10 +41,18 @@ also retained.
 
 ## Normalized capture schema
 
-`render-buffer` accepts this JSON object. All colors are lowercase `#rrggbb`.
-Cells are exhaustive and ordered row-major; modifiers appear in this fixed
-order when present: `bold`, `dim`, `italic`, `underlined`, `reversed`,
-`crossed_out`.
+This full `TestBackend` harness/snapshot format is a producer-side
+canonicalization of the JSON accepted by `render-buffer`. All colors are
+lowercase `#rrggbb`. Its producer must emit exhaustive cells in row-major
+order, and each cell's supported modifiers in this fixed, unique order when
+present: `bold`, `dim`, `italic`, `underlined`, `reversed`, `crossed_out`.
+
+These stricter requirements make full-terminal snapshots byte-stable and
+comparable. They are not renderer restrictions: `render-buffer` accepts any
+unique, in-bounds cells, validates that modifiers are supported, and sorts
+cells before rendering. A sparse capture can therefore be rendered, but it is
+not valid evidence of a complete terminal state and must not be used as this
+harness's full-screen snapshot.
 
 ```json
 {
