@@ -8,6 +8,7 @@ Grafatui can be configured with CLI options, a TOML configuration file, or both.
 |---|---|---|
 | `--prometheus-url <URL>` | Prometheus server URL | `http://localhost:9090` |
 | `--grafana-json <FILE>` | Grafana dashboard JSON file | none |
+| `--annotations-file <FILE>` | Read-only external JSONL point-event file | none |
 | `--validate` | Check the Grafana dashboard import and exit without starting the TUI | `false` |
 | `--strict` | Make `--validate` fail when diagnostics contain warnings | `false` |
 | `--format <FORMAT>` | Output format for `--validate`: `text` or `json` | `text` |
@@ -46,6 +47,7 @@ record_max_frames = 300
 autogrid = true
 autogrid_color = "dark-gray"
 grafana_json = "~/.config/grafatui/my-dashboard.json"
+annotations_file = "./events.jsonl"
 
 [vars]
 job = "node"

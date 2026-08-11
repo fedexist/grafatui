@@ -16,6 +16,7 @@ Grafatui is designed for keyboard-first dashboard inspection.
 | `Home` / `End` | Jump to top or bottom |
 | `y` | Toggle Y-axis mode |
 | `g` | Toggle autogrid guide lines |
+| `a` | Toggle external annotation markers |
 | `1` through `9` | Toggle series visibility |
 | `f` / `Enter` | Toggle fullscreen mode |
 | `v` | Toggle value inspection mode |

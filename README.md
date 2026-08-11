@@ -42,6 +42,7 @@ cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheu
 - Keyboard-first navigation, panel search, fullscreen mode, mouse selection, and value inspection.
 - SVG/PNG export and changed-frame recording bundles.
 - TOML configuration and built-in themes.
+- Read-only external JSONL point annotations for graph and timeseries panels.
 
 ## Documentation
 
@@ -49,6 +50,7 @@ cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheu
 - [Installation](https://fedexist.github.io/grafatui/installation.html)
 - [Quick start](https://fedexist.github.io/grafatui/quick-start.html)
 - [Configuration](https://fedexist.github.io/grafatui/configuration.html)
+- [External annotations](https://fedexist.github.io/grafatui/annotations.html)
 - [Grafana dashboard import](https://fedexist.github.io/grafatui/grafana-dashboard-import.html)
 - [Grafana compatibility matrix](https://fedexist.github.io/grafatui/grafana-compatibility.html)
 - [Examples](examples/README.md)
@@ -66,6 +68,9 @@ grafatui --grafana-json ./dash.json --var job=node --var instance=server-01
 
 # Use a theme
 grafatui --theme tokyo-night
+
+# Overlay read-only JSONL point events
+grafatui --grafana-json ./dashboard.json --annotations-file ./events.jsonl
 
 # Generate shell completions or a man page
 grafatui completions zsh

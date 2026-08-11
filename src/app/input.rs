@@ -43,6 +43,11 @@ pub(super) async fn handle_key(key: KeyEvent, app: &mut AppState) -> Result<Inpu
         return Ok(InputAction::ExportCurrent);
     }
 
+    if key.code == KeyCode::Char('a') && key.modifiers.is_empty() && app.mode != AppMode::Search {
+        app.annotations.toggle_visibility();
+        return Ok(InputAction::Redraw);
+    }
+
     let action = match app.mode {
         AppMode::Search => handle_search_key(key, app),
         AppMode::Inspect => handle_inspect_key(key, app),
@@ -451,6 +456,23 @@ mod tests {
             .unwrap();
         assert_eq!(action, InputAction::ToggleRecording);
         assert_eq!(app.search_query, "e");
+    }
+
+    #[tokio::test]
+    async fn annotations_toggle_in_normal_and_inspect_modes_but_types_in_search() {
+        let mut app = test_app();
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![]);
+
+        handle_key(key(KeyCode::Char('a')), &mut app).await.unwrap();
+        assert!(!app.annotations.is_visible());
+
+        app.mode = AppMode::Inspect;
+        handle_key(key(KeyCode::Char('a')), &mut app).await.unwrap();
+        assert!(app.annotations.is_visible());
+
+        app.mode = AppMode::Search;
+        handle_key(key(KeyCode::Char('a')), &mut app).await.unwrap();
+        assert_eq!(app.search_query, "a");
     }
 
     #[tokio::test]

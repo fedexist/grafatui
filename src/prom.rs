@@ -100,10 +100,12 @@ impl PromClient {
         // Check cache
         {
             let cache = self.cache.lock().unwrap();
-            if let Some((c_start, c_end, c_step, data)) = cache.get(expr) {
-                if *c_start == start && *c_end == end && *c_step == step {
-                    return Ok(data.clone());
-                }
+            if let Some((c_start, c_end, c_step, data)) = cache.get(expr)
+                && *c_start == start
+                && *c_end == end
+                && *c_step == step
+            {
+                return Ok(data.clone());
             }
         }
 

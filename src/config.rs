@@ -29,6 +29,7 @@ pub(crate) struct Config {
     pub(crate) step: Option<String>,
     pub(crate) theme: Option<String>,
     pub(crate) grafana_json: Option<PathBuf>,
+    pub(crate) annotations_file: Option<PathBuf>,
     pub(crate) threshold_marker: Option<String>,
     pub(crate) export_dir: Option<PathBuf>,
     pub(crate) export_format: Option<crate::export::ExportFormat>,
@@ -43,12 +44,12 @@ impl Config {
         let config_path = cli_path
             .map(|p| expand_path(&p))
             .or_else(Self::get_config_path);
-        if let Some(path) = config_path {
-            if path.exists() {
-                let content = fs::read_to_string(path)?;
-                let config: Config = toml::from_str(&content)?;
-                return Ok(config);
-            }
+        if let Some(path) = config_path
+            && path.exists()
+        {
+            let content = fs::read_to_string(path)?;
+            let config: Config = toml::from_str(&content)?;
+            return Ok(config);
         }
         Ok(Config::default())
     }
@@ -77,15 +78,15 @@ impl Config {
 /// Expands a path starting with `~` to the user's home directory.
 pub(crate) fn expand_path(path: &std::path::Path) -> PathBuf {
     let path_str = path.to_string_lossy();
-    if path_str.starts_with("~") {
-        if let Some(dirs) = directories::UserDirs::new() {
-            let home = dirs.home_dir();
-            if path_str == "~" {
-                return home.to_path_buf();
-            }
-            if path_str.starts_with("~/") || path_str.starts_with("~\\") {
-                return home.join(&path_str[2..]);
-            }
+    if path_str.starts_with("~")
+        && let Some(dirs) = directories::UserDirs::new()
+    {
+        let home = dirs.home_dir();
+        if path_str == "~" {
+            return home.to_path_buf();
+        }
+        if path_str.starts_with("~/") || path_str.starts_with("~\\") {
+            return home.join(&path_str[2..]);
         }
     }
     path.to_path_buf()
@@ -104,6 +105,7 @@ mod tests {
             export_format = "svg"
             autogrid = false
             autogrid_color = "gray"
+            annotations_file = "~/events.jsonl"
         "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(
@@ -115,6 +117,10 @@ mod tests {
         assert_eq!(config.export_format, Some(crate::export::ExportFormat::Svg));
         assert_eq!(config.autogrid, Some(false));
         assert_eq!(config.autogrid_color, Some("gray".to_string()));
+        assert_eq!(
+            config.annotations_file,
+            Some(PathBuf::from("~/events.jsonl"))
+        );
     }
 
     #[test]

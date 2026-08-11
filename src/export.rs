@@ -14,6 +14,9 @@
  * limitations under the License.
  */
 
+use crate::annotations::{
+    AnnotationCluster, AnnotationPanelContext, cluster_events_by, format_cluster_detail_lines,
+};
 use crate::app::{AppMode, AppState, PanelState, PanelType, SeriesView, ThresholdMode};
 use crate::theme::Theme;
 use crate::ui;
@@ -428,7 +431,19 @@ fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
         return;
     }
 
-    let legend_height = if panel.series.is_empty() {
+    let (x_min, x_max) = app.time_bounds();
+    let annotations_enabled = panel.panel_type == PanelType::Graph;
+    let has_annotations = annotations_enabled
+        && !app
+            .annotations
+            .events_for_panel(
+                AnnotationPanelContext {
+                    title: &panel.title,
+                },
+                [x_min, x_max],
+            )
+            .is_empty();
+    let legend_height = if panel.series.is_empty() && !has_annotations {
         0.0
     } else {
         LEGEND_HEIGHT
@@ -441,7 +456,7 @@ fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
         height: (rect.height - X_LABEL_HEIGHT - legend_height - 10.0).max(1.0),
     };
 
-    let (x_min, x_max) = app.time_bounds();
+    let x_bounds = [x_min, x_max];
     let y_bounds = ui::calculate_y_bounds(panel);
     let text = color_hex(app.theme.text, "#e6e6e6");
     let axis = color_hex(Color::Gray, "#777777");
@@ -491,7 +506,7 @@ fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
     }
 
     for tick in time_ticks(x_min, x_max) {
-        let x = map_x(tick, [x_min, x_max], plot);
+        let x = map_x(tick, x_bounds, plot);
         draw_line(
             out,
             (x, plot.top),
@@ -577,29 +592,32 @@ fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
         );
     }
 
-    if let Some(cursor_x) = app.cursor_x {
-        if cursor_x >= x_min && cursor_x <= x_max {
-            let x = map_x(cursor_x, [x_min, x_max], plot);
-            draw_line(
-                out,
-                (x, plot.top),
-                (x, plot.bottom()),
-                LineStyle {
-                    color: "#ffffff",
-                    dash: Some("4 4"),
-                    width: 1.0,
-                },
-            );
+    // Area fills remain behind annotations so marker lines stay legible.
+    if graph_options.draw_style == crate::app::GraphDrawStyle::Line
+        && let Some(opacity) = graph_area_opacity(&graph_options)
+    {
+        for (index, series) in panel.series.iter().enumerate() {
+            if !series.visible {
+                continue;
+            }
+            let color = color_hex(series_color(panel, &app.theme, index), "#00ff88");
+            render_graph_area(series, plot, y_bounds, x_bounds, &color, opacity, out);
         }
     }
 
+    let annotation_clusters = if annotations_enabled {
+        render_graph_annotations(app, panel, plot, x_bounds, out)
+    } else {
+        Vec::new()
+    };
+
+    // Primary data follows annotations to preserve graph-data precedence.
     for (index, series) in panel.series.iter().enumerate() {
         if !series.visible {
             continue;
         }
         let color = series_color(panel, &app.theme, index);
         let color = color_hex(color, "#00ff88");
-        let x_bounds = [x_min, x_max];
 
         match graph_options.draw_style {
             crate::app::GraphDrawStyle::Points => {
@@ -609,13 +627,10 @@ fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
                 render_graph_bars(series, plot, y_bounds, x_bounds, &color, out);
             }
             crate::app::GraphDrawStyle::Line => {
-                if let Some(opacity) = graph_area_opacity(&graph_options) {
-                    render_graph_area(series, plot, y_bounds, x_bounds, &color, opacity, out);
-                }
                 if let Some(path) = series_path(series, x_bounds, y_bounds, plot) {
                     write!(
                         out,
-                        r#"<path d="{path}" fill="none" stroke="{color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>"#
+                        r#"<path data-role="graph-line" d="{path}" fill="none" stroke="{color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>"#
                     )
                     .unwrap();
                 }
@@ -626,14 +641,127 @@ fn render_graph_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
         }
     }
 
-    render_legend(
-        app,
-        panel,
-        plot.left,
-        plot.bottom() + X_LABEL_HEIGHT,
-        plot.width,
-        out,
+    if let Some(cursor_x) = app.cursor_x
+        && cursor_x >= x_min
+        && cursor_x <= x_max
+    {
+        let x = map_x(cursor_x, x_bounds, plot);
+        draw_line(
+            out,
+            (x, plot.top),
+            (x, plot.bottom()),
+            LineStyle {
+                color: "#ffffff",
+                dash: Some("4 4"),
+                width: 1.0,
+            },
+        );
+    }
+
+    let active_annotation =
+        active_export_annotation(&annotation_clusters, app.cursor_x, x_bounds, plot);
+    let legend_top = plot.bottom() + X_LABEL_HEIGHT;
+    if let Some(cluster) = active_annotation {
+        render_annotation_details(
+            cluster,
+            plot.left,
+            legend_top,
+            plot.width,
+            &color_hex(app.theme.border_selected, "#f0d000"),
+            out,
+        );
+    } else {
+        render_legend(app, panel, plot.left, legend_top, plot.width, out);
+    }
+}
+
+fn render_graph_annotations<'a>(
+    app: &'a AppState,
+    panel: &PanelState,
+    plot: PlotRect,
+    x_bounds: [f64; 2],
+    out: &mut String,
+) -> Vec<AnnotationCluster<'a>> {
+    let events = app.annotations.events_for_panel(
+        AnnotationPanelContext {
+            title: &panel.title,
+        },
+        x_bounds,
     );
+    let clusters = cluster_events_by(events, |timestamp| {
+        Some(map_x(timestamp, x_bounds, plot).round() as u32)
+    });
+    let color = color_hex(app.theme.border_selected, "#f0d000");
+
+    for cluster in &clusters {
+        let x = f64::from(cluster.coordinate);
+        write!(
+            out,
+            r#"<line data-role="annotation-marker" x1="{x:.2}" y1="{:.2}" x2="{x:.2}" y2="{:.2}" stroke="{color}" stroke-width="1.00" stroke-dasharray="3 4"/>"#,
+            plot.top,
+            plot.bottom()
+        )
+        .unwrap();
+        write!(
+            out,
+            r#"<text x="{x:.2}" y="{:.2}" fill="{color}" font-size="{SMALL_FONT_SIZE:.1}" text-anchor="middle" data-role="annotation-count">{}</text>"#,
+            plot.top + SMALL_FONT_SIZE,
+            annotation_cluster_badge(cluster.events.len())
+        )
+        .unwrap();
+    }
+
+    clusters
+}
+
+fn annotation_cluster_badge(count: usize) -> char {
+    match count {
+        0 => ' ',
+        1 => '•',
+        2..=9 => char::from_digit(count as u32, 10).unwrap(),
+        _ => '+',
+    }
+}
+
+fn active_export_annotation<'a>(
+    clusters: &'a [AnnotationCluster<'a>],
+    cursor_x: Option<f64>,
+    x_bounds: [f64; 2],
+    plot: PlotRect,
+) -> Option<&'a AnnotationCluster<'a>> {
+    let cursor_x = cursor_x?;
+    if cursor_x < x_bounds[0] || cursor_x > x_bounds[1] {
+        return None;
+    }
+    let coordinate = map_x(cursor_x, x_bounds, plot).round() as u32;
+    clusters
+        .iter()
+        .find(|cluster| cluster.coordinate == coordinate)
+}
+
+fn render_annotation_details(
+    cluster: &AnnotationCluster<'_>,
+    left: f64,
+    top: f64,
+    width: f64,
+    color: &str,
+    out: &mut String,
+) {
+    let character_budget = if width.is_finite() && width > 0.0 {
+        (width / SMALL_FONT_SIZE).floor() as usize
+    } else {
+        0
+    };
+    let [heading, details] = format_cluster_detail_lines(cluster, character_budget);
+    for (row, line) in [heading, details].iter().enumerate() {
+        write!(
+            out,
+            r#"<text x="{left:.2}" y="{:.2}" fill="{color}" font-size="{SMALL_FONT_SIZE:.1}" text-anchor="start" data-role="annotation-detail">{}</text>"#,
+            top + 12.0 + row as f64 * 13.0,
+            escape_xml(line)
+        )
+        .unwrap();
+    }
 }
 
 fn render_stat_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &mut String) {
@@ -1092,10 +1220,10 @@ fn cursor_values(panel: &PanelState, app: &AppState) -> std::collections::HashMa
             let db = (b.0 - cursor_x).abs();
             da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
         });
-        if let Some((ts, value)) = closest {
-            if (ts - cursor_x).abs() <= app.step.as_secs_f64() * 2.0 {
-                values.insert(series.name.clone(), *value);
-            }
+        if let Some((ts, value)) = closest
+            && (ts - cursor_x).abs() <= app.step.as_secs_f64() * 2.0
+        {
+            values.insert(series.name.clone(), *value);
         }
     }
     values
@@ -1467,12 +1595,31 @@ fn indexed_color_hex(value: u8) -> &'static str {
 }
 
 fn escape_xml(input: &str) -> String {
-    input
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
+    let mut escaped = String::with_capacity(input.len());
+    for character in input.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&apos;"),
+            character if is_valid_xml_1_0_character(character) => escaped.push(character),
+            _ => escaped.push(char::REPLACEMENT_CHARACTER),
+        }
+    }
+    escaped
+}
+
+fn is_valid_xml_1_0_character(character: char) -> bool {
+    matches!(
+        character,
+        '\u{9}'
+            | '\u{a}'
+            | '\u{d}'
+            | '\u{20}'..='\u{d7ff}'
+            | '\u{e000}'..='\u{fffd}'
+            | '\u{10000}'..='\u{10ffff}'
+    )
 }
 
 fn timestamp_id() -> String {
@@ -1564,6 +1711,16 @@ mod tests {
     }
 
     #[test]
+    fn test_escape_xml_replaces_invalid_xml_1_0_characters() {
+        assert_eq!(
+            escape_xml(
+                "\u{0}\u{1}\t\n\r \u{d7ff}\u{e000}\u{fffd}\u{fffe}\u{ffff}\u{10000}\u{10ffff}&"
+            ),
+            "��\t\n\r \u{d7ff}\u{e000}\u{fffd}��\u{10000}\u{10ffff}&amp;"
+        );
+    }
+
+    #[test]
     fn test_map_coordinates_respect_bounds() {
         let plot = PlotRect {
             left: 10.0,
@@ -1631,6 +1788,166 @@ mod tests {
 
         assert!(svg.contains(&ui::format_time(1_699_999_900.0)));
         assert!(svg.contains(&ui::format_time(1_700_000_000.0)));
+    }
+
+    #[test]
+    fn graph_export_renders_visible_annotations_and_exact_cluster_count() {
+        let mut app = test_app_with_panel_type(PanelType::Graph);
+        app.view_end_ts = 100;
+        app.range = std::time::Duration::from_secs(100);
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![
+            crate::annotations::test_event_at(50.0, "deploy"),
+            crate::annotations::test_event_at(50.01, "rollback"),
+            crate::annotations::test_event_at(50.02, "resolved"),
+        ]);
+        app.cursor_x = Some(50.0);
+
+        let svg = render_svg(&app, Rect::new(0, 0, 120, 50));
+
+        assert_eq!(svg.matches(r#"data-role="annotation-marker""#).count(), 1);
+        assert!(svg.contains(r#"data-role="annotation-count">3</text>"#));
+        assert_eq!(svg.matches(r#"data-role="annotation-detail""#).count(), 2);
+        assert!(svg.contains("3 events near 1970-01-01 00:00:50 UTC"));
+        assert!(svg.contains("deploy · rollback · resolved"));
+    }
+
+    #[test]
+    fn graph_export_bounds_large_annotation_details_with_ellipsis() {
+        let mut app = test_app_with_panel_type(PanelType::Graph);
+        app.view_end_ts = 100;
+        app.range = std::time::Duration::from_secs(100);
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(
+            (0..100)
+                .map(|index| {
+                    crate::annotations::test_event_at(
+                        50.0,
+                        &format!("event-{index:03}-{}", "x".repeat(200)),
+                    )
+                })
+                .collect(),
+        );
+        app.cursor_x = Some(50.0);
+
+        let svg = render_svg(&app, Rect::new(0, 0, 120, 50));
+        let detail_lines = svg
+            .split(r#"data-role="annotation-detail""#)
+            .skip(1)
+            .map(|suffix| {
+                suffix
+                    .split_once('>')
+                    .unwrap()
+                    .1
+                    .split_once("</text>")
+                    .unwrap()
+                    .0
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(detail_lines.len(), 2);
+        assert!(detail_lines[0].starts_with("100 events near"));
+        assert!(detail_lines[1].starts_with("event-000-"));
+        assert!(detail_lines[1].ends_with('…'));
+        assert!(!detail_lines[1].contains("event-001-"));
+        assert!(detail_lines.iter().all(|line| line.chars().count() <= 120));
+    }
+
+    #[test]
+    fn graph_export_routes_inclusive_fractional_annotations_and_escapes_active_details() {
+        let mut app = test_app_with_panel_type(PanelType::Graph);
+        app.view_end_ts = 100;
+        app.range = std::time::Duration::from_secs(100);
+        app.theme.border_selected = Color::Rgb(1, 2, 3);
+        let active_time = chrono::DateTime::parse_from_rfc3339("1970-01-01T00:00:50.123456789Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let active_timestamp = active_time.timestamp() as f64
+            + f64::from(active_time.timestamp_subsec_nanos()) / 1_000_000_000.0;
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![
+            crate::annotations::test_event_at(0.0, "start"),
+            crate::annotations::AnnotationEvent {
+                time: active_time,
+                text: "deploy <prod> & \"main\"".to_string(),
+                tags: vec!["api&edge".to_string(), "<blue>".to_string()],
+                target: crate::annotations::AnnotationTarget::All,
+            },
+            crate::annotations::test_event_at(100.0, "end"),
+        ]);
+        app.cursor_x = Some(active_timestamp);
+
+        let svg = render_svg(&app, Rect::new(0, 0, 120, 50));
+
+        assert_eq!(svg.matches(r#"data-role="annotation-marker""#).count(), 3);
+        let active_marker = svg
+            .split(r#"data-role="annotation-marker""#)
+            .nth(2)
+            .unwrap()
+            .split("/>")
+            .next()
+            .unwrap();
+        assert!(active_marker.contains(r##"stroke="#010203""##));
+        assert!(svg.contains("1970-01-01 00:00:50.123 UTC"));
+        assert!(!svg.contains("1970-01-01 00:00:50.123456789 UTC"));
+        assert!(
+            svg.contains("deploy &lt;prod&gt; &amp; &quot;main&quot; [api&amp;edge, &lt;blue&gt;]")
+        );
+        assert!(!svg.contains("usage &amp; total ("));
+    }
+
+    #[test]
+    fn graph_export_omits_hidden_annotations_and_non_graph_markers() {
+        let mut hidden = test_app_with_panel_type(PanelType::Graph);
+        hidden.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![
+            crate::annotations::test_event_at(hidden.view_end_ts as f64, "deploy"),
+        ]);
+        hidden.annotations.toggle_visibility();
+        assert!(
+            !render_svg(&hidden, Rect::new(0, 0, 120, 50))
+                .contains(r#"data-role="annotation-marker""#)
+        );
+
+        let mut stat = test_app_with_panel_type(PanelType::Stat);
+        stat.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![
+            crate::annotations::test_event_at(stat.view_end_ts as f64, "deploy"),
+        ]);
+        assert!(
+            !render_svg(&stat, Rect::new(0, 0, 120, 50))
+                .contains(r#"data-role="annotation-marker""#)
+        );
+
+        let mut unknown = test_app_with_panel_type(PanelType::Unknown);
+        unknown.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![
+            crate::annotations::test_event_at(unknown.view_end_ts as f64, "deploy"),
+        ]);
+        assert!(
+            !render_svg(&unknown, Rect::new(0, 0, 120, 50))
+                .contains(r#"data-role="annotation-marker""#)
+        );
+    }
+
+    #[test]
+    fn graph_export_orders_annotations_after_area_and_before_primary_data() {
+        let mut app = test_app_with_panel_type(PanelType::Graph);
+        app.panels[0].options = PanelOptions::Graph(GraphOptions {
+            draw_style: GraphDrawStyle::Line,
+            show_points: GraphPointMode::Always,
+            fill_opacity: Some(30),
+            axis_placement: GraphAxisPlacement::Visible,
+            line_interpolation: None,
+            stacking: GraphStackingMode::Off,
+        });
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![
+            crate::annotations::test_event_at(app.view_end_ts as f64, "deploy"),
+        ]);
+
+        let svg = render_svg(&app, Rect::new(0, 0, 120, 50));
+        let area = svg.find(r#"data-role="graph-area""#).unwrap();
+        let annotation = svg.find(r#"data-role="annotation-marker""#).unwrap();
+        let line = svg.find(r#"data-role="graph-line""#).unwrap();
+        let point = svg.find(r#"data-role="graph-point""#).unwrap();
+
+        assert!(area < annotation);
+        assert!(annotation < line);
+        assert!(annotation < point);
     }
 
     #[test]
@@ -1793,8 +2110,12 @@ mod tests {
 
     #[test]
     fn test_png_rasterization_writes_non_empty_file() {
-        let app = test_app(ExportOptions::default());
+        let mut app = test_app(ExportOptions::default());
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![
+            crate::annotations::test_event_at(app.view_end_ts as f64, "deploy"),
+        ]);
         let svg = render_svg(&app, Rect::new(0, 0, 100, 40));
+        assert!(svg.contains(r#"data-role="annotation-marker""#));
         let dir = test_export_dir("png");
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("snapshot.png");
@@ -1802,6 +2123,60 @@ mod tests {
         write_png(&svg, &path).unwrap();
 
         assert!(fs::metadata(&path).unwrap().len() > 0);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn annotation_xml_controls_are_safe_for_svg_png_and_recording() {
+        let dir = test_export_dir("annotation-xml");
+        let export = ExportOptions {
+            dir: dir.clone(),
+            format: ExportFormat::Both,
+            record_max_frames: 10,
+        };
+        let mut app = test_app(export);
+        app.view_end_ts = 100;
+        app.range = std::time::Duration::from_secs(100);
+        let mut event = crate::annotations::test_event_at(
+            50.0,
+            "deploy\t\n\r Ω😀\u{0}\u{1}\u{fffe}\u{ffff} complete",
+        );
+        event.tags = vec!["valid\u{10000}".to_string(), "bad\u{8}".to_string()];
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![event]);
+        app.cursor_x = Some(50.0);
+        let viewport = Rect::new(0, 0, 120, 50);
+
+        let svg = render_svg(&app, viewport);
+        assert!(!svg.chars().any(|character| {
+            matches!(
+                character,
+                '\u{0}' | '\u{1}' | '\u{8}' | '\u{fffe}' | '\u{ffff}'
+            )
+        }));
+        assert!(svg.contains("\t\n\r Ω😀"));
+        assert!(svg.contains("valid\u{10000}"));
+        assert!(svg.contains('�'));
+        let options = resvg::usvg::Options::default();
+        resvg::usvg::Tree::from_data(svg.as_bytes(), &options).unwrap();
+
+        toggle_recording(&mut app, viewport).unwrap();
+        let recording = app.recording.as_ref().unwrap();
+        assert_eq!(recording.frame_count, 1);
+        assert_eq!(recording.frames[0].files.len(), 2);
+        assert!(
+            fs::metadata(recording.dir.join("frame-000001.svg"))
+                .unwrap()
+                .len()
+                > 0
+        );
+        assert!(
+            fs::metadata(recording.dir.join("frame-000001.png"))
+                .unwrap()
+                .len()
+                > 0
+        );
+        toggle_recording(&mut app, viewport).unwrap();
+
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -13,6 +13,18 @@ docker-compose up -d && sleep 5 && cd ../.. && cargo run -- --grafana-json examp
 
 See [`demo/README.md`](demo/README.md) for details.
 
+## External Annotations
+
+[`annotations.jsonl`](annotations.jsonl) is a read-only external JSONL event
+source for graph and timeseries panels. Run it with a dashboard:
+
+```bash
+cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --annotations-file examples/annotations.jsonl
+```
+
+See the [external annotations guide](../docs/annotations.md) for the event
+format, reload behavior, and limitations.
+
 ## Dashboards
 
 
