@@ -11,7 +11,7 @@ mod projection;
 pub(crate) use details::format_cluster_detail_lines;
 pub(crate) use details::format_event_time;
 pub(crate) use diagnostics::{AnnotationTargetWarning, target_warnings};
-#[allow(unused_imports)]
+#[cfg(test)]
 pub(crate) use filter::tag_catalogue;
 pub(crate) use filter::{TagCatalogueEntry, TagFilter};
 pub(crate) use jsonl::{JsonlFileSource, SourcePoll};

@@ -33,8 +33,12 @@ grafatui-recording-<timestamp>/
 
 If `--export-format png` or `both` is selected, matching PNG files are written too.
 
-When external annotations are visible, their markers and any active inline
-annotation details are included in exports and changed-frame recordings.
+When external annotations are visible, their panel targeting and applied tag
+filter affect the markers written to SVG/PNG exports and changed-frame
+recordings. Any active inline annotation details remain exportable. Annotation
+modal chrome is omitted from exports and recordings, and draft-only tag-filter
+edits do not create recording frames; a frame can change after the filter is
+applied or cleared.
 
 ## Recording Limits
 
