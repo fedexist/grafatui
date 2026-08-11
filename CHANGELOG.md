@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.1.11] - 2026-08-11
+
+### ⛰️  Features
+
+- Add annotation event model ([8d860a3](https://github.com/fedexist/grafatui/commit/8d860a3b8f30b365d315d2e834434ebcdf55a6fe))
+- Add annotation file source state ([8afd216](https://github.com/fedexist/grafatui/commit/8afd216eb0c6bad23eede823cb800e99e5037592))
+- Configure JSONL annotations ([27007b0](https://github.com/fedexist/grafatui/commit/27007b02a1b3aa00fa8b023601c12401648dc8fc))
+- Render terminal annotations ([a3226ec](https://github.com/fedexist/grafatui/commit/a3226ec3cf34cb95bd6459793528fe9f73fe21d3))
+- Control annotation visibility ([b111196](https://github.com/fedexist/grafatui/commit/b1111960c1f4bbd68d69e82b41242a6e63be5eb7))
+- Export annotation markers ([d012f25](https://github.com/fedexist/grafatui/commit/d012f2527b6609f1b84b1e03e38ecc08977d53b9))
+
+### 🐛 Bug Fixes
+
+- Preserve annotation timestamp precision ([f039684](https://github.com/fedexist/grafatui/commit/f039684207aa99c6b367762565a3d2db8a7ac13b))
+- Complete annotation verification ([4732391](https://github.com/fedexist/grafatui/commit/47323915004d8ded36fa54e382c7193354912c9a))
+- Harden annotation review edge cases ([618d479](https://github.com/fedexist/grafatui/commit/618d479b5c4e9a7c7b36ceac4dd5bb2335c995b4))
+- Gate annotation strong-data mask ([3d9216e](https://github.com/fedexist/grafatui/commit/3d9216e15d25b120e6001f5e042b8873fbbe7f74))
+
+### 📚 Documentation
+
+- Explain external annotations ([37f9c5e](https://github.com/fedexist/grafatui/commit/37f9c5e2f3d3ee1e5544a4ad4b6d6b63032be966))
+- Clarify annotation file behavior ([079c257](https://github.com/fedexist/grafatui/commit/079c2579e370f427161b107ec789934c8c02a76a))
+
+### ⚙️ Miscellaneous Tasks
+
+- Update gitignore ([aa7362d](https://github.com/fedexist/grafatui/commit/aa7362d93a9ea5d901a9b8190dd996a64fcb5673))
+
+
 ## [0.1.10] - 2026-06-30
 
 ### ⛰️  Features
