@@ -16,14 +16,17 @@ See [`demo/README.md`](demo/README.md) for details.
 ## External Annotations
 
 [`annotations.jsonl`](annotations.jsonl) is a read-only external JSONL event
-source for graph and timeseries panels. Run it with a dashboard:
+source for graph and timeseries panels. Its `Deployed v2.4` event uses
+`panel_titles` to target the bundled `HTTP Request Rate by Status Code` panel;
+the remaining events omit `panel_titles` and therefore remain dashboard-wide.
+Run it with a dashboard:
 
 ```bash
 cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --annotations-file examples/annotations.jsonl
 ```
 
-See the [external annotations guide](../docs/annotations.md) for the event
-format, reload behavior, and limitations.
+See the [external annotations guide](../docs/annotations.md) for targeting,
+tag filtering, inspection, reload behavior, and limitations.
 
 ## Dashboards
 

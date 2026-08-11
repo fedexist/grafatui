@@ -274,6 +274,10 @@ pub(crate) struct AppState {
     pub(crate) prometheus: prom::PromClient,
     /// Optional external point-event state.
     pub(crate) annotations: crate::annotations::AnnotationState,
+    /// Owned active annotation cluster produced by the selected panel's latest draw.
+    pub(crate) rendered_annotation_cluster: Option<Vec<crate::annotations::AnnotationEvent>>,
+    /// Active annotation exploration modal, if any.
+    pub(crate) annotation_modal: Option<crate::annotations::AnnotationModal>,
     /// Current time range window.
     pub(crate) range: Duration,
     /// Query step resolution.
@@ -355,6 +359,8 @@ impl AppState {
         Self {
             prometheus,
             annotations: crate::annotations::AnnotationState::from_path(None),
+            rendered_annotation_cluster: None,
+            annotation_modal: None,
             range,
             step,
             refresh_every,
@@ -484,8 +490,32 @@ impl AppState {
         }
     }
 
+    pub(crate) fn open_rendered_annotation_cluster(&mut self) {
+        let Some(events) = self.rendered_annotation_cluster.clone() else {
+            return;
+        };
+        if let Some(modal) = crate::annotations::ClusterModalState::new(events) {
+            self.annotation_modal = Some(crate::annotations::AnnotationModal::Cluster(modal));
+        }
+    }
+
+    pub(crate) fn open_tag_filter_modal(&mut self) {
+        if let Some(modal) = self.annotations.new_tag_filter_modal() {
+            self.annotation_modal = Some(crate::annotations::AnnotationModal::TagFilter(modal));
+        }
+    }
+
     pub(crate) async fn refresh(&mut self) -> Result<()> {
-        self.annotations.refresh_if_changed().await;
+        let annotations_changed = self.annotations.refresh_if_changed().await;
+        if annotations_changed {
+            let eligible_titles = self
+                .panels
+                .iter()
+                .filter(|panel| panel.panel_type == PanelType::Graph)
+                .map(|panel| panel.title.clone())
+                .collect::<Vec<_>>();
+            self.annotations.reconcile_targets(&eligible_titles);
+        }
 
         let range = self.range;
         let step = self.step;
@@ -651,6 +681,28 @@ mod tests {
         )
     }
 
+    fn test_panel(title: &str, panel_type: PanelType) -> PanelState {
+        PanelState {
+            title: title.to_string(),
+            exprs: vec![],
+            legends: vec![],
+            query_modes: vec![],
+            series: vec![],
+            last_error: None,
+            last_url: None,
+            last_samples: 0,
+            grid: None,
+            y_axis_mode: YAxisMode::Auto,
+            panel_type,
+            thresholds: None,
+            min: None,
+            max: None,
+            autogrid: None,
+            display: crate::ui::DisplayFormat::default(),
+            options: PanelOptions::None,
+        }
+    }
+
     #[tokio::test]
     async fn test_empty_panels() {
         let mut app = create_test_app();
@@ -677,6 +729,76 @@ mod tests {
         app.refresh().await.unwrap();
 
         assert_eq!(app.annotations.snapshot().unwrap().len(), 1);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn reload_preserves_open_cluster_modal() {
+        let path = temp_annotation_path("open-cluster-reload");
+        std::fs::write(
+            &path,
+            "{\"time\":\"2026-07-23T14:30:00Z\",\"text\":\"initial\"}\n",
+        )
+        .unwrap();
+        let mut app = create_test_app();
+        app.annotations = crate::annotations::AnnotationState::from_path(Some(path.clone()));
+        app.refresh().await.unwrap();
+        app.rendered_annotation_cluster =
+            Some(app.annotations.snapshot().unwrap().events().to_vec());
+        app.open_rendered_annotation_cluster();
+
+        std::fs::write(
+            &path,
+            "{\"time\":\"2026-07-23T14:31:00Z\",\"text\":\"replacement event\"}\n",
+        )
+        .unwrap();
+        app.refresh().await.unwrap();
+
+        assert_eq!(
+            app.annotations.snapshot().unwrap().events()[0].text,
+            "replacement event"
+        );
+        let Some(crate::annotations::AnnotationModal::Cluster(modal)) =
+            app.annotation_modal.as_ref()
+        else {
+            panic!("cluster modal should remain open");
+        };
+        assert_eq!(modal.events()[0].text, "initial");
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn refresh_reconciles_annotation_targets() {
+        let path = temp_annotation_path("target-reconciliation");
+        std::fs::write(
+            &path,
+            concat!(
+                r#"{"time":"2026-08-11T14:30:00Z","text":"cpu","panel_titles":["CPU"]}"#,
+                "\n",
+                r#"{"time":"2026-08-11T14:31:00Z","text":"stat","panel_titles":["OnlyStat"]}"#,
+                "\n",
+                r#"{"time":"2026-08-11T14:32:00Z","text":"missing","panel_titles":["Missing"]}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+        let mut app = create_test_app();
+        app.panels = vec![
+            test_panel("CPU", PanelType::Graph),
+            test_panel("CPU", PanelType::Graph),
+            test_panel("OnlyStat", PanelType::Stat),
+        ];
+        app.annotations = crate::annotations::AnnotationState::from_path(Some(path.clone()));
+
+        app.refresh().await.unwrap();
+
+        assert_eq!(
+            app.annotations.footer_status(),
+            Some(
+                "target \"CPU\" matches 2 graph/timeseries panels; applied to all (+2 more)"
+                    .to_string()
+            )
+        );
         std::fs::remove_file(path).unwrap();
     }
 

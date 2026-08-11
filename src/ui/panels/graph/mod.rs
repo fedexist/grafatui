@@ -175,18 +175,27 @@ fn render_forced_point_markers(
 pub(super) fn render_graph_panel(
     frame: &mut Frame,
     area: Rect,
+    panel_index: usize,
     p: &PanelState,
     app: &AppState,
     cursor_x: Option<f64>,
-) {
+    is_selected: bool,
+) -> Option<Vec<crate::annotations::AnnotationEvent>> {
     let theme = &app.theme;
     let use_hash_colors = p.series.len() > theme.palette.len();
     // Determine x bounds from the last refreshed query window.
     let (start, now) = app.time_bounds();
-    let annotation_events = app.annotations.events_for_panel(
-        crate::annotations::AnnotationPanelContext { title: &p.title },
-        [start, now],
-    );
+    let annotation_events = if p.panel_type == crate::app::PanelType::Graph {
+        app.annotations.events_for_panel(
+            crate::annotations::AnnotationPanelContext {
+                index: panel_index,
+                title: &p.title,
+            },
+            [start, now],
+        )
+    } else {
+        Vec::new()
+    };
     let strong_data_mask_mode = strong_data_mask_mode(&annotation_events);
 
     // If inspecting, find values at cursor
@@ -458,6 +467,17 @@ pub(super) fn render_graph_panel(
     let annotation_clusters = terminal_clusters(annotation_events, [start, now], plot_bounds);
     let active_annotation =
         active_cluster(&annotation_clusters, cursor_x, [start, now], plot_bounds);
+    let rendered_cluster = if is_selected {
+        active_annotation.map(|cluster| {
+            cluster
+                .events
+                .iter()
+                .map(|event| (*event).clone())
+                .collect::<Vec<_>>()
+        })
+    } else {
+        None
+    };
 
     // Render threshold markers after chart rendering by merging only onto blank cells.
     // This guarantees data curves keep precedence wherever both map to the same terminal cell.
@@ -603,6 +623,8 @@ pub(super) fn render_graph_panel(
             frame.render_widget(legend, legend_area);
         }
     }
+
+    rendered_cluster
 }
 
 #[cfg(test)]
@@ -845,6 +867,7 @@ mod tests {
         let (start, end) = app.time_bounds();
         app.annotations.events_for_panel(
             crate::annotations::AnnotationPanelContext {
+                index: 0,
                 title: &app.panels[0].title,
             },
             [start, end],
@@ -859,7 +882,7 @@ mod tests {
 
         terminal
             .draw(|frame| {
-                render_graph_panel(frame, Rect::new(0, 0, 80, 20), panel, &app, None);
+                render_graph_panel(frame, Rect::new(0, 0, 80, 20), 0, panel, &app, None, false);
             })
             .unwrap();
 
@@ -915,7 +938,7 @@ mod tests {
 
         terminal
             .draw(|frame| {
-                render_graph_panel(frame, Rect::new(0, 0, 80, 20), panel, &app, None);
+                render_graph_panel(frame, Rect::new(0, 0, 80, 20), 0, panel, &app, None, false);
             })
             .unwrap();
 
@@ -955,6 +978,162 @@ mod tests {
     }
 
     #[test]
+    fn targeted_annotation_renders_only_on_matching_title() {
+        let mut app = area_fill_app(area_fill_panel());
+        app.panels[0].title = "CPU".to_string();
+        let mut deploy = crate::annotations::test_event_at(50.0, "deploy");
+        deploy.target = crate::annotations::AnnotationTarget::PanelTitles(
+            ["CPU".to_string()].into_iter().collect(),
+        );
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![deploy]);
+        let mut memory_panel = app.panels[0].clone();
+        memory_panel.title = "Memory".to_string();
+
+        let mut cpu = Terminal::new(TestBackend::new(80, 20)).unwrap();
+        cpu.draw(|frame| {
+            render_graph_panel(
+                frame,
+                Rect::new(0, 0, 80, 20),
+                0,
+                &app.panels[0],
+                &app,
+                None,
+                false,
+            );
+        })
+        .unwrap();
+        let mut memory = Terminal::new(TestBackend::new(80, 20)).unwrap();
+        memory
+            .draw(|frame| {
+                render_graph_panel(
+                    frame,
+                    Rect::new(0, 0, 80, 20),
+                    1,
+                    &memory_panel,
+                    &app,
+                    None,
+                    false,
+                );
+            })
+            .unwrap();
+
+        let marker_count = |terminal: &Terminal<TestBackend>| {
+            terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .filter(|cell| cell.symbol() == "┊")
+                .count()
+        };
+        assert!(marker_count(&cpu) > 0);
+        assert_eq!(marker_count(&memory), 0);
+    }
+
+    #[test]
+    fn unknown_panel_preserves_graph_data_but_omits_annotation_markers() {
+        let mut app = area_fill_app(area_fill_panel());
+        app.panels[0].panel_type = PanelType::Unknown;
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![
+            crate::annotations::test_event_at(50.0, "deploy"),
+        ]);
+        let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
+        let mut rendered_cluster = None;
+
+        terminal
+            .draw(|frame| {
+                rendered_cluster = crate::ui::panels::render_panel(
+                    frame,
+                    Rect::new(0, 0, 80, 20),
+                    0,
+                    &app.panels[0],
+                    &app,
+                    true,
+                    None,
+                );
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        assert!(
+            buffer
+                .content()
+                .iter()
+                .any(|cell| cell.style().fg == Some(app.theme.palette[0])),
+            "unknown panels must retain legacy graph data rendering"
+        );
+        assert_eq!(
+            buffer
+                .content()
+                .iter()
+                .filter(|cell| cell.symbol() == "┊")
+                .count(),
+            0,
+            "unknown panels must not render annotation markers"
+        );
+        assert!(rendered_cluster.is_none());
+    }
+
+    #[test]
+    fn tag_filter_recalculates_same_column_count() {
+        let mut app = area_fill_app(area_fill_panel());
+        let mut deploy = crate::annotations::test_event_at(50.0, "deploy");
+        deploy.tags = vec!["deploy".to_string()];
+        let mut incident = crate::annotations::test_event_at(50.0, "incident");
+        incident.tags = vec!["incident".to_string()];
+        let mut rollback = crate::annotations::test_event_at(50.0, "rollback");
+        rollback.tags = vec!["deploy".to_string()];
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![
+            deploy, incident, rollback,
+        ]);
+        app.annotations
+            .set_filter(crate::annotations::TagFilter::from_selected([
+                "deploy".to_string()
+            ]));
+        let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
+
+        terminal
+            .draw(|frame| {
+                render_graph_panel(
+                    frame,
+                    Rect::new(0, 0, 80, 20),
+                    0,
+                    &app.panels[0],
+                    &app,
+                    None,
+                    false,
+                );
+            })
+            .unwrap();
+
+        let chart_area = Rect::new(0, 0, 80, 18);
+        let x_labels = vec![Span::raw("00:00:00"), Span::raw("00:01:40")];
+        let chart_y_labels = vec![Span::raw("0"), Span::raw("10")];
+        let plot = PlotBounds {
+            left: chart_plot_left(
+                chart_area,
+                chart_y_label_width(&chart_y_labels),
+                &x_labels,
+                true,
+            ),
+            right: chart_area.right(),
+            top: chart_area.top(),
+            bottom: chart_area.bottom().saturating_sub(2),
+        };
+        let marker_x = labels::value_to_plot_x(50.0, [0.0, 100.0], plot).unwrap();
+
+        assert_eq!(
+            terminal
+                .backend()
+                .buffer()
+                .cell((marker_x, plot.top))
+                .unwrap()
+                .symbol(),
+            "2"
+        );
+    }
+
+    #[test]
     fn annotation_cluster_renders_and_inspects_on_same_column() {
         let mut app = area_fill_app(area_fill_panel());
         app.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![
@@ -970,9 +1149,11 @@ mod tests {
                 render_graph_panel(
                     frame,
                     Rect::new(0, 0, 80, 20),
+                    0,
                     &app.panels[0],
                     &app,
                     app.cursor_x,
+                    false,
                 );
             })
             .unwrap();
@@ -1004,7 +1185,15 @@ mod tests {
         let mut baseline = Terminal::new(TestBackend::new(80, 20)).unwrap();
         baseline
             .draw(|frame| {
-                render_graph_panel(frame, Rect::new(0, 0, 80, 20), &app.panels[0], &app, None);
+                render_graph_panel(
+                    frame,
+                    Rect::new(0, 0, 80, 20),
+                    0,
+                    &app.panels[0],
+                    &app,
+                    None,
+                    false,
+                );
             })
             .unwrap();
 
@@ -1014,7 +1203,15 @@ mod tests {
         let mut annotated = Terminal::new(TestBackend::new(80, 20)).unwrap();
         annotated
             .draw(|frame| {
-                render_graph_panel(frame, Rect::new(0, 0, 80, 20), &app.panels[0], &app, None);
+                render_graph_panel(
+                    frame,
+                    Rect::new(0, 0, 80, 20),
+                    0,
+                    &app.panels[0],
+                    &app,
+                    None,
+                    false,
+                );
             })
             .unwrap();
 
@@ -1090,9 +1287,11 @@ mod tests {
                 render_graph_panel(
                     frame,
                     Rect::new(0, 0, 30, 12),
+                    0,
                     &app.panels[0],
                     &app,
                     app.cursor_x,
+                    false,
                 );
             })
             .unwrap();
@@ -1131,9 +1330,11 @@ mod tests {
                 render_graph_panel(
                     frame,
                     Rect::new(0, 0, width, height),
+                    0,
                     &app.panels[0],
                     &app,
                     app.cursor_x,
+                    false,
                 );
             })
             .unwrap();

@@ -46,11 +46,12 @@ use table::render_table;
 pub(crate) fn render_panel(
     frame: &mut Frame,
     area: Rect,
+    panel_index: usize,
     p: &PanelState,
     app: &AppState,
     is_selected: bool,
     cursor_x: Option<f64>,
-) {
+) -> Option<Vec<crate::annotations::AnnotationEvent>> {
     let theme = &app.theme;
     let border_style = if is_selected {
         Style::default().fg(theme.border_selected)
@@ -71,7 +72,7 @@ pub(crate) fn render_panel(
             .wrap(Wrap { trim: true })
             .style(Style::default().fg(theme.text));
         frame.render_widget(para, area);
-        return;
+        return None;
     }
 
     // Render the outer block (Panel container)
@@ -87,23 +88,38 @@ pub(crate) fn render_panel(
     let inner_area = block.inner(area);
 
     match p.panel_type {
-        PanelType::Graph | PanelType::Unknown => {
-            render_graph_panel(frame, inner_area, p, app, cursor_x);
+        PanelType::Graph => render_graph_panel(
+            frame,
+            inner_area,
+            panel_index,
+            p,
+            app,
+            cursor_x,
+            is_selected,
+        ),
+        PanelType::Unknown => {
+            render_graph_panel(frame, inner_area, panel_index, p, app, cursor_x, false);
+            None
         }
         PanelType::Gauge => {
             render_gauge(frame, inner_area, p, app);
+            None
         }
         PanelType::BarGauge => {
             render_bar_gauge(frame, inner_area, p, app);
+            None
         }
         PanelType::Table => {
             render_table(frame, inner_area, p, app);
+            None
         }
         PanelType::Stat => {
             render_stat(frame, inner_area, p, app);
+            None
         }
         PanelType::Heatmap => {
             render_heatmap(frame, inner_area, p, app);
+            None
         }
     }
 }

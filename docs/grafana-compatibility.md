@@ -247,8 +247,10 @@ tooltips.
 | `annotations` | ❌ Not Implemented | |
 | `annotations.list` | ❌ Not Implemented | |
 
-Grafatui external JSONL events are a separate, opt-in read-only source. They do
-not imply compatibility with Grafana annotation queries, APIs, `annotations`, or
+Grafatui external JSONL events are a separate, opt-in read-only source.
+`panel_titles` is Grafatui's external-source routing field: it matches eligible
+graph/timeseries panel titles exactly, not Grafana panel IDs. It does not imply
+compatibility with Grafana annotation queries, APIs, `annotations`, or
 `annotations.list`.
 
 ---
