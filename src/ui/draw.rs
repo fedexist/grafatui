@@ -190,8 +190,8 @@ fn build_footer_detail(app: &AppState) -> String {
         parts.push(format!("Cursor: {cursor_time}"));
     }
 
-    if let Some(warning) = app.annotations.warning() {
-        parts.push(format!("Annotations: {warning}"));
+    if let Some(status) = app.annotations.footer_status() {
+        parts.push(format!("Annotations: {status}"));
     }
 
     if let Some(status) = &app.export_status {
@@ -278,6 +278,28 @@ mod tests {
         assert!(detail.contains("Cursor:"));
         assert!(detail.contains("Annotations: events.jsonl:2: invalid time"));
         assert!(detail.contains("Exported frame.svg"));
+    }
+
+    #[test]
+    fn footer_composes_annotation_warning_with_sorted_filter_summary() {
+        let mut event = crate::annotations::test_event_at(10.0, "deploy");
+        event.target = crate::annotations::AnnotationTarget::PanelTitles(
+            ["CPU".to_string()].into_iter().collect(),
+        );
+        let mut app = test_app();
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![event]);
+        app.annotations
+            .reconcile_targets(&["CPU".to_string(), "CPU".to_string()]);
+        app.annotations
+            .set_filter(crate::annotations::TagFilter::from_selected([
+                "incident".to_string(),
+                "deploy".to_string(),
+            ]));
+
+        assert_eq!(
+            build_footer_detail(&app),
+            "Annotations: target \"CPU\" matches 2 graph/timeseries panels; applied to all | tags deploy|incident"
+        );
     }
 
     #[test]
