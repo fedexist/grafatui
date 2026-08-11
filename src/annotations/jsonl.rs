@@ -12,6 +12,22 @@ struct RawAnnotationEvent {
     text: String,
     #[serde(default)]
     tags: Vec<String>,
+    #[serde(default)]
+    panel_titles: RawPanelTitles,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum RawPanelTitles {
+    Null(()),
+    Titles(Vec<String>),
+    Missing,
+}
+
+impl Default for RawPanelTitles {
+    fn default() -> Self {
+        Self::Missing
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,7 +80,7 @@ pub(crate) fn parse_jsonl(
                 path,
                 line_number,
                 format!(
-                    "invalid annotation event (time, text, and tags must have valid types): {error}"
+                    "invalid annotation event (time, text, tags, and panel_titles must have valid types): {error}"
                 ),
             )
         })?;
@@ -93,11 +109,41 @@ pub(crate) fn parse_jsonl(
             ));
         }
 
+        let target = match raw.panel_titles {
+            RawPanelTitles::Missing => AnnotationTarget::All,
+            RawPanelTitles::Null(()) => {
+                return Err(AnnotationLoadError::at_line(
+                    path,
+                    line_number,
+                    "panel_titles must not be null",
+                ));
+            }
+            RawPanelTitles::Titles(titles) if titles.is_empty() => {
+                return Err(AnnotationLoadError::at_line(
+                    path,
+                    line_number,
+                    "panel_titles must contain at least one title",
+                ));
+            }
+            RawPanelTitles::Titles(titles)
+                if titles.iter().any(|title| title.trim().is_empty()) =>
+            {
+                return Err(AnnotationLoadError::at_line(
+                    path,
+                    line_number,
+                    "panel_titles must not contain blank strings",
+                ));
+            }
+            RawPanelTitles::Titles(titles) => {
+                AnnotationTarget::PanelTitles(titles.into_iter().collect())
+            }
+        };
+
         events.push(AnnotationEvent {
             time,
             text: raw.text,
             tags: raw.tags,
-            target: AnnotationTarget::All,
+            target,
         });
     }
 
@@ -190,6 +236,8 @@ impl JsonlFileSource {
 mod tests {
     use std::path::{Path, PathBuf};
 
+    use crate::annotations::AnnotationTarget;
+
     use super::{JsonlFileSource, SourcePoll, parse_jsonl};
 
     fn temp_path(name: &str) -> PathBuf {
@@ -219,6 +267,53 @@ mod tests {
         assert_eq!(snapshot.events()[0].text, "deploy");
         assert_eq!(snapshot.events()[0].tags, vec!["prod"]);
         assert_eq!(snapshot.events()[1].tags, Vec::<String>::new());
+    }
+
+    #[test]
+    fn parses_optional_panel_titles_and_deduplicates_them() {
+        let snapshot = parse_jsonl(
+            Path::new("events.jsonl"),
+            concat!(
+                r#"{"time":"2026-08-11T14:30:00Z","text":"global"}"#,
+                "\n",
+                r#"{"time":"2026-08-11T14:31:00Z","text":"targeted","panel_titles":["CPU","CPU","Errors"]}"#,
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(snapshot.events()[0].target, AnnotationTarget::All);
+        assert_eq!(
+            snapshot.events()[1].target,
+            AnnotationTarget::PanelTitles(
+                ["CPU".to_string(), "Errors".to_string()]
+                    .into_iter()
+                    .collect()
+            )
+        );
+    }
+
+    #[test]
+    fn rejects_empty_or_blank_panel_titles_with_line_numbers() {
+        for input in [
+            r#"{"time":"2026-08-11T14:30:00Z","text":"x","panel_titles":[]}"#,
+            r#"{"time":"2026-08-11T14:30:00Z","text":"x","panel_titles":["  "]}"#,
+        ] {
+            let error = parse_jsonl(Path::new("events.jsonl"), input).unwrap_err();
+            assert_eq!(error.line(), Some(1));
+            assert!(error.to_string().contains("panel_titles"));
+        }
+    }
+
+    #[test]
+    fn rejects_null_panel_titles_with_line_number() {
+        let error = parse_jsonl(
+            Path::new("events.jsonl"),
+            r#"{"time":"2026-08-11T14:30:00Z","text":"x","panel_titles":null}"#,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.line(), Some(1));
+        assert!(error.to_string().contains("panel_titles"));
     }
 
     #[test]
