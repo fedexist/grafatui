@@ -41,6 +41,10 @@ pub(crate) struct Args {
     #[arg(long, value_name = "FILE")]
     pub(crate) grafana_json: Option<PathBuf>,
 
+    /// Optional JSONL point-event file to overlay on graph panels.
+    #[arg(long, value_name = "FILE")]
+    pub(crate) annotations_file: Option<PathBuf>,
+
     /// Validate a Grafana dashboard import without starting the TUI
     #[arg(long)]
     pub(crate) validate: bool,
@@ -163,5 +167,11 @@ mod tests {
         assert!(args.validate);
         assert!(args.strict);
         assert_eq!(args.format, crate::cli::ValidateFormat::Json);
+    }
+
+    #[test]
+    fn test_parse_annotations_file() {
+        let args = Args::parse_from(["grafatui", "--annotations-file", "events.jsonl"]);
+        assert_eq!(args.annotations_file, Some(PathBuf::from("events.jsonl")));
     }
 }

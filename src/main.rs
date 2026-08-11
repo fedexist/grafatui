@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+mod annotations;
 mod app;
 mod config;
 mod export;
@@ -86,6 +87,8 @@ async fn main() -> Result<()> {
         print_validation_summary(&summary, args.format, args.strict)?;
         return Ok(());
     }
+
+    let annotations_path = resolve_annotations_path(args.annotations_file, config.annotations_file);
 
     let prometheus_url = args
         .prometheus_url
@@ -210,6 +213,7 @@ async fn main() -> Result<()> {
         }
         .validate()?,
     );
+    state.annotations = annotations::AnnotationState::from_path(annotations_path);
     state.autogrid_enabled = autogrid_enabled;
     state.autogrid_color = autogrid_color;
     state.vars = vars; // <— pass variables into the app
@@ -255,6 +259,15 @@ fn resolve_refresh_rate_ms(
         .or(config_refresh_rate)
         .or(dashboard_refresh_rate)
         .unwrap_or(1000)
+}
+
+fn resolve_annotations_path(
+    cli_path: Option<std::path::PathBuf>,
+    config_path: Option<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    cli_path
+        .or(config_path)
+        .map(|path| config::expand_path(&path))
 }
 
 #[derive(Debug)]
@@ -392,6 +405,15 @@ mod tests {
         assert_eq!(resolve_refresh_rate_ms(None, Some(3000), Some(4000)), 3000);
         assert_eq!(resolve_refresh_rate_ms(None, None, Some(4000)), 4000);
         assert_eq!(resolve_refresh_rate_ms(None, None, None), 1000);
+    }
+
+    #[test]
+    fn test_resolve_annotations_path_prefers_cli_and_expands_selected_path() {
+        let resolved = resolve_annotations_path(
+            Some(std::path::PathBuf::from("./cli.jsonl")),
+            Some(std::path::PathBuf::from("./config.jsonl")),
+        );
+        assert_eq!(resolved, Some(std::path::PathBuf::from("./cli.jsonl")));
     }
 
     #[test]

@@ -8,7 +8,7 @@ oriented around two priorities:
 2. **User-visible product value** - parity work should make real dashboards
    easier to read, debug, and share.
 
-> **Current version**: 0.1.9 · **Status**: Active development, pre-1.0
+> **Current version**: 0.1.10 · **Status**: Active development, pre-1.0
 
 **Legend**:
 - 🟢 Low complexity · 🟡 Medium complexity · 🔴 High complexity
@@ -38,6 +38,7 @@ These features are shipped and available today:
 | UI | **Mouse support** | Click to select, scroll, drag cursor in fullscreen inspect mode |
 | UI | **Value inspection** | Cursor-based point-in-time data exploration |
 | UI | **Series toggling** | Show/hide individual series with `1`-`9` |
+| Annotations | **External JSONL point annotations (iteration 1)** | Read-only JSONL events on graph/timeseries panels, counted same-column markers, inline inspection, export, and recording parity |
 | Rendering | **Smart caching** | Request deduplication and caching for identical queries |
 | Rendering | **Downsampling** | Max-pooling to preserve peaks while fitting the terminal |
 | Rendering | **Adaptive time labels** | Date/time axis labels adjust to the selected range |
@@ -56,6 +57,17 @@ These features are shipped and available today:
 For a field-by-field breakdown of Grafana JSON compatibility, see the
 [compatibility matrix](docs/grafana-compatibility.md). Keep that document
 refreshed alongside parity work so it stays aligned with the current release.
+
+### External Annotation Iterations
+
+| Iteration | Scope | Status |
+|---|---|---|
+| 1 | External JSONL point annotations | ✅ Implemented by the current iteration-1 PR |
+| 2 | Navigable annotation popup, panel targeting, and tag filtering | 📋 Future PR |
+| 3 | Annotation provider API | 📋 Future PR |
+
+These iterations are separate from Grafana `annotations` and `annotations.list`,
+which remain unsupported.
 
 ---
 
@@ -250,7 +262,6 @@ These are valuable, but they should not outrank core Grafana import fidelity.
 | SSH tunnel mode | Connect to remote Prometheus more easily | 🟡 | 💡 |
 | Colorblind palettes | Improve accessibility | 🟢 | 📋 |
 | Custom keybindings | User-remappable shortcuts | 🟡 | 📋 |
-| Panel annotations | Deployment markers/events on graphs | 🟡 | 💡 |
 
 ---
 

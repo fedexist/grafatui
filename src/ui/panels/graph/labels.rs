@@ -143,8 +143,8 @@ fn value_to_y_label_row(value: f64, y_bounds: [f64; 2], plot: PlotBounds) -> Opt
     value_to_plot_y(value, y_bounds, plot)
 }
 
-fn value_to_plot_x(value: f64, x_bounds: [f64; 2], plot: PlotBounds) -> Option<u16> {
-    if value <= x_bounds[0] || value >= x_bounds[1] || x_bounds[1] <= x_bounds[0] {
+pub(super) fn value_to_plot_x(value: f64, x_bounds: [f64; 2], plot: PlotBounds) -> Option<u16> {
+    if value < x_bounds[0] || value > x_bounds[1] || x_bounds[1] <= x_bounds[0] {
         return None;
     }
 
@@ -207,7 +207,7 @@ fn centered_label_start(center: u16, label_width: u16, min_x: u16, max_x: u16) -
     // For even-length labels, bias one cell right so the visual midpoint better matches
     // the target chart column instead of consistently leaning left.
     let mut start_x = center.checked_sub(half_width)?;
-    if label_width % 2 == 0 {
+    if label_width.is_multiple_of(2) {
         start_x = start_x.saturating_add(1);
     }
     let end_x_exclusive = start_x.saturating_add(label_width);
@@ -277,8 +277,23 @@ mod tests {
         };
 
         assert_eq!(value_to_plot_x(5.0, [0.0, 10.0], plot), Some(15));
-        assert_eq!(value_to_plot_x(0.0, [0.0, 10.0], plot), None);
-        assert_eq!(value_to_plot_x(10.0, [0.0, 10.0], plot), None);
+        assert_eq!(value_to_plot_x(0.0, [0.0, 10.0], plot), Some(10));
+        assert_eq!(value_to_plot_x(10.0, [0.0, 10.0], plot), Some(20));
+    }
+
+    #[test]
+    fn test_value_to_plot_x_includes_window_boundaries() {
+        let plot = PlotBounds {
+            left: 10,
+            right: 21,
+            top: 0,
+            bottom: 5,
+        };
+
+        assert_eq!(value_to_plot_x(0.0, [0.0, 100.0], plot), Some(10));
+        assert_eq!(value_to_plot_x(100.0, [0.0, 100.0], plot), Some(20));
+        assert_eq!(value_to_plot_x(-1.0, [0.0, 100.0], plot), None);
+        assert_eq!(value_to_plot_x(101.0, [0.0, 100.0], plot), None);
     }
 
     #[test]

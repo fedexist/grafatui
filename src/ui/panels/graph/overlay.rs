@@ -61,7 +61,7 @@ pub(super) fn is_blank_cell(cell: &ratatui::buffer::Cell) -> bool {
     cell.symbol().chars().all(char::is_whitespace)
 }
 
-fn overlay_cell_if_blank(dst: &mut ratatui::buffer::Cell, src: &ratatui::buffer::Cell) {
+pub(super) fn overlay_cell_if_blank(dst: &mut ratatui::buffer::Cell, src: &ratatui::buffer::Cell) {
     if is_blank_cell(dst) && !is_blank_cell(src) {
         dst.set_symbol(src.symbol()).set_style(src.style());
     }
