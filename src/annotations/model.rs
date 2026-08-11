@@ -1,8 +1,11 @@
+use std::collections::BTreeSet;
+
 use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AnnotationTarget {
     All,
+    PanelTitles(BTreeSet<String>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,8 +50,10 @@ pub(crate) struct AnnotationPanelContext<'a> {
 
 impl AnnotationTarget {
     pub(crate) fn applies_to(&self, panel: AnnotationPanelContext<'_>) -> bool {
-        let _ = panel.title;
-        matches!(self, Self::All)
+        match self {
+            Self::All => true,
+            Self::PanelTitles(titles) => titles.contains(panel.title),
+        }
     }
 }
 
@@ -56,7 +61,7 @@ impl AnnotationTarget {
 mod tests {
     use chrono::{DateTime, Utc};
 
-    use super::{AnnotationEvent, AnnotationSnapshot, AnnotationTarget};
+    use super::{AnnotationEvent, AnnotationPanelContext, AnnotationSnapshot, AnnotationTarget};
 
     fn event(time: &str, text: &str) -> AnnotationEvent {
         AnnotationEvent {
@@ -91,5 +96,13 @@ mod tests {
         let expected = event.time.timestamp() as f64 + 0.123_456_789;
 
         assert!((event.timestamp_secs() - expected).abs() < 1e-7);
+    }
+
+    #[test]
+    fn panel_title_target_matches_exactly_and_case_sensitively() {
+        let target = AnnotationTarget::PanelTitles(["CPU".to_string()].into_iter().collect());
+
+        assert!(target.applies_to(AnnotationPanelContext { title: "CPU" }));
+        assert!(!target.applies_to(AnnotationPanelContext { title: "cpu" }));
     }
 }
