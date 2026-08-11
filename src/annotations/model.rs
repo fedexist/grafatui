@@ -45,6 +45,7 @@ impl AnnotationSnapshot {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AnnotationPanelContext<'a> {
+    pub(crate) index: usize,
     pub(crate) title: &'a str,
 }
 
@@ -102,7 +103,13 @@ mod tests {
     fn panel_title_target_matches_exactly_and_case_sensitively() {
         let target = AnnotationTarget::PanelTitles(["CPU".to_string()].into_iter().collect());
 
-        assert!(target.applies_to(AnnotationPanelContext { title: "CPU" }));
-        assert!(!target.applies_to(AnnotationPanelContext { title: "cpu" }));
+        assert!(target.applies_to(AnnotationPanelContext {
+            index: 0,
+            title: "CPU",
+        }));
+        assert!(!target.applies_to(AnnotationPanelContext {
+            index: 1,
+            title: "cpu",
+        }));
     }
 }
