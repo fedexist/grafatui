@@ -4,9 +4,12 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+import xml.etree.ElementTree as ElementTree
 
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "render-buffer"
+
+
 def available_chromium():
     for name in ("chromium", "chromium-browser", "google-chrome"):
         executable = shutil.which(name)
@@ -92,6 +95,61 @@ class RenderBufferTests(unittest.TestCase):
             self.assertIn('font-weight="bold"', svg)
             self.assertIn('fill="#bf616a"', svg)
             self.assertIn('class="cursor"', svg)
+            ElementTree.fromstring(svg)
+
+    def test_renders_reversed_and_remaining_modifiers(self):
+        value = capture()
+        value["cells"][0].update(
+            {
+                "symbol": "R",
+                "fg": "#112233",
+                "bg": "#445566",
+                "modifiers": [
+                    "reversed",
+                    "dim",
+                    "italic",
+                    "underlined",
+                    "crossed_out",
+                ],
+            }
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            svg_path = pathlib.Path(directory) / "capture.svg"
+            result = self.render(self.write_capture(directory, value), svg_path)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            svg = svg_path.read_text(encoding="utf-8")
+
+        self.assertIn('x="0" y="0" width="10" height="20" fill="#112233"', svg)
+        self.assertIn('fill="#445566" opacity="0.6"', svg)
+        self.assertIn('font-style="italic"', svg)
+        self.assertIn('text-decoration="underline line-through"', svg)
+
+    def test_rejects_boolean_version(self):
+        value = capture()
+        value["version"] = True
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render(
+                self.write_capture(directory, value), pathlib.Path(directory) / "out.svg"
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stderr, "error: version must be integer 1\n")
+
+    def test_rejects_xml_forbidden_symbol_characters_without_writing_svg(self):
+        for symbol, codepoint in (("\x01", "U+0001"), ("\ud800", "U+D800")):
+            with self.subTest(codepoint=codepoint), tempfile.TemporaryDirectory() as directory:
+                value = capture()
+                value["cells"][0]["symbol"] = symbol
+                svg_path = pathlib.Path(directory) / "out.svg"
+                result = self.render(self.write_capture(directory, value), svg_path)
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(
+                    result.stderr,
+                    f"error: cell symbol contains XML 1.0-forbidden character: {codepoint}\n",
+                )
+                self.assertFalse(svg_path.exists())
 
     def test_rejects_out_of_range_cell_coordinate(self):
         value = capture()

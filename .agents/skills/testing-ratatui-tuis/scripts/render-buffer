@@ -46,11 +46,27 @@ def require_color(value, name: str) -> str:
     return value
 
 
+def forbidden_xml_character(value: str) -> Optional[int]:
+    for character in value:
+        codepoint = ord(character)
+        if codepoint in (0x09, 0x0A, 0x0D):
+            continue
+        if 0x20 <= codepoint <= 0xD7FF:
+            continue
+        if 0xE000 <= codepoint <= 0xFFFD:
+            continue
+        if 0x10000 <= codepoint <= 0x10FFFF:
+            continue
+        return codepoint
+    return None
+
+
 def validate_capture(capture: dict) -> None:
     if not isinstance(capture, dict):
         raise CaptureError("capture must be an object")
-    if capture.get("version") != 1:
-        raise CaptureError("version must be 1")
+    version = capture.get("version")
+    if isinstance(version, bool) or not isinstance(version, int) or version != 1:
+        raise CaptureError("version must be integer 1")
 
     width = require_positive_integer(capture.get("width"), "width")
     height = require_positive_integer(capture.get("height"), "height")
@@ -75,8 +91,15 @@ def validate_capture(capture: dict) -> None:
         if coordinate in coordinates:
             raise CaptureError(f"duplicate cell coordinate: ({x}, {y})")
         coordinates.add(coordinate)
-        if not isinstance(cell.get("symbol"), str):
+        symbol = cell.get("symbol")
+        if not isinstance(symbol, str):
             raise CaptureError("cell symbol must be a string")
+        codepoint = forbidden_xml_character(symbol)
+        if codepoint is not None:
+            raise CaptureError(
+                "cell symbol contains XML 1.0-forbidden character: "
+                f"U+{codepoint:04X}"
+            )
         require_color(cell.get("fg"), "cell fg")
         require_color(cell.get("bg"), "cell bg")
         modifiers = cell.get("modifiers")
