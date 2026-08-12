@@ -89,7 +89,16 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    let annotations_path = resolve_annotations_path(args.annotations_file, config.annotations_file);
+    let annotation_source = resolve_annotation_source(
+        AnnotationCliSource {
+            file: args.annotations_file,
+            program: args.annotations_command,
+            args: args.annotations_command_arg,
+            timeout: args.annotations_command_timeout,
+        },
+        config.annotations_file,
+        config.annotations_command,
+    )?;
 
     let prometheus_url = args
         .prometheus_url
@@ -214,7 +223,7 @@ async fn main() -> Result<()> {
         }
         .validate()?,
     );
-    state.annotations = annotations::AnnotationState::from_path(annotations_path);
+    state.annotations = annotations::AnnotationState::from_source(annotation_source);
     state.autogrid_enabled = autogrid_enabled;
     state.autogrid_color = autogrid_color;
     state.vars = vars; // <— pass variables into the app
@@ -262,17 +271,7 @@ fn resolve_refresh_rate_ms(
         .unwrap_or(1000)
 }
 
-fn resolve_annotations_path(
-    cli_path: Option<std::path::PathBuf>,
-    config_path: Option<std::path::PathBuf>,
-) -> Option<std::path::PathBuf> {
-    cli_path
-        .or(config_path)
-        .map(|path| config::expand_path(&path))
-}
-
 #[derive(Debug, Default)]
-#[allow(dead_code)]
 struct AnnotationCliSource {
     file: Option<std::path::PathBuf>,
     program: Option<String>,
@@ -280,7 +279,6 @@ struct AnnotationCliSource {
     timeout: Option<String>,
 }
 
-#[allow(dead_code)]
 fn resolve_annotation_source(
     cli: AnnotationCliSource,
     config_file: Option<std::path::PathBuf>,
@@ -324,7 +322,6 @@ fn resolve_annotation_source(
     Ok(config_file.map(|path| AnnotationSourceConfig::File(config::expand_path(&path))))
 }
 
-#[allow(dead_code)]
 fn validate_annotation_command(program: &str, timeout: Duration) -> Result<()> {
     if program.trim().is_empty() {
         bail!("annotation command program must not be empty");
@@ -470,15 +467,6 @@ mod tests {
         assert_eq!(resolve_refresh_rate_ms(None, Some(3000), Some(4000)), 3000);
         assert_eq!(resolve_refresh_rate_ms(None, None, Some(4000)), 4000);
         assert_eq!(resolve_refresh_rate_ms(None, None, None), 1000);
-    }
-
-    #[test]
-    fn test_resolve_annotations_path_prefers_cli_and_expands_selected_path() {
-        let resolved = resolve_annotations_path(
-            Some(std::path::PathBuf::from("./cli.jsonl")),
-            Some(std::path::PathBuf::from("./config.jsonl")),
-        );
-        assert_eq!(resolved, Some(std::path::PathBuf::from("./cli.jsonl")));
     }
 
     #[test]

@@ -16,7 +16,6 @@ pub(crate) use diagnostics::{AnnotationTargetWarning, target_warnings};
 #[cfg(test)]
 pub(crate) use filter::tag_catalogue;
 pub(crate) use filter::{TagCatalogueEntry, TagFilter};
-pub(crate) use jsonl::JsonlFileProvider;
 pub(crate) use modal::TagFilterModalState;
 pub(crate) use modal::{AnnotationModal, ClusterModalState, visible_range};
 pub(crate) use model::{
@@ -25,7 +24,7 @@ pub(crate) use model::{
 pub(crate) use projection::{AnnotationCluster, cluster_events_by};
 pub(crate) use provider::{
     AnnotationCommandConfig, AnnotationProvider, AnnotationProviderError, AnnotationRefreshContext,
-    AnnotationSourceConfig, DEFAULT_COMMAND_TIMEOUT, ProviderFuture, ProviderPoll,
+    AnnotationSourceConfig, DEFAULT_COMMAND_TIMEOUT, ProviderFuture, ProviderPoll, build_provider,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -61,10 +60,12 @@ impl AnnotationState {
         }
     }
 
+    pub(crate) fn from_source(source: Option<AnnotationSourceConfig>) -> Self {
+        Self::from_provider(source.map(build_provider))
+    }
+
     pub(crate) fn from_path(path: Option<PathBuf>) -> Self {
-        Self::from_provider(
-            path.map(|path| Box::new(JsonlFileProvider::new(path)) as Box<dyn AnnotationProvider>),
-        )
+        Self::from_source(path.map(AnnotationSourceConfig::File))
     }
 
     pub(crate) async fn refresh(&mut self, context: &AnnotationRefreshContext) -> bool {
@@ -250,6 +251,7 @@ pub(crate) fn test_event_at(timestamp_secs: f64, text: &str) -> AnnotationEvent 
 mod tests {
     use std::collections::VecDeque;
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
     use super::{
@@ -261,19 +263,33 @@ mod tests {
     #[derive(Debug)]
     struct ScriptedProvider {
         outcomes: VecDeque<ProviderPoll>,
+        refresh_count: Option<Arc<Mutex<usize>>>,
     }
 
     impl ScriptedProvider {
         fn new(outcomes: Vec<ProviderPoll>) -> Self {
             Self {
                 outcomes: outcomes.into(),
+                refresh_count: None,
+            }
+        }
+
+        fn recording(outcomes: Vec<ProviderPoll>, refresh_count: Arc<Mutex<usize>>) -> Self {
+            Self {
+                outcomes: outcomes.into(),
+                refresh_count: Some(refresh_count),
             }
         }
     }
 
     impl AnnotationProvider for ScriptedProvider {
         fn refresh<'a>(&'a mut self, _context: &'a AnnotationRefreshContext) -> ProviderFuture<'a> {
-            Box::pin(async move { self.outcomes.pop_front().unwrap_or(ProviderPoll::Unchanged) })
+            Box::pin(async move {
+                if let Some(refresh_count) = &self.refresh_count {
+                    *refresh_count.lock().unwrap() += 1;
+                }
+                self.outcomes.pop_front().unwrap_or(ProviderPoll::Unchanged)
+            })
         }
     }
 
@@ -297,17 +313,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn state_retains_last_valid_snapshot_and_clears_warning_on_recovery() {
-        let context = AnnotationRefreshContext::from_unix_window(200, Duration::from_secs(100));
+    async fn command_state_retains_snapshot_on_failure_and_clears_warning_on_recovery() {
+        let context = refresh_context();
         let provider = ScriptedProvider::new(vec![
-            ProviderPoll::Loaded(snapshot_with("deploy")),
-            ProviderPoll::Failed(AnnotationProviderError::new("temporary failure")),
+            ProviderPoll::Loaded(snapshot_with("initial")),
+            ProviderPoll::Failed(AnnotationProviderError::new("command failed")),
             ProviderPoll::Loaded(AnnotationSnapshot::new(Vec::new())),
         ]);
         let mut state = AnnotationState::from_provider(Some(Box::new(provider)));
 
         assert!(state.refresh(&context).await);
         assert_eq!(state.snapshot().unwrap().len(), 1);
+        assert_eq!(state.snapshot().unwrap().events()[0].text, "initial");
         assert!(state.footer_status().is_none());
 
         state.refresh(&context).await;
@@ -322,6 +339,41 @@ mod tests {
         assert!(state.refresh(&context).await);
         assert_eq!(state.snapshot().unwrap().len(), 0);
         assert!(state.footer_status().is_none());
+    }
+
+    #[tokio::test]
+    async fn hidden_state_refreshes_provider_every_time() {
+        let refresh_count = Arc::new(Mutex::new(0));
+        let provider = ScriptedProvider::recording(
+            vec![ProviderPoll::Unchanged, ProviderPoll::Unchanged],
+            Arc::clone(&refresh_count),
+        );
+        let mut state = AnnotationState::from_provider(Some(Box::new(provider)));
+        state.toggle_visibility();
+
+        state.refresh(&refresh_context()).await;
+        state.refresh(&refresh_context()).await;
+
+        assert!(!state.is_visible());
+        assert_eq!(*refresh_count.lock().unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn state_from_file_source_loads_snapshot() {
+        let path = temp_path("source-construction");
+        tokio::fs::write(
+            &path,
+            "{\"time\":\"2026-08-12T10:00:00Z\",\"text\":\"source\"}\n",
+        )
+        .await
+        .unwrap();
+        let mut state =
+            AnnotationState::from_source(Some(super::AnnotationSourceConfig::File(path.clone())));
+
+        assert!(state.refresh(&refresh_context()).await);
+        assert_eq!(state.snapshot().unwrap().events()[0].text, "source");
+
+        tokio::fs::remove_file(path).await.unwrap();
     }
 
     #[tokio::test]
