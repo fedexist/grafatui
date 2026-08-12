@@ -15,7 +15,7 @@ pub(crate) use diagnostics::{AnnotationTargetWarning, target_warnings};
 #[cfg(test)]
 pub(crate) use filter::tag_catalogue;
 pub(crate) use filter::{TagCatalogueEntry, TagFilter};
-pub(crate) use jsonl::{JsonlFileSource, SourcePoll};
+pub(crate) use jsonl::JsonlFileProvider;
 pub(crate) use modal::TagFilterModalState;
 pub(crate) use modal::{AnnotationModal, ClusterModalState, visible_range};
 pub(crate) use model::{
@@ -23,7 +23,8 @@ pub(crate) use model::{
 };
 pub(crate) use projection::{AnnotationCluster, cluster_events_by};
 pub(crate) use provider::{
-    AnnotationCommandConfig, AnnotationSourceConfig, DEFAULT_COMMAND_TIMEOUT,
+    AnnotationCommandConfig, AnnotationProvider, AnnotationProviderError, AnnotationRefreshContext,
+    AnnotationSourceConfig, DEFAULT_COMMAND_TIMEOUT, ProviderFuture, ProviderPoll,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -37,7 +38,7 @@ pub(crate) struct AnnotationStatus {
 pub(crate) enum AnnotationState {
     Disabled,
     Active {
-        source: Option<JsonlFileSource>,
+        provider: Option<Box<dyn AnnotationProvider>>,
         snapshot: AnnotationSnapshot,
         filter: TagFilter,
         visible: bool,
@@ -46,10 +47,10 @@ pub(crate) enum AnnotationState {
 }
 
 impl AnnotationState {
-    pub(crate) fn from_path(path: Option<PathBuf>) -> Self {
-        match path {
-            Some(path) => Self::Active {
-                source: Some(JsonlFileSource::new(path)),
+    pub(crate) fn from_provider(provider: Option<Box<dyn AnnotationProvider>>) -> Self {
+        match provider {
+            Some(provider) => Self::Active {
+                provider: Some(provider),
                 snapshot: AnnotationSnapshot::new(Vec::new()),
                 filter: TagFilter::default(),
                 visible: true,
@@ -59,13 +60,19 @@ impl AnnotationState {
         }
     }
 
-    pub(crate) async fn refresh_if_changed(&mut self) -> bool {
+    pub(crate) fn from_path(path: Option<PathBuf>) -> Self {
+        Self::from_provider(
+            path.map(|path| Box::new(JsonlFileProvider::new(path)) as Box<dyn AnnotationProvider>),
+        )
+    }
+
+    pub(crate) async fn refresh(&mut self, context: &AnnotationRefreshContext) -> bool {
         let poll = match self {
             Self::Active {
-                source: Some(source),
+                provider: Some(provider),
                 ..
-            } => source.poll().await,
-            Self::Disabled | Self::Active { source: None, .. } => return false,
+            } => provider.refresh(context).await,
+            Self::Disabled | Self::Active { provider: None, .. } => return false,
         };
 
         match (self, poll) {
@@ -73,21 +80,21 @@ impl AnnotationState {
                 Self::Active {
                     snapshot, status, ..
                 },
-                SourcePoll::Loaded(next_snapshot),
+                ProviderPoll::Loaded(next_snapshot),
             ) => {
                 *snapshot = next_snapshot;
                 status.loaded_events = snapshot.len();
                 status.source_warning = None;
                 true
             }
-            (Self::Active { status, .. }, SourcePoll::Failed(error)) => {
+            (Self::Active { status, .. }, ProviderPoll::Failed(error)) => {
                 status.source_warning = Some(format!(
                     "{error}; using {} previous event(s)",
                     status.loaded_events
                 ));
                 false
             }
-            (_, SourcePoll::Unchanged) | (Self::Disabled, _) => false,
+            (_, ProviderPoll::Unchanged) | (Self::Disabled, _) => false,
         }
     }
 
@@ -201,7 +208,7 @@ impl AnnotationState {
         let snapshot = AnnotationSnapshot::new(events);
         let event_count = snapshot.len();
         Self::Active {
-            source: None,
+            provider: None,
             snapshot,
             filter: TagFilter::default(),
             visible: true,
@@ -215,7 +222,7 @@ impl AnnotationState {
     #[cfg(test)]
     pub(crate) fn warning_for_test(message: &str) -> Self {
         Self::Active {
-            source: None,
+            provider: None,
             snapshot: AnnotationSnapshot::new(Vec::new()),
             filter: TagFilter::default(),
             visible: true,
@@ -240,9 +247,42 @@ pub(crate) fn test_event_at(timestamp_secs: f64, text: &str) -> AnnotationEvent 
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::path::PathBuf;
+    use std::time::Duration;
 
-    use super::{AnnotationPanelContext, AnnotationState, AnnotationTarget, TagFilter};
+    use super::{
+        AnnotationPanelContext, AnnotationProvider, AnnotationProviderError,
+        AnnotationRefreshContext, AnnotationSnapshot, AnnotationState, AnnotationTarget,
+        ProviderFuture, ProviderPoll, TagFilter,
+    };
+
+    #[derive(Debug)]
+    struct ScriptedProvider {
+        outcomes: VecDeque<ProviderPoll>,
+    }
+
+    impl ScriptedProvider {
+        fn new(outcomes: Vec<ProviderPoll>) -> Self {
+            Self {
+                outcomes: outcomes.into(),
+            }
+        }
+    }
+
+    impl AnnotationProvider for ScriptedProvider {
+        fn refresh<'a>(&'a mut self, _context: &'a AnnotationRefreshContext) -> ProviderFuture<'a> {
+            Box::pin(async move { self.outcomes.pop_front().unwrap_or(ProviderPoll::Unchanged) })
+        }
+    }
+
+    fn snapshot_with(text: &str) -> AnnotationSnapshot {
+        AnnotationSnapshot::new(vec![super::test_event_at(100.0, text)])
+    }
+
+    fn refresh_context() -> AnnotationRefreshContext {
+        AnnotationRefreshContext::from_unix_window(200, Duration::from_secs(100))
+    }
 
     fn temp_path(name: &str) -> PathBuf {
         let suffix = std::time::SystemTime::now()
@@ -257,22 +297,19 @@ mod tests {
 
     #[tokio::test]
     async fn state_retains_last_valid_snapshot_and_clears_warning_on_recovery() {
-        let path = temp_path("state-recovery");
-        tokio::fs::write(
-            &path,
-            "{\"time\":\"2026-07-23T14:30:00Z\",\"text\":\"deploy\"}\n",
-        )
-        .await
-        .unwrap();
-        let mut state = AnnotationState::from_path(Some(path.clone()));
+        let context = AnnotationRefreshContext::from_unix_window(200, Duration::from_secs(100));
+        let provider = ScriptedProvider::new(vec![
+            ProviderPoll::Loaded(snapshot_with("deploy")),
+            ProviderPoll::Failed(AnnotationProviderError::new("temporary failure")),
+            ProviderPoll::Loaded(AnnotationSnapshot::new(Vec::new())),
+        ]);
+        let mut state = AnnotationState::from_provider(Some(Box::new(provider)));
 
-        assert!(state.refresh_if_changed().await);
+        assert!(state.refresh(&context).await);
         assert_eq!(state.snapshot().unwrap().len(), 1);
         assert!(state.footer_status().is_none());
-        assert!(!state.refresh_if_changed().await);
 
-        tokio::fs::write(&path, "{\"time\":").await.unwrap();
-        state.refresh_if_changed().await;
+        state.refresh(&context).await;
         assert_eq!(state.snapshot().unwrap().len(), 1);
         assert!(
             state
@@ -281,12 +318,9 @@ mod tests {
                 .contains("using 1 previous event")
         );
 
-        tokio::fs::write(&path, "").await.unwrap();
-        state.refresh_if_changed().await;
+        assert!(state.refresh(&context).await);
         assert_eq!(state.snapshot().unwrap().len(), 0);
         assert!(state.footer_status().is_none());
-
-        tokio::fs::remove_file(path).await.unwrap();
     }
 
     #[tokio::test]
@@ -302,8 +336,9 @@ mod tests {
         .await
         .unwrap();
         let mut state = AnnotationState::from_path(Some(path.clone()));
+        let context = refresh_context();
 
-        assert!(state.refresh_if_changed().await);
+        assert!(state.refresh(&context).await);
         state.reconcile_targets(&["CPU".to_string(), "CPU".to_string()]);
         assert_eq!(
             state.footer_status(),
@@ -314,7 +349,7 @@ mod tests {
         );
 
         tokio::fs::write(&path, "{").await.unwrap();
-        assert!(!state.refresh_if_changed().await);
+        assert!(!state.refresh(&context).await);
         let source_first_status = state.footer_status().unwrap();
         assert!(source_first_status.starts_with(&format!("{}:1:", path.display())));
         assert!(source_first_status.contains("using 1 previous event(s)"));
@@ -329,7 +364,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(state.refresh_if_changed().await);
+        assert!(state.refresh(&context).await);
         state.reconcile_targets(&["Memory".to_string()]);
         assert_eq!(state.footer_status(), None);
 
@@ -355,14 +390,15 @@ mod tests {
         .await
         .unwrap();
         let mut state = AnnotationState::from_path(Some(path.clone()));
+        let context = refresh_context();
         state.toggle_visibility();
 
-        state.refresh_if_changed().await;
+        state.refresh(&context).await;
         assert_eq!(state.snapshot().unwrap().len(), 1);
         assert!(!state.is_visible());
 
         tokio::fs::remove_file(&path).await.unwrap();
-        state.refresh_if_changed().await;
+        state.refresh(&context).await;
         assert_eq!(state.snapshot().unwrap().len(), 1);
         assert!(
             state
@@ -375,11 +411,12 @@ mod tests {
     #[tokio::test]
     async fn disabled_state_has_no_source_work_or_visibility() {
         let mut state = AnnotationState::from_path(None);
+        let context = refresh_context();
         assert!(!state.is_configured());
         assert!(!state.is_visible());
         assert!(state.snapshot().is_none());
         assert!(state.footer_status().is_none());
-        assert!(!state.refresh_if_changed().await);
+        assert!(!state.refresh(&context).await);
         state.toggle_visibility();
         assert!(!state.is_visible());
     }

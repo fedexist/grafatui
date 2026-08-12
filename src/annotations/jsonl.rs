@@ -1,10 +1,13 @@
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
-use super::{AnnotationEvent, AnnotationSnapshot, AnnotationTarget};
+use super::{
+    AnnotationEvent, AnnotationProvider, AnnotationProviderError, AnnotationRefreshContext,
+    AnnotationSnapshot, AnnotationTarget, ProviderFuture, ProviderPoll,
+};
 
 #[derive(Deserialize)]
 struct RawAnnotationEvent {
@@ -27,7 +30,7 @@ enum RawPanelTitles {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AnnotationLoadError {
-    path: PathBuf,
+    source: String,
     line: Option<usize>,
     reason: String,
 }
@@ -38,9 +41,9 @@ impl AnnotationLoadError {
         self.line
     }
 
-    fn at_line(path: &Path, line: usize, reason: impl Into<String>) -> Self {
+    fn at_line(source: &str, line: usize, reason: impl Into<String>) -> Self {
         Self {
-            path: path.to_path_buf(),
+            source: source.to_string(),
             line: Some(line),
             reason: reason.into(),
         }
@@ -50,8 +53,8 @@ impl AnnotationLoadError {
 impl fmt::Display for AnnotationLoadError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.line {
-            Some(line) => write!(formatter, "{}:{line}: {}", self.path.display(), self.reason),
-            None => write!(formatter, "{}: {}", self.path.display(), self.reason),
+            Some(line) => write!(formatter, "{}:{line}: {}", self.source, self.reason),
+            None => write!(formatter, "{}: {}", self.source, self.reason),
         }
     }
 }
@@ -59,7 +62,7 @@ impl fmt::Display for AnnotationLoadError {
 impl std::error::Error for AnnotationLoadError {}
 
 pub(crate) fn parse_jsonl(
-    path: &Path,
+    source: &str,
     input: &str,
 ) -> Result<AnnotationSnapshot, AnnotationLoadError> {
     let mut events = Vec::new();
@@ -72,7 +75,7 @@ pub(crate) fn parse_jsonl(
         let line_number = index + 1;
         let raw: RawAnnotationEvent = serde_json::from_str(line).map_err(|error| {
             AnnotationLoadError::at_line(
-                path,
+                source,
                 line_number,
                 format!(
                     "invalid annotation event (time, text, tags, and panel_titles must have valid types): {error}"
@@ -82,7 +85,7 @@ pub(crate) fn parse_jsonl(
         let time = DateTime::parse_from_rfc3339(&raw.time)
             .map_err(|error| {
                 AnnotationLoadError::at_line(
-                    path,
+                    source,
                     line_number,
                     format!("time must be an RFC 3339 timestamp: {error}"),
                 )
@@ -91,14 +94,14 @@ pub(crate) fn parse_jsonl(
 
         if raw.text.trim().is_empty() {
             return Err(AnnotationLoadError::at_line(
-                path,
+                source,
                 line_number,
                 "text must not be empty",
             ));
         }
         if raw.tags.iter().any(|tag| tag.trim().is_empty()) {
             return Err(AnnotationLoadError::at_line(
-                path,
+                source,
                 line_number,
                 "tags must not contain empty strings",
             ));
@@ -108,14 +111,14 @@ pub(crate) fn parse_jsonl(
             RawPanelTitles::Missing => AnnotationTarget::All,
             RawPanelTitles::Null(()) => {
                 return Err(AnnotationLoadError::at_line(
-                    path,
+                    source,
                     line_number,
                     "panel_titles must not be null",
                 ));
             }
             RawPanelTitles::Titles(titles) if titles.is_empty() => {
                 return Err(AnnotationLoadError::at_line(
-                    path,
+                    source,
                     line_number,
                     "panel_titles must contain at least one title",
                 ));
@@ -124,7 +127,7 @@ pub(crate) fn parse_jsonl(
                 if titles.iter().any(|title| title.trim().is_empty()) =>
             {
                 return Err(AnnotationLoadError::at_line(
-                    path,
+                    source,
                     line_number,
                     "panel_titles must not contain blank strings",
                 ));
@@ -155,19 +158,12 @@ enum SourceFingerprint {
 }
 
 #[derive(Debug)]
-pub(crate) enum SourcePoll {
-    Unchanged,
-    Loaded(AnnotationSnapshot),
-    Failed(AnnotationLoadError),
-}
-
-#[derive(Debug)]
-pub(crate) struct JsonlFileSource {
+pub(crate) struct JsonlFileProvider {
     path: PathBuf,
     last_seen: Option<SourceFingerprint>,
 }
 
-impl JsonlFileSource {
+impl JsonlFileProvider {
     pub(crate) fn new(path: PathBuf) -> Self {
         Self {
             path,
@@ -175,65 +171,82 @@ impl JsonlFileSource {
         }
     }
 
-    pub(crate) async fn poll(&mut self) -> SourcePoll {
+    async fn poll_file(&mut self) -> ProviderPoll {
         let fingerprint = match tokio::fs::metadata(&self.path).await {
             Ok(metadata) => match metadata.modified() {
                 Ok(modified) => SourceFingerprint::Present {
                     len: metadata.len(),
                     modified,
                 },
-                Err(error) => return SourcePoll::Failed(self.io_error(error)),
+                Err(error) => return ProviderPoll::Failed(self.io_error(error)),
             },
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 SourceFingerprint::Missing
             }
-            Err(error) => return SourcePoll::Failed(self.io_error(error)),
+            Err(error) => return ProviderPoll::Failed(self.io_error(error)),
         };
 
         if self.last_seen.as_ref() == Some(&fingerprint) {
-            return SourcePoll::Unchanged;
+            return ProviderPoll::Unchanged;
         }
 
         match fingerprint {
             SourceFingerprint::Missing => {
                 self.last_seen = Some(SourceFingerprint::Missing);
-                SourcePoll::Failed(AnnotationLoadError {
-                    path: self.path.clone(),
-                    line: None,
-                    reason: "annotation file does not exist".to_string(),
-                })
+                ProviderPoll::Failed(AnnotationProviderError::new(
+                    AnnotationLoadError {
+                        source: self.path.display().to_string(),
+                        line: None,
+                        reason: "annotation file does not exist".to_string(),
+                    }
+                    .to_string(),
+                ))
             }
             SourceFingerprint::Present { len, modified } => {
                 match tokio::fs::read_to_string(&self.path).await {
                     Ok(input) => {
                         self.last_seen = Some(SourceFingerprint::Present { len, modified });
-                        match parse_jsonl(&self.path, &input) {
-                            Ok(snapshot) => SourcePoll::Loaded(snapshot),
-                            Err(error) => SourcePoll::Failed(error),
+                        match parse_jsonl(&self.path.display().to_string(), &input) {
+                            Ok(snapshot) => ProviderPoll::Loaded(snapshot),
+                            Err(error) => ProviderPoll::Failed(AnnotationProviderError::new(
+                                error.to_string(),
+                            )),
                         }
                     }
-                    Err(error) => SourcePoll::Failed(self.io_error(error)),
+                    Err(error) => ProviderPoll::Failed(self.io_error(error)),
                 }
             }
         }
     }
 
-    fn io_error(&self, error: std::io::Error) -> AnnotationLoadError {
-        AnnotationLoadError {
-            path: self.path.clone(),
-            line: None,
-            reason: format!("could not read annotation file: {error}"),
-        }
+    fn io_error(&self, error: std::io::Error) -> AnnotationProviderError {
+        AnnotationProviderError::new(
+            AnnotationLoadError {
+                source: self.path.display().to_string(),
+                line: None,
+                reason: format!("could not read annotation file: {error}"),
+            }
+            .to_string(),
+        )
+    }
+}
+
+impl AnnotationProvider for JsonlFileProvider {
+    fn refresh<'a>(&'a mut self, _context: &'a AnnotationRefreshContext) -> ProviderFuture<'a> {
+        Box::pin(async move { self.poll_file().await })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
+    use std::time::Duration;
 
-    use crate::annotations::AnnotationTarget;
+    use crate::annotations::{
+        AnnotationProvider, AnnotationRefreshContext, AnnotationTarget, ProviderPoll,
+    };
 
-    use super::{JsonlFileSource, SourcePoll, parse_jsonl};
+    use super::{JsonlFileProvider, parse_jsonl};
 
     fn temp_path(name: &str) -> PathBuf {
         let suffix = std::time::SystemTime::now()
@@ -246,6 +259,10 @@ mod tests {
         ))
     }
 
+    fn refresh_context() -> AnnotationRefreshContext {
+        AnnotationRefreshContext::from_unix_window(200, Duration::from_secs(100))
+    }
+
     #[test]
     fn parses_valid_jsonl_and_ignores_blank_lines_and_unknown_fields() {
         let input = concat!(
@@ -256,7 +273,7 @@ mod tests {
             "\n",
         );
 
-        let snapshot = parse_jsonl(Path::new("events.jsonl"), input).unwrap();
+        let snapshot = parse_jsonl("events.jsonl", input).unwrap();
 
         assert_eq!(snapshot.len(), 2);
         assert_eq!(snapshot.events()[0].text, "deploy");
@@ -267,7 +284,7 @@ mod tests {
     #[test]
     fn parses_optional_panel_titles_and_deduplicates_them() {
         let snapshot = parse_jsonl(
-            Path::new("events.jsonl"),
+            "events.jsonl",
             concat!(
                 r#"{"time":"2026-08-11T14:30:00Z","text":"global"}"#,
                 "\n",
@@ -293,7 +310,7 @@ mod tests {
             r#"{"time":"2026-08-11T14:30:00Z","text":"x","panel_titles":[]}"#,
             r#"{"time":"2026-08-11T14:30:00Z","text":"x","panel_titles":["  "]}"#,
         ] {
-            let error = parse_jsonl(Path::new("events.jsonl"), input).unwrap_err();
+            let error = parse_jsonl("events.jsonl", input).unwrap_err();
             assert_eq!(error.line(), Some(1));
             assert!(error.to_string().contains("panel_titles"));
         }
@@ -302,7 +319,7 @@ mod tests {
     #[test]
     fn rejects_null_panel_titles_with_line_number() {
         let error = parse_jsonl(
-            Path::new("events.jsonl"),
+            "events.jsonl",
             r#"{"time":"2026-08-11T14:30:00Z","text":"x","panel_titles":null}"#,
         )
         .unwrap_err();
@@ -314,7 +331,7 @@ mod tests {
     #[test]
     fn rejects_invalid_required_fields_with_line_number() {
         let error = parse_jsonl(
-            Path::new("events.jsonl"),
+            "events.jsonl",
             "{\"time\":1700000000000,\"text\":\"deploy\"}\n",
         )
         .unwrap_err();
@@ -327,14 +344,14 @@ mod tests {
     #[test]
     fn rejects_blank_text_and_tags() {
         let blank_text = parse_jsonl(
-            Path::new("events.jsonl"),
+            "events.jsonl",
             r#"{"time":"2026-07-23T14:30:00Z","text":"  "}"#,
         )
         .unwrap_err();
         assert!(blank_text.to_string().contains("text must not be empty"));
 
         let blank_tag = parse_jsonl(
-            Path::new("events.jsonl"),
+            "events.jsonl",
             r#"{"time":"2026-07-23T14:30:00Z","text":"deploy","tags":[""]}"#,
         )
         .unwrap_err();
@@ -354,13 +371,21 @@ mod tests {
         )
         .await
         .unwrap();
-        let mut source = JsonlFileSource::new(path.clone());
+        let mut provider = JsonlFileProvider::new(path.clone());
+        let context = refresh_context();
 
-        assert!(matches!(source.poll().await, SourcePoll::Loaded(snapshot) if snapshot.len() == 1));
-        assert!(matches!(source.poll().await, SourcePoll::Unchanged));
+        assert!(
+            matches!(provider.refresh(&context).await, ProviderPoll::Loaded(snapshot) if snapshot.len() == 1)
+        );
+        assert!(matches!(
+            provider.refresh(&context).await,
+            ProviderPoll::Unchanged
+        ));
 
         tokio::fs::write(&path, "").await.unwrap();
-        assert!(matches!(source.poll().await, SourcePoll::Loaded(snapshot) if snapshot.len() == 0));
+        assert!(
+            matches!(provider.refresh(&context).await, ProviderPoll::Loaded(snapshot) if snapshot.len() == 0)
+        );
 
         tokio::fs::remove_file(path).await.unwrap();
     }
@@ -368,10 +393,17 @@ mod tests {
     #[tokio::test]
     async fn reports_missing_then_loads_when_file_appears() {
         let path = temp_path("appears");
-        let mut source = JsonlFileSource::new(path.clone());
+        let mut provider = JsonlFileProvider::new(path.clone());
+        let context = refresh_context();
 
-        assert!(matches!(source.poll().await, SourcePoll::Failed(_)));
-        assert!(matches!(source.poll().await, SourcePoll::Unchanged));
+        assert!(matches!(
+            provider.refresh(&context).await,
+            ProviderPoll::Failed(_)
+        ));
+        assert!(matches!(
+            provider.refresh(&context).await,
+            ProviderPoll::Unchanged
+        ));
 
         tokio::fs::write(
             &path,
@@ -379,7 +411,9 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(matches!(source.poll().await, SourcePoll::Loaded(snapshot) if snapshot.len() == 1));
+        assert!(
+            matches!(provider.refresh(&context).await, ProviderPoll::Loaded(snapshot) if snapshot.len() == 1)
+        );
 
         tokio::fs::remove_file(path).await.unwrap();
     }
@@ -393,12 +427,22 @@ mod tests {
         )
         .await
         .unwrap();
-        let mut source = JsonlFileSource::new(path.clone());
-        assert!(matches!(source.poll().await, SourcePoll::Loaded(_)));
+        let mut provider = JsonlFileProvider::new(path.clone());
+        let context = refresh_context();
+        assert!(matches!(
+            provider.refresh(&context).await,
+            ProviderPoll::Loaded(_)
+        ));
 
         tokio::fs::write(&path, "{\"time\":").await.unwrap();
-        assert!(matches!(source.poll().await, SourcePoll::Failed(_)));
-        assert!(matches!(source.poll().await, SourcePoll::Unchanged));
+        assert!(matches!(
+            provider.refresh(&context).await,
+            ProviderPoll::Failed(_)
+        ));
+        assert!(matches!(
+            provider.refresh(&context).await,
+            ProviderPoll::Unchanged
+        ));
 
         tokio::fs::remove_file(path).await.unwrap();
     }
@@ -416,10 +460,11 @@ mod tests {
         tokio::fs::write(&path, invalid_utf8).await.unwrap();
         let initial_metadata = tokio::fs::metadata(&path).await.unwrap();
         let initial_modified = initial_metadata.modified().unwrap();
-        let mut source = JsonlFileSource::new(path.clone());
+        let mut provider = JsonlFileProvider::new(path.clone());
+        let context = refresh_context();
 
         assert!(
-            matches!(source.poll().await, SourcePoll::Failed(error) if error.to_string().contains("could not read annotation file"))
+            matches!(provider.refresh(&context).await, ProviderPoll::Failed(error) if error.to_string().contains("could not read annotation file"))
         );
 
         tokio::fs::write(&path, valid).await.unwrap();
@@ -434,8 +479,8 @@ mod tests {
         assert_eq!(recovered_metadata.modified().unwrap(), initial_modified);
 
         assert!(matches!(
-            source.poll().await,
-            SourcePoll::Loaded(snapshot) if snapshot.len() == 1
+            provider.refresh(&context).await,
+            ProviderPoll::Loaded(snapshot) if snapshot.len() == 1
         ));
 
         tokio::fs::remove_file(path).await.unwrap();
