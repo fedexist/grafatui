@@ -4,6 +4,7 @@
 import argparse
 import html
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -14,6 +15,11 @@ from typing import Optional
 
 COLOR = re.compile(r"#[0-9a-fA-F]{6}\Z")
 MODIFIERS = {"bold", "dim", "italic", "underlined", "reversed", "crossed_out"}
+CHROMIUM_PROBE_TIMEOUT_SECONDS = 3
+MACOS_CHROMIUM_PATHS = (
+    pathlib.Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+    pathlib.Path("/Applications/Chromium.app/Contents/MacOS/Chromium"),
+)
 
 
 class CaptureError(ValueError):
@@ -187,13 +193,35 @@ def render_capture(capture: dict, font_family: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def chromium_is_functional(chromium: str) -> bool:
+    try:
+        result = subprocess.run(
+            [chromium, "--version"],
+            check=False,
+            timeout=CHROMIUM_PROBE_TIMEOUT_SECONDS,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
 def find_chromium(explicit: Optional[str]) -> Optional[str]:
     if explicit:
         return shutil.which(explicit)
     for name in ("chromium", "chromium-browser", "google-chrome"):
         chromium = shutil.which(name)
-        if chromium:
+        if chromium and chromium_is_functional(chromium):
             return chromium
+    for chromium in MACOS_CHROMIUM_PATHS:
+        executable = str(chromium)
+        if (
+            chromium.is_file()
+            and os.access(chromium, os.X_OK)
+            and chromium_is_functional(executable)
+        ):
+            return executable
     return None
 
 
