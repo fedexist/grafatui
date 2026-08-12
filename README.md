@@ -42,7 +42,7 @@ cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheu
 - Keyboard-first navigation, panel search, fullscreen mode, mouse selection, and value inspection.
 - SVG/PNG export and changed-frame recording bundles.
 - TOML configuration and built-in themes.
-- Read-only external JSONL point annotations with panel targeting, tag filtering, and navigable cluster details.
+- Read-only external file or command-backed JSONL point annotations with panel targeting, tag filtering, and navigable cluster details.
 
 ## Documentation
 
@@ -71,6 +71,9 @@ grafatui --theme tokyo-night
 
 # Overlay read-only JSONL point events
 grafatui --grafana-json ./dashboard.json --annotations-file ./events.jsonl
+
+# Query read-only annotations through a command provider
+grafatui --grafana-json ./dashboard.json --annotations-command ./target/debug/examples/git_annotation_provider --annotations-command-arg=.
 
 # Generate shell completions or a man page
 grafatui completions zsh

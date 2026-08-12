@@ -244,10 +244,10 @@ tooltips.
 
 | JSON Field | Status | Notes |
 |---|---|---|
-| `annotations` | ❌ Not Implemented | |
-| `annotations.list` | ❌ Not Implemented | |
+| `annotations` | ❌ Not Implemented | External file/command providers do not implement this Grafana field. |
+| `annotations.list` | ❌ Not Implemented | External file/command providers do not implement this Grafana field. |
 
-Grafatui external JSONL events are a separate, opt-in read-only source.
+Grafatui external file/command JSONL events are a separate, opt-in read-only source.
 `panel_titles` is Grafatui's external-source routing field: it matches eligible
 graph/timeseries panel titles exactly, not Grafana panel IDs. It does not imply
 compatibility with Grafana annotation queries, APIs, `annotations`, or

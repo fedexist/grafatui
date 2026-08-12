@@ -38,7 +38,7 @@ These features are shipped and available today:
 | UI | **Mouse support** | Click to select, scroll, drag cursor in fullscreen inspect mode |
 | UI | **Value inspection** | Cursor-based point-in-time data exploration |
 | UI | **Series toggling** | Show/hide individual series with `1`-`9` |
-| Annotations | **External JSONL point annotations (iteration 1)** | Read-only JSONL events on graph/timeseries panels, counted same-column markers, inline inspection, export, and recording parity |
+| Annotations | **External annotation providers (iterations 1–3)** | Read-only file/command JSONL events on graph/timeseries panels, targeting, tag filtering, bounded provider protocol, concurrent refresh, export, and recording parity |
 | Rendering | **Smart caching** | Request deduplication and caching for identical queries |
 | Rendering | **Downsampling** | Max-pooling to preserve peaks while fitting the terminal |
 | Rendering | **Adaptive time labels** | Date/time axis labels adjust to the selected range |
@@ -62,12 +62,27 @@ refreshed alongside parity work so it stays aligned with the current release.
 
 | Iteration | Scope | Status |
 |---|---|---|
-| 1 | External JSONL point annotations | ✅ Implemented by the current iteration-1 PR |
-| 2 | Navigable annotation popup, panel targeting, and tag filtering | 📋 Future PR |
-| 3 | Annotation provider API | 📋 Future PR |
+| 1 | External JSONL point annotations | ✅ Shipped |
+| 2 | Navigable annotation popup, panel targeting, and tag filtering | ✅ Shipped |
+| 3 | Bounded command provider protocol and Prometheus-coordinated refresh | ✅ Implemented by this PR |
 
 These iterations are separate from Grafana `annotations` and `annotations.list`,
 which remain unsupported.
+
+### Provider Ecosystem and Integrations (Post-Core)
+
+| Item | User value | Complexity | Status |
+|---|---|---|---|
+| Independent provider scheduling and redraw | Refresh slow providers without coupling them to Prometheus redraws | 🟡 | 📋 |
+| Stable public Rust provider API | Build supported native providers outside Grafatui | 🟡 | 📋 |
+| Possible Python SDK | Make provider authoring accessible without Rust | 🟡 | 💡 |
+| Long-running providers | Reuse authenticated clients and streams safely | 🔴 | 📋 |
+| Multiple annotation sources | Combine independent event systems in one overlay | 🔴 | 📋 |
+| Range events | Show maintenance windows and other duration-based annotations | 🟡 | 📋 |
+| Stable event IDs | Support deduplication and reliable provider updates | 🟡 | 📋 |
+| Per-panel tag filters | Let each panel narrow the shared annotation stream | 🟡 | 📋 |
+| Reference/community CI/CD providers | Turn durable CI/CD deployment records into useful overlays | 🟡 | 📋 |
+| HTTP, Grafana, and vendor adapters | Add integrations only where demonstrated demand exists | 🔴 | 💡 |
 
 ---
 
