@@ -60,8 +60,9 @@ instance = "server-01"
 ## External Annotation Sources
 
 Select one read-only annotation source: `annotations_file` or the nested
-`[annotations_command]` table. The two TOML forms conflict, and a file source
-also conflicts with all command CLI flags.
+`[annotations_command]` table. The two TOML forms conflict. The
+`--annotations-file` CLI flag conflicts with every command-source CLI flag;
+CLI source selection still replaces the complete TOML annotation source.
 
 ```toml
 [annotations_command]
