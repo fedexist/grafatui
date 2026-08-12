@@ -101,8 +101,8 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        AnnotationProvider, AnnotationRefreshContext, AnnotationSourceConfig, ProviderFuture,
-        ProviderPoll, build_provider,
+        AnnotationCommandConfig, AnnotationProvider, AnnotationRefreshContext,
+        AnnotationSourceConfig, ProviderFuture, ProviderPoll, build_provider,
     };
     use crate::annotations::AnnotationSnapshot;
 
@@ -154,5 +154,29 @@ mod tests {
         assert_eq!(snapshot.events()[0].text, "deploy");
 
         tokio::fs::remove_file(path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn builds_command_provider_that_identifies_spawn_failure() {
+        let missing_program = std::env::temp_dir()
+            .join(format!(
+                "grafatui-missing-provider-factory-{}",
+                std::process::id()
+            ))
+            .to_string_lossy()
+            .into_owned();
+        let mut provider =
+            build_provider(AnnotationSourceConfig::Command(AnnotationCommandConfig {
+                program: missing_program.clone(),
+                args: Vec::new(),
+                timeout: Duration::from_secs(1),
+            }));
+        let context = AnnotationRefreshContext::from_unix_window(200, Duration::from_secs(10));
+
+        let ProviderPoll::Failed(error) = provider.refresh(&context).await else {
+            panic!("expected command provider spawn failure");
+        };
+        assert!(error.to_string().contains(&missing_program));
+        assert!(error.to_string().contains("could not start"));
     }
 }
