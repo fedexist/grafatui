@@ -30,6 +30,8 @@ pub(crate) struct Config {
     pub(crate) theme: Option<String>,
     pub(crate) grafana_json: Option<PathBuf>,
     pub(crate) annotations_file: Option<PathBuf>,
+    #[allow(dead_code)]
+    pub(crate) annotations_command: Option<crate::annotations::AnnotationCommandConfig>,
     pub(crate) threshold_marker: Option<String>,
     pub(crate) export_dir: Option<PathBuf>,
     pub(crate) export_format: Option<crate::export::ExportFormat>,
@@ -95,6 +97,7 @@ pub(crate) fn expand_path(path: &std::path::Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn test_config_deserialization() {
@@ -120,6 +123,40 @@ mod tests {
         assert_eq!(
             config.annotations_file,
             Some(PathBuf::from("~/events.jsonl"))
+        );
+    }
+
+    #[test]
+    fn parses_annotation_command_table_and_defaults() {
+        let config: Config = toml::from_str(
+            r#"
+            [annotations_command]
+            program = "./provider"
+            args = ["--environment", "prod"]
+            "#,
+        )
+        .unwrap();
+
+        let command = config.annotations_command.unwrap();
+        assert_eq!(command.program, "./provider");
+        assert_eq!(command.args, ["--environment", "prod"]);
+        assert_eq!(command.timeout, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn parses_annotation_command_human_timeout() {
+        let config: Config = toml::from_str(
+            r#"
+            [annotations_command]
+            program = "./provider"
+            timeout = "750ms"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.annotations_command.unwrap().timeout,
+            Duration::from_millis(750)
         );
     }
 
