@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+mod command;
 mod details;
 mod diagnostics;
 mod filter;
