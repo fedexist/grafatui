@@ -1,32 +1,21 @@
+import importlib.machinery
+import importlib.util
 import json
+import os
 import pathlib
-import shutil
 import subprocess
 import tempfile
 import unittest
 import xml.etree.ElementTree as ElementTree
+from unittest import mock
 
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "render-buffer"
-
-
-def available_chromium():
-    for name in ("chromium", "chromium-browser", "google-chrome"):
-        executable = shutil.which(name)
-        if executable is None:
-            continue
-        version = subprocess.run(
-            [executable, "--version"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if version.returncode == 0:
-            return executable
-    return None
-
-
-CHROMIUM = available_chromium()
+LOADER = importlib.machinery.SourceFileLoader("render_buffer", str(SCRIPT))
+SPEC = importlib.util.spec_from_loader(LOADER.name, LOADER)
+RENDER_BUFFER = importlib.util.module_from_spec(SPEC)
+LOADER.exec_module(RENDER_BUFFER)
+CHROMIUM = RENDER_BUFFER.find_chromium(None)
 
 
 def capture():
@@ -173,6 +162,57 @@ class RenderBufferTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(result.stderr, "error: duplicate cell coordinate: (0, 0)\n")
 
+    def test_finds_executable_standard_macos_browser_when_path_candidates_are_absent(self):
+        browsers = (
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        )
+        for browser in browsers:
+            with (
+                self.subTest(browser=browser),
+                mock.patch.object(RENDER_BUFFER.shutil, "which", return_value=None),
+                mock.patch.object(
+                    pathlib.Path, "is_file", lambda path: str(path) == browser
+                ),
+                mock.patch(
+                    "os.access",
+                    lambda path, mode: str(path) == browser and mode == os.X_OK,
+                ),
+                mock.patch.object(
+                    RENDER_BUFFER.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess([browser, "--version"], 0),
+                ),
+            ):
+                self.assertEqual(RENDER_BUFFER.find_chromium(None), browser)
+
+    def test_skips_broken_path_candidate_for_working_standard_macos_chrome(self):
+        broken = "/opt/homebrew/bin/chromium"
+        chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+        def which(name):
+            return broken if name == "chromium" else None
+
+        def probe(command, **options):
+            self.assertLessEqual(options["timeout"], 5)
+            return subprocess.CompletedProcess(
+                command,
+                126 if command[0] == broken else 0,
+            )
+
+        with (
+            mock.patch.object(RENDER_BUFFER.shutil, "which", side_effect=which),
+            mock.patch.object(
+                pathlib.Path, "is_file", lambda path: str(path) == chrome
+            ),
+            mock.patch(
+                "os.access",
+                lambda path, mode: str(path) == chrome and mode == os.X_OK,
+            ),
+            mock.patch.object(RENDER_BUFFER.subprocess, "run", side_effect=probe),
+        ):
+            self.assertEqual(RENDER_BUFFER.find_chromium(None), chrome)
+
     @unittest.skipUnless(CHROMIUM, "Chromium is not installed")
     def test_rasterizes_svg_to_png_when_chromium_is_available(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -184,8 +224,6 @@ class RenderBufferTests(unittest.TestCase):
                 svg_path,
                 "--png",
                 str(png_path),
-                "--chromium",
-                CHROMIUM,
             )
 
             self.assertEqual(result.returncode, 0, result.stderr)

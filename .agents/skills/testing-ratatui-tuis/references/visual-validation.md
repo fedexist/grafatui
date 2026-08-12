@@ -94,6 +94,14 @@ the PTY scenario a fixed size, ordered inputs, positive bounded timeout, and
 raw ANSI/result artifact paths. Do not make a PTY transcript substitute for a
 deterministic buffer assertion.
 
+The PTY steps must reproduce the scenario contract's exact ordered inputs. A
+quit-only run proves lifecycle only; it cannot support a keyboard-flow claim.
+If the required live state cannot be seeded deterministically, mark that PTY
+interaction evidence inapplicable or inconclusive and explain the boundary.
+For terminal-restoration claims, compare the relevant terminal attributes
+before startup and after exit; cleanup escape sequences or a successful
+`disable_raw_mode` call alone do not prove restoration.
+
 If Chromium is missing for PNG rendering, PTY support is unavailable, a
 bounded action times out, or input remains nondeterministic, record the result
 as `inconclusive`, retain its diagnostics, and do not approve or update a
@@ -106,6 +114,10 @@ Keep artifacts under a scenario-specific, reviewable location (for example,
 state/buffer assertion output, and only the rendered SVG/PNG or PTY ANSI and
 result files needed to explain the outcome. Name files deterministically from
 the scenario and dimensions.
+
+Before responding, write the required completion table and `Remaining
+uncertainty` line once to `report.md`, then paste that file verbatim into the
+final response instead of reconstructing the table.
 
 Avoid artifact bloat: do not commit duplicate visual states, full recordings,
 or transient files that add no diagnostic value. Retain failed or inconclusive

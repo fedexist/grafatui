@@ -12,22 +12,24 @@ Build change-specific, deterministic evidence before accepting TUI behavior. Com
 ## Workflow
 
 1. Inspect the request, diff, bindings, and existing tests.
-2. Write scenario expectations for each changed behavior: deterministic precondition, fixed viewport, ordered inputs, exact state, expected screen, and required evidence. Use the [visual validation contract](references/visual-validation.md) to select a risk-based scenario matrix.
+2. Before any test, implementation, capture, or PTY command, save each scenario's expectations under its artifact directory using the required record in the [visual validation contract](references/visual-validation.md). Record the path and ordering, then leave this contract unchanged; save outcomes separately.
 3. Establish deterministic fixtures, time, theme, dimensions, and application state; add the smallest test seam needed.
 4. Assert state transitions and input behavior. Render the asserted state with `TestBackend`, serialize the actual buffer, and follow the [Ratatui harness](references/ratatui-harness.md) for capture and normalization.
-5. Run `scripts/render-buffer` on each relevant capture and inspect its resulting image with the available image viewer against the written expectations.
-6. Run `scripts/pty-smoke` for critical lifecycle or interaction flows, with fixed dimensions, scripted input, bounded timeout, and retained diagnostics.
+5. For every visual state named in the saved scenario contract, run `scripts/render-buffer` on its capture and inspect the resulting image with the available image viewer against the written expectations.
+6. Run `scripts/pty-smoke` for critical lifecycle or interaction flows, reproducing the contract's ordered inputs with fixed dimensions, bounded timeout, and retained diagnostics.
 7. Diagnose every failure, add a failing regression test before the fix, then rerun affected scenarios and proportionate broader checks. Persist only compact tests and approved baselines that add durable value.
 
 ## Evidence requirements
 
-Mark a scenario `pass` only with passing state/input assertions, matching deterministic buffers, semantic inspection of new or changed screenshots, no unexplained approved-baseline differences, successful critical PTY flows, clean exit and terminal restoration, and relevant proportionate broader tests. Classify unavailable or unstable required evidence as `inconclusive`, never `pass`.
+Before classification, map every contracted action and visual state to its artifact path; missing or mismatched evidence is `fail` or `inconclusive`. Mark a scenario `pass` only with passing state/input assertions, matching deterministic buffers, semantic inspection of new or changed screenshots, no unexplained approved-baseline differences, successful critical PTY flows, clean exit and terminal restoration, and relevant proportionate broader tests. Classify unavailable or unstable required evidence as `inconclusive`, never `pass`.
 
 ## Fix loop
 
-Preserve failure artifacts, identify the unmet written expectation, fix the state, layout, style, or input cause, and repeat state assertions, capture, image inspection, and applicable PTY flow. Update a baseline only after the revised scenario expectation and all evidence agree.
+Before editing production code, save `<scenario>.red.txt` with `Command: ...`, `Exit: ...`, then raw combined stdout/stderr. If RED is impossible, save the reason to `<scenario>.red-impossible.txt`. Save later results separately. Fix the unmet expectation, then repeat state assertions, capture, image inspection, and applicable PTY flow. Update a baseline only after all evidence agrees.
 
 ## Completion report
+
+Save exactly this table, one row per scenario, followed immediately by `Remaining uncertainty`, to `<artifact-root>/report.md`; end the final response with the same content verbatim:
 
 | Scenario | Evidence | Result | Persisted coverage |
 | --- | --- | --- | --- |
