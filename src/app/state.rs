@@ -506,7 +506,14 @@ impl AppState {
     }
 
     pub(crate) async fn refresh(&mut self) -> Result<()> {
-        let annotations_changed = self.annotations.refresh_if_changed().await;
+        let range = self.range;
+        let step = self.step;
+
+        // Calculate end timestamp: "now" minus time_offset
+        let end_ts = chrono::Utc::now().timestamp() - self.time_offset.as_secs() as i64;
+        let annotation_context =
+            crate::annotations::AnnotationRefreshContext::from_unix_window(end_ts, range);
+        let annotations_changed = self.annotations.refresh(&annotation_context).await;
         if annotations_changed {
             let eligible_titles = self
                 .panels
@@ -516,12 +523,6 @@ impl AppState {
                 .collect::<Vec<_>>();
             self.annotations.reconcile_targets(&eligible_titles);
         }
-
-        let range = self.range;
-        let step = self.step;
-
-        // Calculate end timestamp: "now" minus time_offset
-        let end_ts = chrono::Utc::now().timestamp() - self.time_offset.as_secs() as i64;
 
         let _ = refresh_query_variables(
             &self.prometheus,
