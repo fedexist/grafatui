@@ -1,4 +1,4 @@
-#![allow(dead_code)] // Command providers are implemented here before runtime wiring.
+#![allow(dead_code)]
 
 use chrono::SecondsFormat;
 use serde::Serialize;

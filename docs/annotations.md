@@ -57,6 +57,9 @@ input, then closes stdin. The request defines the complete refresh window:
 {"version":1,"range":{"from":"2026-08-12T10:00:00Z","to":"2026-08-12T10:05:00Z"}}
 ```
 
+`range.from` and `range.to` are inclusive UTC RFC 3339 bounds. Grafatui
+defensively applies its visible-range filtering to the events returned.
+
 The provider writes zero or more existing JSONL events to stdout and diagnostics
 to stderr. Exit `0` with valid bounded JSONL replaces the complete annotation
 snapshot; an empty successful stdout clears it. A spawn failure, timeout,
