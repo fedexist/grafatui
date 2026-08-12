@@ -69,10 +69,7 @@ async fn main() -> Result<()> {
     }
 
     // Load config
-    let config = match args.config.clone() {
-        Some(path) => Config::load(Some(path))?,
-        None => Config::load(None).unwrap_or_default(),
-    };
+    let config = load_startup_config(args.config.clone())?;
     let dashboard_path = args
         .grafana_json
         .clone()
@@ -258,6 +255,10 @@ async fn main() -> Result<()> {
     terminal.show_cursor()?;
 
     res
+}
+
+fn load_startup_config(path: Option<std::path::PathBuf>) -> Result<Config> {
+    Config::load(path)
 }
 
 fn resolve_refresh_rate_ms(
@@ -457,6 +458,32 @@ fn print_validation_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn temp_config_path(name: &str) -> std::path::PathBuf {
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "grafatui-{name}-{}-{suffix}.toml",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn startup_config_loader_propagates_parse_errors() {
+        let path = temp_config_path("malformed-startup-config");
+        std::fs::write(
+            &path,
+            "[annotations_command]\nprogram = \"./provider\"\ntimeout = \"soon\"\n",
+        )
+        .unwrap();
+
+        let result = load_startup_config(Some(path.clone()));
+
+        std::fs::remove_file(path).unwrap();
+        assert!(result.is_err());
+    }
 
     #[test]
     fn test_resolve_refresh_rate_precedence() {
