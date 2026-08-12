@@ -42,8 +42,33 @@ pub(crate) struct Args {
     pub(crate) grafana_json: Option<PathBuf>,
 
     /// Optional JSONL point-event file to overlay on graph panels.
-    #[arg(long, value_name = "FILE")]
+    #[arg(
+        long,
+        value_name = "FILE",
+        conflicts_with_all = [
+            "annotations_command",
+            "annotations_command_arg",
+            "annotations_command_timeout"
+        ]
+    )]
     pub(crate) annotations_file: Option<PathBuf>,
+
+    /// Optional executable annotation provider.
+    #[arg(long, value_name = "PROGRAM", conflicts_with = "annotations_file")]
+    pub(crate) annotations_command: Option<String>,
+
+    /// Argument passed to --annotations-command; repeat to preserve argument order.
+    #[arg(
+        long,
+        value_name = "ARG",
+        requires = "annotations_command",
+        allow_hyphen_values = true
+    )]
+    pub(crate) annotations_command_arg: Vec<String>,
+
+    /// Maximum annotation-command runtime (for example, 500ms or 10s).
+    #[arg(long, value_name = "DURATION", requires = "annotations_command")]
+    pub(crate) annotations_command_timeout: Option<String>,
 
     /// Validate a Grafana dashboard import without starting the TUI
     #[arg(long)]
@@ -173,5 +198,38 @@ mod tests {
     fn test_parse_annotations_file() {
         let args = Args::parse_from(["grafatui", "--annotations-file", "events.jsonl"]);
         assert_eq!(args.annotations_file, Some(PathBuf::from("events.jsonl")));
+    }
+
+    #[test]
+    fn parses_annotation_command_with_ordered_hyphen_arguments() {
+        let args = Args::try_parse_from([
+            "grafatui",
+            "--annotations-command",
+            "./provider",
+            "--annotations-command-arg=--environment",
+            "--annotations-command-arg=prod",
+            "--annotations-command-timeout",
+            "750ms",
+        ])
+        .unwrap();
+
+        assert_eq!(args.annotations_command.as_deref(), Some("./provider"));
+        assert_eq!(args.annotations_command_arg, ["--environment", "prod"]);
+        assert_eq!(args.annotations_command_timeout.as_deref(), Some("750ms"));
+    }
+
+    #[test]
+    fn rejects_partial_or_conflicting_annotation_command_flags() {
+        assert!(Args::try_parse_from(["grafatui", "--annotations-command-arg=x"]).is_err());
+        assert!(
+            Args::try_parse_from([
+                "grafatui",
+                "--annotations-file",
+                "events.jsonl",
+                "--annotations-command",
+                "./provider"
+            ])
+            .is_err()
+        );
     }
 }

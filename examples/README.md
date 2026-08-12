@@ -28,6 +28,26 @@ cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --annotatio
 See the [external annotations guide](../docs/annotations.md) for targeting,
 tag filtering, inspection, reload behavior, and limitations.
 
+### Git Command Provider
+
+`git_annotation_provider.rs` turns commits in Grafatui's requested time window
+into external JSONL annotations. Build it from the repository root:
+
+```bash
+cargo build --example git_annotation_provider
+```
+
+Then configure the compiled example as the one annotation source:
+
+```toml
+[annotations_command]
+program = "./target/debug/examples/git_annotation_provider"
+args = ["."]
+timeout = "10s"
+```
+
+The optional first argument is the Git repository path and defaults to `.`.
+
 ## Dashboards
 
 
