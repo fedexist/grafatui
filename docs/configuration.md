@@ -9,6 +9,9 @@ Grafatui can be configured with CLI options, a TOML configuration file, or both.
 | `--prometheus-url <URL>` | Prometheus server URL | `http://localhost:9090` |
 | `--grafana-json <FILE>` | Grafana dashboard JSON file | none |
 | `--annotations-file <FILE>` | Read-only external JSONL point-event file | none |
+| `--annotations-command <PROGRAM>` | Read-only executable annotation provider | none |
+| `--annotations-command-arg <ARG>` | Argument for `--annotations-command`; repeat to preserve order | none |
+| `--annotations-command-timeout <DURATION>` | Maximum command-provider runtime | `10s` |
 | `--validate` | Check the Grafana dashboard import and exit without starting the TUI | `false` |
 | `--strict` | Make `--validate` fail when diagnostics contain warnings | `false` |
 | `--format <FORMAT>` | Output format for `--validate`: `text` or `json` | `text` |
@@ -53,6 +56,35 @@ annotations_file = "./events.jsonl"
 job = "node"
 instance = "server-01"
 ```
+
+## External Annotation Sources
+
+Select one read-only annotation source: `annotations_file` or the nested
+`[annotations_command]` table. The two TOML forms conflict, and a file source
+also conflicts with all command CLI flags.
+
+```toml
+[annotations_command]
+program = "./target/debug/examples/git_annotation_provider"
+args = ["."]
+timeout = "10s"
+```
+
+`program` is required; `args` defaults to an empty list and `timeout` defaults
+to `10s`. The matching CLI source is:
+
+```bash
+grafatui \
+  --annotations-command ./target/debug/examples/git_annotation_provider \
+  --annotations-command-arg=. \
+  --annotations-command-timeout 10s
+```
+
+`--annotations-command-arg` and `--annotations-command-timeout` require
+`--annotations-command`; repeat the argument flag to retain argument order.
+`--annotations-file` and `--annotations-command` cannot be combined. A CLI file
+or command has whole-source precedence over TOML: it replaces the configured
+file or complete command configuration rather than merging individual fields.
 
 ## Themes
 
