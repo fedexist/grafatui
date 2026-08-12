@@ -7,6 +7,7 @@ mod jsonl;
 mod modal;
 mod model;
 mod projection;
+mod provider;
 
 pub(crate) use details::format_cluster_detail_lines;
 pub(crate) use details::format_event_time;
@@ -21,6 +22,9 @@ pub(crate) use model::{
     AnnotationEvent, AnnotationPanelContext, AnnotationSnapshot, AnnotationTarget,
 };
 pub(crate) use projection::{AnnotationCluster, cluster_events_by};
+pub(crate) use provider::{
+    AnnotationCommandConfig, AnnotationSourceConfig, DEFAULT_COMMAND_TIMEOUT,
+};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct AnnotationStatus {

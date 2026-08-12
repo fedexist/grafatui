@@ -40,6 +40,7 @@ use theme::Theme;
 
 mod cli;
 
+use annotations::{AnnotationCommandConfig, AnnotationSourceConfig};
 use cli::Args;
 
 /// Main entry point for the Grafatui application.
@@ -270,6 +271,70 @@ fn resolve_annotations_path(
         .map(|path| config::expand_path(&path))
 }
 
+#[derive(Debug, Default)]
+#[allow(dead_code)]
+struct AnnotationCliSource {
+    file: Option<std::path::PathBuf>,
+    program: Option<String>,
+    args: Vec<String>,
+    timeout: Option<String>,
+}
+
+#[allow(dead_code)]
+fn resolve_annotation_source(
+    cli: AnnotationCliSource,
+    config_file: Option<std::path::PathBuf>,
+    config_command: Option<AnnotationCommandConfig>,
+) -> Result<Option<AnnotationSourceConfig>> {
+    if config_file.is_some() && config_command.is_some() {
+        bail!("annotations_file and annotations_command cannot both be configured");
+    }
+    if cli.file.is_some() && cli.program.is_some() {
+        bail!("--annotations-file and --annotations-command cannot be combined");
+    }
+    if cli.program.is_none() && (!cli.args.is_empty() || cli.timeout.is_some()) {
+        bail!("annotation command arguments and timeout require --annotations-command");
+    }
+
+    if let Some(path) = cli.file {
+        return Ok(Some(AnnotationSourceConfig::File(config::expand_path(
+            &path,
+        ))));
+    }
+    if let Some(program) = cli.program {
+        let timeout = match cli.timeout {
+            Some(value) => humantime::parse_duration(&value)
+                .with_context(|| "--annotations-command-timeout")?,
+            None => annotations::DEFAULT_COMMAND_TIMEOUT,
+        };
+        validate_annotation_command(&program, timeout)?;
+        return Ok(Some(AnnotationSourceConfig::Command(
+            AnnotationCommandConfig {
+                program,
+                args: cli.args,
+                timeout,
+            },
+        )));
+    }
+
+    if let Some(command) = config_command {
+        validate_annotation_command(&command.program, command.timeout)?;
+        return Ok(Some(AnnotationSourceConfig::Command(command)));
+    }
+    Ok(config_file.map(|path| AnnotationSourceConfig::File(config::expand_path(&path))))
+}
+
+#[allow(dead_code)]
+fn validate_annotation_command(program: &str, timeout: Duration) -> Result<()> {
+    if program.trim().is_empty() {
+        bail!("annotation command program must not be empty");
+    }
+    if timeout.is_zero() {
+        bail!("annotation command timeout must be greater than zero");
+    }
+    Ok(())
+}
+
 #[derive(Debug)]
 struct ImportContext {
     vars: HashMap<String, String>,
@@ -414,6 +479,135 @@ mod tests {
             Some(std::path::PathBuf::from("./config.jsonl")),
         );
         assert_eq!(resolved, Some(std::path::PathBuf::from("./cli.jsonl")));
+    }
+
+    #[test]
+    fn annotation_source_cli_command_replaces_complete_toml_source() {
+        let resolved = resolve_annotation_source(
+            AnnotationCliSource {
+                program: Some("./cli-provider".into()),
+                args: vec!["cli".into()],
+                timeout: Some("2s".into()),
+                ..AnnotationCliSource::default()
+            },
+            Some("config.jsonl".into()),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolved,
+            Some(annotations::AnnotationSourceConfig::Command(
+                annotations::AnnotationCommandConfig {
+                    program: "./cli-provider".into(),
+                    args: vec!["cli".into()],
+                    timeout: Duration::from_secs(2),
+                },
+            ))
+        );
+    }
+
+    #[test]
+    fn annotation_source_rejects_invalid_same_layer_configuration() {
+        let toml_command = annotations::AnnotationCommandConfig {
+            program: "./config-provider".into(),
+            args: vec![],
+            timeout: Duration::from_secs(10),
+        };
+        assert!(
+            resolve_annotation_source(
+                AnnotationCliSource::default(),
+                Some("events.jsonl".into()),
+                Some(toml_command),
+            )
+            .is_err()
+        );
+        assert!(
+            resolve_annotation_source(
+                AnnotationCliSource {
+                    program: Some("   ".into()),
+                    ..AnnotationCliSource::default()
+                },
+                None,
+                None,
+            )
+            .is_err()
+        );
+        assert!(
+            resolve_annotation_source(
+                AnnotationCliSource {
+                    program: Some("./provider".into()),
+                    timeout: Some("0s".into()),
+                    ..AnnotationCliSource::default()
+                },
+                None,
+                None,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn annotation_source_returns_none_when_unconfigured() {
+        assert_eq!(
+            resolve_annotation_source(AnnotationCliSource::default(), None, None).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn annotation_source_cli_file_replaces_toml_command() {
+        let resolved = resolve_annotation_source(
+            AnnotationCliSource {
+                file: Some("cli.jsonl".into()),
+                ..AnnotationCliSource::default()
+            },
+            None,
+            Some(annotations::AnnotationCommandConfig {
+                program: "./config-provider".into(),
+                args: vec!["config".into()],
+                timeout: Duration::from_secs(10),
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolved,
+            Some(annotations::AnnotationSourceConfig::File(
+                "cli.jsonl".into()
+            ))
+        );
+    }
+
+    #[test]
+    fn annotation_source_uses_toml_command_without_cli_source() {
+        let command = annotations::AnnotationCommandConfig {
+            program: "./config-provider".into(),
+            args: vec!["config".into()],
+            timeout: Duration::from_secs(3),
+        };
+
+        assert_eq!(
+            resolve_annotation_source(AnnotationCliSource::default(), None, Some(command.clone()))
+                .unwrap(),
+            Some(annotations::AnnotationSourceConfig::Command(command))
+        );
+    }
+
+    #[test]
+    fn annotation_source_rejects_malformed_cli_timeout() {
+        assert!(
+            resolve_annotation_source(
+                AnnotationCliSource {
+                    program: Some("./provider".into()),
+                    timeout: Some("soon".into()),
+                    ..AnnotationCliSource::default()
+                },
+                None,
+                None,
+            )
+            .is_err()
+        );
     }
 
     #[test]
