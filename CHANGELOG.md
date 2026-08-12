@@ -4,6 +4,56 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.1.11] - 2026-08-12
+
+### ⛰️  Features
+
+- Add annotation event model ([8d860a3](https://github.com/fedexist/grafatui/commit/8d860a3b8f30b365d315d2e834434ebcdf55a6fe))
+- Add annotation file source state ([8afd216](https://github.com/fedexist/grafatui/commit/8afd216eb0c6bad23eede823cb800e99e5037592))
+- Configure JSONL annotations ([27007b0](https://github.com/fedexist/grafatui/commit/27007b02a1b3aa00fa8b023601c12401648dc8fc))
+- Render terminal annotations ([a3226ec](https://github.com/fedexist/grafatui/commit/a3226ec3cf34cb95bd6459793528fe9f73fe21d3))
+- Control annotation visibility ([b111196](https://github.com/fedexist/grafatui/commit/b1111960c1f4bbd68d69e82b41242a6e63be5eb7))
+- Export annotation markers ([d012f25](https://github.com/fedexist/grafatui/commit/d012f2527b6609f1b84b1e03e38ecc08977d53b9))
+- Add annotation panel title targets ([ee07715](https://github.com/fedexist/grafatui/commit/ee07715dc25d8ab8a97c91ee60d2d8b491fedb6b))
+- Filter annotations by tag ([ead05ce](https://github.com/fedexist/grafatui/commit/ead05ceae1f3e618af0c8e5eea6c131f587a28e0))
+- Report annotation target warnings ([244bcf2](https://github.com/fedexist/grafatui/commit/244bcf2da53fd93e45fae50731ba9a993d30505a))
+- Route annotations by selected panel ([3471d7c](https://github.com/fedexist/grafatui/commit/3471d7c8c84ab64a603fecd190d331e24d2d5aff))
+- Model annotation exploration modals ([9627d03](https://github.com/fedexist/grafatui/commit/9627d03542ead09e38b03af8a58f6a78cdeb186a))
+- Navigate annotation clusters and tags ([b5b023d](https://github.com/fedexist/grafatui/commit/b5b023d192a79bebe82d5c2c23434a484d735fe8))
+- Add annotation command configuration ([cba9ac0](https://github.com/fedexist/grafatui/commit/cba9ac08dd0ab39167471fc3f9b211242dfe3ed9))
+- Define annotation command protocol ([45962b0](https://github.com/fedexist/grafatui/commit/45962b0447cf9c5d7c9614a45ba815a79fe847cb))
+- Execute bounded annotation commands ([239c444](https://github.com/fedexist/grafatui/commit/239c444eb4dc1ccc6692d2206f7669eae228377d))
+- Refresh annotation providers with metrics ([9649950](https://github.com/fedexist/grafatui/commit/9649950253143223d52c9ee580ae7b7f59aa3ec9))
+
+### 🐛 Bug Fixes
+
+- Preserve annotation timestamp precision ([f039684](https://github.com/fedexist/grafatui/commit/f039684207aa99c6b367762565a3d2db8a7ac13b))
+- Complete annotation verification ([4732391](https://github.com/fedexist/grafatui/commit/47323915004d8ded36fa54e382c7193354912c9a))
+- Harden annotation review edge cases ([618d479](https://github.com/fedexist/grafatui/commit/618d479b5c4e9a7c7b36ceac4dd5bb2335c995b4))
+- Gate annotation strong-data mask ([3d9216e](https://github.com/fedexist/grafatui/commit/3d9216e15d25b120e6001f5e042b8873fbbe7f74))
+- Propagate annotation config errors ([0bd08de](https://github.com/fedexist/grafatui/commit/0bd08dee3ba7af2a2cf8ee9b61815ca7715cba14))
+
+### 📚 Documentation
+
+- Explain external annotations ([37f9c5e](https://github.com/fedexist/grafatui/commit/37f9c5e2f3d3ee1e5544a4ad4b6d6b63032be966))
+- Clarify annotation file behavior ([079c257](https://github.com/fedexist/grafatui/commit/079c2579e370f427161b107ec789934c8c02a76a))
+- Explain richer annotation workflows ([c833510](https://github.com/fedexist/grafatui/commit/c8335104f745cb79b9d16a1e2c5713b20e221491))
+- Document annotation command providers ([df2145c](https://github.com/fedexist/grafatui/commit/df2145cae161e451a841a3863a655e724b06c93f))
+- Clarify annotation command source semantics ([d532081](https://github.com/fedexist/grafatui/commit/d5320816c984dd3d216eabba04e7ddb5576efaa1))
+
+### 🚜 Refactor
+
+- Introduce annotation provider boundary ([cfb1f9f](https://github.com/fedexist/grafatui/commit/cfb1f9fb6d9719ef2e2d24a6f52f7da578ab7ef3))
+
+### 🧪 Testing
+
+- Verify richer annotation exports ([0d2922a](https://github.com/fedexist/grafatui/commit/0d2922a60cf51f67445438c2314d30cf4072e760))
+
+### ⚙️ Miscellaneous Tasks
+
+- Update gitignore ([aa7362d](https://github.com/fedexist/grafatui/commit/aa7362d93a9ea5d901a9b8190dd996a64fcb5673))
+
+
 ## [0.1.10] - 2026-06-30
 
 ### ⛰️  Features
