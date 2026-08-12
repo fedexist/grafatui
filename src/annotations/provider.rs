@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::time::Duration;
 
-use super::AnnotationSnapshot;
+use super::{AnnotationSnapshot, command::CommandProvider, jsonl::JsonlFileProvider};
 
 pub(crate) const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -76,6 +76,13 @@ pub(crate) trait AnnotationProvider: fmt::Debug + Send {
     fn refresh<'a>(&'a mut self, context: &'a AnnotationRefreshContext) -> ProviderFuture<'a>;
 }
 
+pub(crate) fn build_provider(source: AnnotationSourceConfig) -> Box<dyn AnnotationProvider> {
+    match source {
+        AnnotationSourceConfig::File(path) => Box::new(JsonlFileProvider::new(path)),
+        AnnotationSourceConfig::Command(config) => Box::new(CommandProvider::new(config)),
+    }
+}
+
 fn default_command_timeout() -> Duration {
     DEFAULT_COMMAND_TIMEOUT
 }
@@ -90,9 +97,13 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
     use std::time::Duration;
 
-    use super::{AnnotationProvider, AnnotationRefreshContext, ProviderFuture, ProviderPoll};
+    use super::{
+        AnnotationProvider, AnnotationRefreshContext, AnnotationSourceConfig, ProviderFuture,
+        ProviderPoll, build_provider,
+    };
     use crate::annotations::AnnotationSnapshot;
 
     #[derive(Debug)]
@@ -112,5 +123,36 @@ mod tests {
             provider.refresh(&context).await,
             ProviderPoll::Loaded(snapshot) if snapshot.len() == 0
         ));
+    }
+
+    fn temp_path(name: &str) -> PathBuf {
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "grafatui-provider-{name}-{}-{suffix}.jsonl",
+            std::process::id()
+        ))
+    }
+
+    #[tokio::test]
+    async fn builds_file_provider_that_loads_jsonl() {
+        let path = temp_path("construction");
+        tokio::fs::write(
+            &path,
+            "{\"time\":\"2026-08-12T10:00:00Z\",\"text\":\"deploy\"}\n",
+        )
+        .await
+        .unwrap();
+        let mut provider = build_provider(AnnotationSourceConfig::File(path.clone()));
+        let context = AnnotationRefreshContext::from_unix_window(200, Duration::from_secs(10));
+
+        let ProviderPoll::Loaded(snapshot) = provider.refresh(&context).await else {
+            panic!("expected file provider to load a snapshot");
+        };
+        assert_eq!(snapshot.events()[0].text, "deploy");
+
+        tokio::fs::remove_file(path).await.unwrap();
     }
 }
