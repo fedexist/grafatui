@@ -52,6 +52,11 @@ impl AnnotationProviderError {
     pub(crate) fn new(message: impl Into<String>) -> Self {
         Self(message.into())
     }
+
+    #[allow(dead_code)] // Used by command providers before they are runtime-wired.
+    pub(crate) fn command(program: &str, reason: impl fmt::Display) -> Self {
+        Self(format!("annotation command {program}: {reason}"))
+    }
 }
 
 impl fmt::Display for AnnotationProviderError {
