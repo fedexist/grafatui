@@ -88,7 +88,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: target/generate-rpm/*.rpm
           file_glob: true
-          tag: ${{ github.ref }}
+          tag: ${{ inputs.release_tag || github.ref }}
 
   update-homebrew:
     needs: upload-assets
