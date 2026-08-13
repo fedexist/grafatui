@@ -96,6 +96,7 @@ deterministic buffer assertion.
 
 The PTY steps must reproduce the scenario contract's exact ordered inputs. A
 quit-only run proves lifecycle only; it cannot support a keyboard-flow claim.
+List cleanup inputs such as the final `q` in the contract's Actions field.
 If the required live state cannot be seeded deterministically, mark that PTY
 interaction evidence inapplicable or inconclusive and explain the boundary.
 For terminal-restoration claims, compare the relevant terminal attributes
@@ -118,6 +119,28 @@ the scenario and dimensions.
 Before responding, write the required completion table and `Remaining
 uncertainty` line once to `report.md`, then paste that file verbatim into the
 final response instead of reconstructing the table.
+
+## Final evidence audit
+
+Run this gate after producing every artifact and before writing `report.md`:
+
+- Re-read the immutable contract. Check that each expected visual state is
+  present in its buffer/image and that wording matches the actual screen.
+- Capture every material intermediate state after an input, including search
+  popups before acceptance; a final-state image cannot stand in for it.
+- Compare the contract's precondition and ordered actions with the state test
+  and PTY scenario. Extra setup belongs in the precondition; omitted,
+  substituted, or extra interaction makes that evidence fail.
+- Read every command's exit status and output. A formatting, test, renderer,
+  or PTY failure prevents `pass`, even when another layer succeeds.
+- After the final production or test edit, regenerate every GREEN buffer,
+  image, PTY result, and broader-check log. Preserve command, exit status, and
+  output; then write `report.md` last.
+- Persist focused behavioral tests. Keep capture generators and exploratory
+  artifacts temporary unless the repository explicitly benefits from them.
+  Serialize actual Ratatui cell colors/modifiers; never fabricate style fields.
+- Use `fail` when evidence contradicts an expectation; reserve
+  `inconclusive` for required evidence that cannot be obtained reliably.
 
 Avoid artifact bloat: do not commit duplicate visual states, full recordings,
 or transient files that add no diagnostic value. Retain failed or inconclusive

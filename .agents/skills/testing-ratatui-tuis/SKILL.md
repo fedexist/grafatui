@@ -17,11 +17,12 @@ Build change-specific, deterministic evidence before accepting TUI behavior. Com
 4. Assert state transitions and input behavior. Render the asserted state with `TestBackend`, serialize the actual buffer, and follow the [Ratatui harness](references/ratatui-harness.md) for capture and normalization.
 5. For every visual state named in the saved scenario contract, run `scripts/render-buffer` on its capture and inspect the resulting image with the available image viewer against the written expectations.
 6. Run `scripts/pty-smoke` for critical lifecycle or interaction flows, reproducing the contract's ordered inputs with fixed dimensions, bounded timeout, and retained diagnostics.
-7. Diagnose every failure, add a failing regression test before the fix, then rerun affected scenarios and proportionate broader checks. Persist only compact tests and approved baselines that add durable value.
+7. Diagnose every failure, add a failing regression test before the fix, then rerun affected scenarios and proportionate broader checks.
+8. Run the final evidence audit in the [visual validation contract](references/visual-validation.md). Persist only focused tests and approved baselines, not capture helpers.
 
 ## Evidence requirements
 
-Before classification, map every contracted action and visual state to its artifact path; missing or mismatched evidence is `fail` or `inconclusive`. Mark a scenario `pass` only with passing state/input assertions, matching deterministic buffers, semantic inspection of new or changed screenshots, no unexplained approved-baseline differences, successful critical PTY flows, clean exit and terminal restoration, and relevant proportionate broader tests. Classify unavailable or unstable required evidence as `inconclusive`, never `pass`.
+Map every contracted action and visual state to an artifact; mismatches are `fail`, unavailable evidence is `inconclusive`. Mark `pass` only after all required assertions, buffers, images, PTY flows, lifecycle checks, and broader commands exit successfully.
 
 ## Fix loop
 
