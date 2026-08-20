@@ -21,6 +21,13 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
+fn example_dashboard(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("dashboards")
+        .join(name)
+}
+
 #[test]
 fn validate_strict_exits_nonzero_when_warnings_exist() {
     let path = write_dashboard(
@@ -139,6 +146,26 @@ fn validate_accepts_supported_v2_resource_json() {
     let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(summary["title"], "Compatibility");
     assert_eq!(summary["panel_count"], 1);
+    assert_eq!(summary["diagnostics"], serde_json::json!([]));
+}
+
+#[test]
+fn validate_accepts_live_grafana_v2_compatibility_example() {
+    let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+        .args(["--validate", "--format", "json", "--grafana-json"])
+        .arg(example_dashboard("grafana_v2_compatibility.json"))
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summary["title"], "Grafana V2 Compatibility");
+    assert_eq!(summary["panel_count"], 2);
     assert_eq!(summary["diagnostics"], serde_json::json!([]));
 }
 
