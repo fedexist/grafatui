@@ -117,7 +117,18 @@ fn parse_grafana_dashboard(data: &str) -> Result<DashboardImport> {
 
 fn detect_and_adapt(value: Value) -> Result<model::Dashboard> {
     match value.get("apiVersion") {
-        None => classic::adapt(value),
+        None => {
+            if value.as_object().is_some_and(|object| {
+                ["kind", "spec", "metadata", "status"]
+                    .iter()
+                    .any(|marker| object.contains_key(*marker))
+            }) {
+                anyhow::bail!(
+                    "invalid Grafana dashboard resource at apiVersion: missing required field `apiVersion`"
+                );
+            }
+            classic::adapt(value)
+        }
         Some(Value::String(version)) if version == v2::V2_API_VERSION => v2::adapt(value),
         Some(Value::String(version)) => anyhow::bail!(
             "unsupported Grafana dashboard resource apiVersion `{version}` at apiVersion; supported resource version is `{}`",
@@ -330,7 +341,9 @@ mod tests {
                     "panel-1": {
                         "kind": "Panel",
                         "spec": {
+                            "id": 1,
                             "title": "Panel",
+                            "links": [],
                             "data": {"kind": "QueryGroup", "spec": {"queries": [], "transformations": [], "queryOptions": {}}},
                             "vizConfig": {"kind": "VizConfig", "group": "timeseries", "version": "v0", "spec": {"fieldConfig": {"defaults": {}}, "options": {}}}
                         }
@@ -419,6 +432,20 @@ mod tests {
             assert!(error.contains(version));
             assert!(error.contains("apiVersion"));
         }
+    }
+
+    #[test]
+    fn rejects_resource_envelope_without_api_version() {
+        let error = parse_grafana_dashboard(
+            r#"{"kind":"Dashboard","spec":{"title":"Incomplete resource"}}"#,
+        )
+        .expect_err("resource-shaped JSON without apiVersion must be rejected")
+        .to_string();
+
+        assert!(
+            error.contains("apiVersion"),
+            "expected missing apiVersion error, got `{error}`"
+        );
     }
 
     #[test]
@@ -631,6 +658,46 @@ mod tests {
             assert!(
                 error.contains(expected_path),
                 "{case}: expected `{expected_path}` in `{error}`"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_missing_or_non_object_v2_query_variable_data_query_spec() {
+        for case in ["missing_spec", "wrong_spec_type"] {
+            let mut json = valid_v2_resource();
+            json["spec"]["variables"] = serde_json::json!([{
+                "kind": "QueryVariable",
+                "spec": {
+                    "name": "instance",
+                    "current": {"text": "node-1", "value": "node-1"},
+                    "query": {
+                        "kind": "DataQuery",
+                        "group": "prometheus",
+                        "spec": {"query": "label_values(up, instance)"}
+                    },
+                    "definition": "label_values(up, instance)"
+                }
+            }]);
+            let query = json["spec"]["variables"][0]["spec"]["query"]
+                .as_object_mut()
+                .unwrap();
+            match case {
+                "missing_spec" => {
+                    query.remove("spec");
+                }
+                "wrong_spec_type" => {
+                    query.insert("spec".into(), serde_json::json!([]));
+                }
+                _ => unreachable!(),
+            }
+
+            let error = parse_grafana_dashboard(&json.to_string())
+                .expect_err(case)
+                .to_string();
+            assert!(
+                error.contains("spec.variables[0].spec.query.spec"),
+                "{case}: expected native DataQuery.spec path in `{error}`"
             );
         }
     }
@@ -937,6 +1004,41 @@ mod tests {
     }
 
     #[test]
+    fn rejects_malformed_required_v2_panel_id_and_links_at_native_paths() {
+        for (case, expected_path) in [
+            ("missing_id", "spec.elements[\"panel-1\"].spec.id"),
+            ("wrong_id_type", "spec.elements[\"panel-1\"].spec.id"),
+            ("missing_links", "spec.elements[\"panel-1\"].spec.links"),
+            ("wrong_links_type", "spec.elements[\"panel-1\"].spec.links"),
+        ] {
+            let mut json: serde_json::Value = serde_json::from_str(include_str!(
+                "../tests/fixtures/grafana/v2_compatibility.json"
+            ))
+            .unwrap();
+            let panel = &mut json["spec"]["elements"]["panel-1"]["spec"];
+            match case {
+                "missing_id" => {
+                    panel.as_object_mut().unwrap().remove("id");
+                }
+                "wrong_id_type" => panel["id"] = serde_json::json!("1"),
+                "missing_links" => {
+                    panel.as_object_mut().unwrap().remove("links");
+                }
+                "wrong_links_type" => panel["links"] = serde_json::json!({}),
+                _ => unreachable!(),
+            }
+
+            let error = parse_grafana_dashboard(&json.to_string())
+                .expect_err(case)
+                .to_string();
+            assert!(
+                error.contains(expected_path),
+                "{case}: expected `{expected_path}` in `{error}`"
+            );
+        }
+    }
+
+    #[test]
     fn v2_diagnostics_unsupported_variable_kinds_are_skipped_with_native_paths() {
         let mut json = valid_v2_resource();
         json["spec"]["variables"] = serde_json::json!([
@@ -1003,6 +1105,34 @@ mod tests {
 
         assert_eq!(dashboard.queries.len(), 1);
         assert_eq!(dashboard.queries[0].exprs, ["up"]);
+        assert_eq!(dashboard.diagnostics.len(), 1);
+        assert_eq!(dashboard.diagnostics[0].code, "unsupported_datasource");
+        assert_eq!(
+            dashboard.diagnostics[0].path,
+            "spec.elements[\"panel-1\"].spec.data.spec.queries[0].spec.query"
+        );
+    }
+
+    #[test]
+    fn v2_all_unsupported_datasource_targets_increment_skipped_panels_once() {
+        let mut json = valid_v2_resource();
+        json["spec"]["elements"]["panel-1"]["spec"]["data"]["spec"]["queries"] = serde_json::json!([{
+            "kind": "PanelQuery",
+            "spec": {
+                "hidden": false,
+                "refId": "A",
+                "query": {
+                    "kind": "DataQuery",
+                    "group": "loki",
+                    "spec": {"expr": "{app=\"api\"}"}
+                }
+            }
+        }]);
+
+        let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+
+        assert!(dashboard.queries.is_empty());
+        assert_eq!(dashboard.skipped_panels, 1);
         assert_eq!(dashboard.diagnostics.len(), 1);
         assert_eq!(dashboard.diagnostics[0].code, "unsupported_datasource");
         assert_eq!(

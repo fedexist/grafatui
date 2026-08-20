@@ -145,14 +145,14 @@ fn normalize_query_variable(
     if datasource != "prometheus" {
         diagnostics.push(super::ImportDiagnostic::new(
             "unsupported_datasource",
-            query_path,
+            &query_path,
             format!("unsupported Grafana V2 datasource `{datasource}` skipped"),
         ));
     }
-    let query = query
-        .get("spec")
-        .and_then(Value::as_object)
-        .and_then(|query_spec| query_spec.get("query"))
+    let query_spec_path = format!("{query_path}.spec");
+    let query_spec = require_object_from(query, "spec", &query_spec_path)?;
+    let query = query_spec
+        .get("query")
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|query| !query.is_empty())
@@ -340,8 +340,13 @@ fn parse_panel(
     let panel_path = format!("{path}.spec");
     let data_path = format!("{panel_path}.data.spec.queries");
     let mut targets = Vec::new();
+    let mut has_visible_target = false;
+    let mut has_supported_visible_target = false;
     for (index, query) in raw.spec.data.spec.queries.into_iter().enumerate() {
         let query_path = format!("{data_path}[{index}].spec.query");
+        if !query.spec.hidden {
+            has_visible_target = true;
+        }
         if query.spec.query.group != "prometheus" {
             diagnostics.push(super::ImportDiagnostic::new(
                 "unsupported_datasource",
@@ -352,6 +357,9 @@ fn parse_panel(
                 ),
             ));
             continue;
+        }
+        if !query.spec.hidden {
+            has_supported_visible_target = true;
         }
 
         let expr_path = format!("{query_path}.spec.expr");
@@ -417,6 +425,7 @@ fn parse_panel(
         title: raw.spec.title,
         source_path: path.to_string(),
         targets,
+        count_as_skipped_if_empty: has_visible_target && !has_supported_visible_target,
         grid: Some(grid),
         field_defaults: Some(field_defaults),
         reduce_options_path: viz_spec
@@ -432,7 +441,13 @@ fn parse_panel(
 fn validate_panel_structure(element: &JsonObject, path: &str) -> Result<()> {
     let panel_path = format!("{path}.spec");
     let panel = require_object_from(element, "spec", &panel_path)?;
+    let id_path = format!("{panel_path}.id");
+    ensure!(
+        panel.get("id").is_some_and(Value::is_number),
+        "invalid Grafana V2 resource at {id_path}: expected a number"
+    );
     require_string_from(panel, "title", &format!("{panel_path}.title"))?;
+    require_array_from(panel, "links", &format!("{panel_path}.links"))?;
 
     let data_path = format!("{panel_path}.data");
     let data = require_object_from(panel, "data", &data_path)?;

@@ -37,6 +37,7 @@ pub(super) struct Panel {
     pub(super) title: String,
     pub(super) source_path: String,
     pub(super) targets: Vec<Target>,
+    pub(super) count_as_skipped_if_empty: bool,
     pub(super) grid: Option<GridPos>,
     pub(super) field_defaults: Option<FieldDefaults>,
     pub(super) reduce_options_path: Option<String>,

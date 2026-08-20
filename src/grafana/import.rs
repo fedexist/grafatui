@@ -193,6 +193,8 @@ fn import_panels(out: &mut DashboardImport, panels: Vec<model::Panel>) -> Result
                 display,
                 options,
             });
+        } else if panel.count_as_skipped_if_empty {
+            out.skipped_panels += 1;
         }
     }
     Ok(())
