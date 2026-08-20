@@ -8,7 +8,7 @@ oriented around two priorities:
 2. **User-visible product value** - parity work should make real dashboards
    easier to read, debug, and share.
 
-> **Current version**: 0.1.10 · **Status**: Active development, pre-1.0
+> **Current version**: 0.1.11 · **Status**: Active development, pre-1.0
 
 **Legend**:
 - 🟢 Low complexity · 🟡 Medium complexity · 🔴 High complexity
@@ -194,6 +194,24 @@ This is the main backlog, ordered by Grafana parity domain.
 | **Mixed datasource warnings** | Mixed panels and unsupported datasources | Makes unsupported imports clear | 🟢 | 📋 |
 | **Loki support** | Logs datasource and logs panel | Useful terminal observability companion | 🔴 | 💡 |
 | **InfluxDB support** | Influx datasource | Broadens dashboard compatibility | 🔴 | 💡 |
+
+### 9. Grafana Dashboard Schema v2
+
+The first v2 milestone is format compatibility: accept JSON resources with the
+exact `dashboard.grafana.app/v2` API version and map the subset that has an
+existing Grafatui equivalent. Unsupported v2-only layout semantics must fail
+with a clear import error rather than silently changing the dashboard.
+
+| Feature | Grafana field / behavior | User value | Complexity | Status |
+|---|---|---|---|---|
+| **V2 Resource JSON compatibility** | `apiVersion: dashboard.grafana.app/v2` with a `GridLayout` | Imports Grafana 13's default JSON format without requiring a Classic export | 🔴 | 🔜 |
+| **Rows layout** | `RowsLayout` and nested row layouts | Preserves dashboard grouping and collapsed sections | 🔴 | 📋 |
+| **Tabs layout** | `TabsLayout` and nested tabs | Preserves tabbed dashboard organization | 🔴 | 📋 |
+| **Auto-grid layout** | `AutoGridLayout` | Preserves automatic panel placement and sizing | 🔴 | 📋 |
+| **Repeat and dynamic layouts** | Layout and element `repeat` settings | Expands panels or groups from variable values | 🔴 | 📋 |
+| **Conditional rendering** | `conditionalRendering` on supported containers | Shows or hides content using v2 conditions | 🔴 | 📋 |
+| **Nested layout variables** | Variables scoped to rows and tabs | Preserves local variable scope in dynamic dashboards | 🔴 | 📋 |
+| **V2 Resource YAML** | YAML representation of the v2 resource | Supports Grafana's alternative as-code export format | 🟡 | 💡 |
 
 ---
 

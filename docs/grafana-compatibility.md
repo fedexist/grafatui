@@ -1,8 +1,10 @@
 # Grafana Dashboard JSON Compatibility
 
-This document provides a comprehensive feature-parity table between the [Grafana Dashboard JSON Model](https://grafana.com/docs/grafana/latest/dashboards/build-dashboards/json-model/) and what Grafatui currently supports.
+This document provides a comprehensive feature-parity table between the
+[Grafana dashboard JSON models](https://grafana.com/docs/grafana/latest/visualizations/dashboards/build-dashboards/view-dashboard-json-model/)
+and what Grafatui currently supports.
 
-> **Snapshot**: Grafatui v0.1.9. The roadmap prioritizes Grafana parity first,
+> **Snapshot**: Grafatui v0.1.11. The roadmap prioritizes Grafana parity first,
 > then user-visible product value. See the [roadmap](https://github.com/fedexist/grafatui/blob/main/ROADMAP.md) for milestone
 > slices built from this compatibility ladder.
 
@@ -11,6 +13,25 @@ This document provides a comprehensive feature-parity table between the [Grafana
 - 🔶 **Partial** — Partially implemented or with limitations
 - ❌ **Not Implemented** — Recognized but not yet functional
 - ⛔ **Not Applicable** — Cannot be implemented in a TUI context (e.g., browser-only features)
+
+---
+
+## Dashboard Schema Models
+
+Grafatui currently imports only the non-resource Classic JSON model. In Grafana
+13, use **Export as code → Advanced options → Model: Classic**. See the
+[dashboard import guide](grafana-dashboard-import.md) for detailed steps.
+
+| Model | Status | Notes |
+|---|---|---|
+| Classic JSON | ✅ Supported | Expected by `--grafana-json`; the remaining tables describe support for its fields |
+| V1 Resource JSON | ❌ Not Implemented | The Kubernetes-style `dashboard.grafana.app/v1` resource envelope is not accepted |
+| V2 Resource JSON | ❌ Not Implemented | Exact `dashboard.grafana.app/v2` compatibility is planned in [issue #79](https://github.com/fedexist/grafatui/issues/79) |
+| Resource YAML | ❌ Not Implemented | `--grafana-json` accepts JSON only |
+
+Grafana V2 Resource features that do not have a Classic equivalent—including
+tabs, auto-grid layouts, repeat layouts, and conditional rendering—are separate
+roadmap items and are not part of the initial compatibility work.
 
 ---
 
@@ -346,4 +367,4 @@ Grafatui provides several TUI-native capabilities that don't map directly to Gra
 
 ---
 
-*This document was reviewed against the Grafatui source code at v0.1.9. If you notice any inaccuracies, please open an issue or PR.*
+*This document was reviewed against the Grafatui source code at v0.1.11. If you notice any inaccuracies, please open an issue or PR.*
