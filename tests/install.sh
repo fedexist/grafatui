@@ -77,7 +77,7 @@ prepare_wget_only_path() {
 
   local tool
   local tool_path
-  for tool in awk chmod cp mkdir mktemp mv rm tar; do
+  for tool in awk chmod cp gzip mkdir mktemp mv rm tar; do
     tool_path="$(command -v "${tool}")"
     ln -s "${tool_path}" "${WGET_ONLY_BIN}/${tool}"
   done
@@ -87,6 +87,8 @@ prepare_wget_only_path() {
   else
     ln -s "$(command -v shasum)" "${WGET_ONLY_BIN}/shasum"
   fi
+
+  [[ -x "${WGET_ONLY_BIN}/gzip" ]] || fail 'wget-only PATH is missing the gzip dependency used by GNU tar'
 }
 
 test_installs_latest_linux_x86_64_release() {
