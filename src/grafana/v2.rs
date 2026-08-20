@@ -131,15 +131,22 @@ fn normalize_variables(
 fn normalize_query_variable(
     spec: &JsonObject,
     index: usize,
-    _diagnostics: &mut Vec<super::ImportDiagnostic>,
+    diagnostics: &mut Vec<super::ImportDiagnostic>,
 ) -> Result<Option<model::Variable>> {
     let source_path = format!("spec.variables[{index}]");
     let name = require_string_from(spec, "name", &format!("{source_path}.spec.name"))?.to_string();
     let query_spec = spec.get("query").and_then(Value::as_object);
-    let is_prometheus = query_spec
+    let datasource = query_spec
         .and_then(|query| query.get("group"))
-        .and_then(Value::as_str)
-        == Some("prometheus");
+        .and_then(Value::as_str);
+    let is_prometheus = datasource == Some("prometheus");
+    if let Some(datasource) = datasource.filter(|datasource| *datasource != "prometheus") {
+        diagnostics.push(super::ImportDiagnostic::new(
+            "unsupported_datasource",
+            format!("{source_path}.spec.query"),
+            format!("unsupported Grafana V2 datasource `{datasource}` skipped"),
+        ));
+    }
     let query = query_spec
         .and_then(|query| query.get("spec"))
         .and_then(Value::as_object)
@@ -301,33 +308,65 @@ fn parse_panel(
     value: &Value,
     path: &str,
     grid: model::GridPos,
-    _diagnostics: &mut Vec<super::ImportDiagnostic>,
+    diagnostics: &mut Vec<super::ImportDiagnostic>,
 ) -> Result<Option<model::Panel>> {
-    let raw: RawPanelElement = serde_json::from_value(value.clone())
-        .with_context(|| format!("parsing Grafana V2 panel at {path}"))?;
-    if raw.kind != "Panel" {
+    let element = value
+        .as_object()
+        .ok_or_else(|| anyhow!("invalid Grafana V2 element at {path}: expected an object"))?;
+    let kind_path = format!("{path}.kind");
+    let kind = require_string_from(element, "kind", &kind_path)?;
+    if kind != "Panel" {
+        diagnostics.push(super::ImportDiagnostic::new(
+            "unsupported_element",
+            path,
+            format!("unsupported Grafana V2 element kind `{kind}` skipped"),
+        ));
         return Ok(None);
     }
+    validate_panel_kinds(element, path)?;
+
+    let raw: RawPanelElement = serde_json::from_value(value.clone())
+        .with_context(|| format!("parsing Grafana V2 panel at {path}"))?;
 
     let panel_path = format!("{path}.spec");
     let data_path = format!("{panel_path}.data.spec.queries");
-    let targets = raw
-        .spec
-        .data
-        .spec
-        .queries
-        .into_iter()
-        .enumerate()
-        .filter_map(|(index, query)| {
-            (query.spec.query.group == "prometheus").then(|| model::Target {
-                expr: query.spec.query.spec.expr,
-                expr_path: format!("{data_path}[{index}].spec.query.spec.expr"),
-                legend_format: query.spec.query.spec.legend_format,
-                instant: query.spec.query.spec.instant,
-                hidden: query.spec.hidden,
-            })
-        })
-        .collect();
+    let mut targets = Vec::new();
+    for (index, query) in raw.spec.data.spec.queries.into_iter().enumerate() {
+        let query_path = format!("{data_path}[{index}].spec.query");
+        if query.spec.query.group != "prometheus" {
+            diagnostics.push(super::ImportDiagnostic::new(
+                "unsupported_datasource",
+                &query_path,
+                format!(
+                    "unsupported Grafana V2 datasource `{}` skipped",
+                    query.spec.query.group
+                ),
+            ));
+            continue;
+        }
+
+        let expr_path = format!("{query_path}.spec.expr");
+        let expr = query
+            .spec
+            .query
+            .spec
+            .expr
+            .filter(|expr| !expr.trim().is_empty());
+        if !query.spec.hidden && expr.is_none() {
+            diagnostics.push(super::ImportDiagnostic::new(
+                "missing_query_expression",
+                &expr_path,
+                "visible Prometheus query has no expression and was skipped",
+            ));
+        }
+        targets.push(model::Target {
+            expr,
+            expr_path,
+            legend_format: query.spec.query.spec.legend_format,
+            instant: query.spec.query.spec.instant,
+            hidden: query.spec.hidden,
+        });
+    }
     let viz_spec = raw.spec.viz_config.spec;
     let defaults = viz_spec.field_config.defaults;
     let field_defaults = model::FieldDefaults {
@@ -381,6 +420,46 @@ fn parse_panel(
     }))
 }
 
+fn validate_panel_kinds(element: &JsonObject, path: &str) -> Result<()> {
+    let panel_path = format!("{path}.spec");
+    let panel = require_object_from(element, "spec", &panel_path)?;
+
+    let data_path = format!("{panel_path}.data");
+    let data = require_object_from(panel, "data", &data_path)?;
+    require_expected_kind(data, &data_path, "QueryGroup")?;
+    let data_spec_path = format!("{data_path}.spec");
+    let data_spec = require_object_from(data, "spec", &data_spec_path)?;
+    let queries_path = format!("{data_spec_path}.queries");
+    let queries = require_array_from(data_spec, "queries", &queries_path)?;
+    for (index, query) in queries.iter().enumerate() {
+        let query_path = format!("{queries_path}[{index}]");
+        let query = query.as_object().ok_or_else(|| {
+            anyhow!("invalid Grafana V2 panel query at {query_path}: expected an object")
+        })?;
+        require_expected_kind(query, &query_path, "PanelQuery")?;
+        let query_spec_path = format!("{query_path}.spec");
+        let query_spec = require_object_from(query, "spec", &query_spec_path)?;
+        let data_query_path = format!("{query_spec_path}.query");
+        let data_query = require_object_from(query_spec, "query", &data_query_path)?;
+        require_expected_kind(data_query, &data_query_path, "DataQuery")?;
+    }
+
+    let viz_path = format!("{panel_path}.vizConfig");
+    let viz = require_object_from(panel, "vizConfig", &viz_path)?;
+    require_expected_kind(viz, &viz_path, "VizConfig")?;
+    Ok(())
+}
+
+fn require_expected_kind(object: &JsonObject, path: &str, expected: &str) -> Result<()> {
+    let kind_path = format!("{path}.kind");
+    let kind = require_string_from(object, "kind", &kind_path)?;
+    ensure!(
+        kind == expected,
+        "invalid Grafana V2 kind `{kind}` at {kind_path}: expected `{expected}`"
+    );
+    Ok(())
+}
+
 fn non_empty_json_value(value: &Value) -> bool {
     match value {
         Value::Array(values) => !values.is_empty(),
@@ -393,7 +472,6 @@ fn non_empty_json_value(value: &Value) -> bool {
 
 #[derive(Deserialize)]
 struct RawPanelElement {
-    kind: String,
     spec: RawPanelSpec,
 }
 
@@ -407,8 +485,6 @@ struct RawPanelSpec {
 
 #[derive(Deserialize)]
 struct RawQueryGroup {
-    #[allow(dead_code)]
-    kind: String,
     spec: RawQueryGroupSpec,
 }
 
@@ -422,8 +498,6 @@ struct RawQueryGroupSpec {
 
 #[derive(Deserialize)]
 struct RawPanelQuery {
-    #[allow(dead_code)]
-    kind: String,
     spec: RawPanelQuerySpec,
 }
 
@@ -437,8 +511,6 @@ struct RawPanelQuerySpec {
 
 #[derive(Deserialize)]
 struct RawDataQuery {
-    #[allow(dead_code)]
-    kind: String,
     group: String,
     spec: RawPrometheusQuery,
 }
@@ -453,8 +525,6 @@ struct RawPrometheusQuery {
 
 #[derive(Deserialize)]
 struct RawVizConfig {
-    #[allow(dead_code)]
-    kind: String,
     group: String,
     #[serde(rename = "version")]
     _version: String,

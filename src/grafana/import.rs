@@ -128,6 +128,14 @@ fn import_panels(out: &mut DashboardImport, panels: Vec<model::Panel>) -> Result
         let mut display = crate::ui::DisplayFormat::default();
         let mut graph_options = crate::app::GraphOptions::default();
 
+        if let Some(path) = panel.transformations_path {
+            out.diagnostics.push(ImportDiagnostic::new(
+                "ignored_field",
+                path,
+                "`transformations` are not supported yet; queries will run without Grafana transformations",
+            ));
+        }
+
         if let Some(path) = panel.reduce_options_path {
             out.diagnostics.push(ImportDiagnostic::new(
                 "ignored_field",
