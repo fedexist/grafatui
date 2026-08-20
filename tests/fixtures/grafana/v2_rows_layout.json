@@ -1,0 +1,13 @@
+{
+  "apiVersion": "dashboard.grafana.app/v2",
+  "kind": "Dashboard",
+  "metadata": {"name": "rows-layout"},
+  "spec": {
+    "title": "Rows layout",
+    "elements": {},
+    "layout": {"kind": "RowsLayout", "spec": {"rows": []}},
+    "variables": [],
+    "timeSettings": {"from": "now-6h", "to": "now", "autoRefresh": ""}
+  },
+  "status": {}
+}

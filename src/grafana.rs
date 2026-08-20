@@ -470,6 +470,63 @@ mod tests {
     }
 
     #[test]
+    fn rejects_invalid_v2_nested_kinds() {
+        let cases = [
+            (
+                "data",
+                "spec.elements[\"panel-1\"].spec.data.kind",
+                "NotQueryGroup",
+            ),
+            (
+                "query",
+                "spec.elements[\"panel-1\"].spec.data.spec.queries[0].kind",
+                "NotPanelQuery",
+            ),
+            (
+                "data_query",
+                "spec.elements[\"panel-1\"].spec.data.spec.queries[0].spec.query.kind",
+                "NotDataQuery",
+            ),
+            (
+                "viz",
+                "spec.elements[\"panel-1\"].spec.vizConfig.kind",
+                "NotVizConfig",
+            ),
+        ];
+
+        for (case, expected_path, replacement) in cases {
+            let mut value: serde_json::Value = serde_json::from_str(include_str!(
+                "../tests/fixtures/grafana/v2_compatibility.json"
+            ))
+            .unwrap();
+            match case {
+                "data" => {
+                    value["spec"]["elements"]["panel-1"]["spec"]["data"]["kind"] =
+                        replacement.into()
+                }
+                "query" => {
+                    value["spec"]["elements"]["panel-1"]["spec"]["data"]["spec"]["queries"][0]["kind"] =
+                        replacement.into()
+                }
+                "data_query" => {
+                    value["spec"]["elements"]["panel-1"]["spec"]["data"]["spec"]["queries"][0]["spec"]
+                        ["query"]["kind"] = replacement.into()
+                }
+                "viz" => {
+                    value["spec"]["elements"]["panel-1"]["spec"]["vizConfig"]["kind"] =
+                        replacement.into()
+                }
+                _ => unreachable!(),
+            }
+            let error = parse_grafana_dashboard(&value.to_string())
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(replacement));
+            assert!(error.contains(expected_path));
+        }
+    }
+
+    #[test]
     fn v2_query_variable_falls_back_to_definition_with_its_native_path() {
         let mut json = valid_v2_resource();
         json["spec"]["variables"] = serde_json::json!([{
@@ -539,7 +596,7 @@ mod tests {
     }
 
     #[test]
-    fn v2_non_prometheus_query_variable_is_not_dynamic() {
+    fn v2_diagnostics_non_prometheus_query_variable_is_not_dynamic() {
         let mut json = valid_v2_resource();
         json["spec"]["variables"] = serde_json::json!([{
             "kind": "QueryVariable",
@@ -557,7 +614,12 @@ mod tests {
             Some("api")
         );
         assert!(dashboard.query_vars.is_empty());
-        assert!(dashboard.diagnostics.is_empty());
+        assert_eq!(dashboard.diagnostics.len(), 1);
+        assert_eq!(dashboard.diagnostics[0].code, "unsupported_datasource");
+        assert_eq!(
+            dashboard.diagnostics[0].path,
+            "spec.variables[0].spec.query"
+        );
     }
 
     #[test]
@@ -583,7 +645,7 @@ mod tests {
     }
 
     #[test]
-    fn v2_unsupported_variable_kinds_are_skipped_with_native_paths() {
+    fn v2_diagnostics_unsupported_variable_kinds_are_skipped_with_native_paths() {
         let mut json = valid_v2_resource();
         json["spec"]["variables"] = serde_json::json!([
             {"kind": "AdhocVariable", "spec": {"name": "adhoc"}},
@@ -599,6 +661,199 @@ mod tests {
         assert_eq!(dashboard.diagnostics[0].path, "spec.variables[0]");
         assert_eq!(dashboard.diagnostics[1].code, "unsupported_variable");
         assert_eq!(dashboard.diagnostics[1].path, "spec.variables[1]");
+    }
+
+    #[test]
+    fn v2_diagnostics_unsupported_elements_are_skipped_before_deserialization() {
+        for (kind, name) in [("LibraryPanel", "library-1"), ("FutureElement", "future-1")] {
+            let mut json = valid_v2_resource();
+            json["spec"]["elements"] = serde_json::json!({
+                name: {"kind": kind, "spec": {"name": "not-a-panel"}}
+            });
+            json["spec"]["layout"]["spec"]["items"][0]["spec"]["element"]["name"] = name.into();
+
+            let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+
+            assert!(dashboard.queries.is_empty());
+            assert_eq!(dashboard.diagnostics.len(), 1);
+            assert_eq!(dashboard.diagnostics[0].code, "unsupported_element");
+            assert_eq!(
+                dashboard.diagnostics[0].path,
+                format!("spec.elements[{name:?}]")
+            );
+        }
+    }
+
+    #[test]
+    fn v2_diagnostics_mixed_datasources_retain_prometheus_expressions() {
+        let mut json = valid_v2_resource();
+        json["spec"]["elements"]["panel-1"]["spec"]["data"]["spec"]["queries"] = serde_json::json!([
+            {
+                "kind": "PanelQuery",
+                "spec": {
+                    "hidden": false,
+                    "refId": "A",
+                    "query": {"kind": "DataQuery", "group": "loki", "spec": {"expr": "{app=\"api\"}"}}
+                }
+            },
+            {
+                "kind": "PanelQuery",
+                "spec": {
+                    "hidden": false,
+                    "refId": "B",
+                    "query": {"kind": "DataQuery", "group": "prometheus", "spec": {"expr": "up"}}
+                }
+            }
+        ]);
+
+        let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+
+        assert_eq!(dashboard.queries.len(), 1);
+        assert_eq!(dashboard.queries[0].exprs, ["up"]);
+        assert_eq!(dashboard.diagnostics.len(), 1);
+        assert_eq!(dashboard.diagnostics[0].code, "unsupported_datasource");
+        assert_eq!(
+            dashboard.diagnostics[0].path,
+            "spec.elements[\"panel-1\"].spec.data.spec.queries[0].spec.query"
+        );
+    }
+
+    #[test]
+    fn v2_diagnostics_missing_visible_prometheus_expression() {
+        let mut json = valid_v2_resource();
+        json["spec"]["elements"]["panel-1"]["spec"]["data"]["spec"]["queries"] = serde_json::json!([{
+            "kind": "PanelQuery",
+            "spec": {
+                "hidden": false,
+                "refId": "A",
+                "query": {"kind": "DataQuery", "group": "prometheus", "spec": {"expr": "  "}}
+            }
+        }]);
+
+        let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+
+        assert!(dashboard.queries.is_empty());
+        assert_eq!(dashboard.diagnostics.len(), 1);
+        assert_eq!(dashboard.diagnostics[0].code, "missing_query_expression");
+        assert_eq!(
+            dashboard.diagnostics[0].path,
+            "spec.elements[\"panel-1\"].spec.data.spec.queries[0].spec.query.spec.expr"
+        );
+    }
+
+    #[test]
+    fn v2_diagnostics_transformations_use_the_native_path() {
+        let mut json = valid_v2_resource();
+        json["spec"]["elements"]["panel-1"]["spec"]["data"]["spec"]["transformations"] =
+            serde_json::json!([{"kind": "reduce"}]);
+
+        let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+
+        assert_eq!(dashboard.diagnostics.len(), 1);
+        assert_eq!(dashboard.diagnostics[0].code, "ignored_field");
+        assert_eq!(
+            dashboard.diagnostics[0].path,
+            "spec.elements[\"panel-1\"].spec.data.spec.transformations"
+        );
+    }
+
+    #[test]
+    fn v2_diagnostics_unsupported_viz_groups_increment_skipped_panels() {
+        let mut json = valid_v2_resource();
+        json["spec"]["elements"]["panel-1"]["spec"]["vizConfig"]["group"] =
+            serde_json::json!("piechart");
+
+        let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+
+        assert!(dashboard.queries.is_empty());
+        assert_eq!(dashboard.skipped_panels, 1);
+        assert_eq!(dashboard.diagnostics.len(), 1);
+        assert_eq!(dashboard.diagnostics[0].code, "skipped_panel");
+        assert_eq!(dashboard.diagnostics[0].path, "spec.elements[\"panel-1\"]");
+    }
+
+    #[test]
+    fn v2_diagnostics_mappings_and_reduce_options_reuse_classic_messages() {
+        let classic = parse_grafana_dashboard(
+            r#"{
+                "title": "Classic",
+                "panels": [{
+                    "type": "stat",
+                    "title": "Panel",
+                    "targets": [{"expr": "up"}],
+                    "fieldConfig": {"defaults": {"mappings": [{"type": "value"}]}},
+                    "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+                }]
+            }"#,
+        )
+        .unwrap();
+        let mut json = valid_v2_resource();
+        json["spec"]["elements"]["panel-1"]["spec"]["vizConfig"]["spec"]["fieldConfig"]["defaults"]
+            ["mappings"] = serde_json::json!([{"type": "value"}]);
+        json["spec"]["elements"]["panel-1"]["spec"]["vizConfig"]["spec"]["options"]["reduceOptions"] =
+            serde_json::json!({"calcs": ["lastNotNull"]});
+
+        let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+
+        assert_eq!(dashboard.diagnostics.len(), 2);
+        assert_eq!(dashboard.diagnostics[0].code, "ignored_field");
+        assert_eq!(
+            dashboard.diagnostics[0].path,
+            "spec.elements[\"panel-1\"].spec.vizConfig.spec.options.reduceOptions"
+        );
+        assert_eq!(
+            dashboard.diagnostics[0].message,
+            classic.diagnostics[0].message
+        );
+        assert_eq!(dashboard.diagnostics[1].code, "ignored_field");
+        assert_eq!(
+            dashboard.diagnostics[1].path,
+            "spec.elements[\"panel-1\"].spec.vizConfig.spec.fieldConfig.defaults.mappings"
+        );
+        assert_eq!(
+            dashboard.diagnostics[1].message,
+            classic.diagnostics[1].message
+        );
+    }
+
+    #[test]
+    fn v2_diagnostics_variable_analysis_uses_v2_expression_paths() {
+        let mut json = valid_v2_resource();
+        json["spec"]["variables"] = serde_json::json!([{
+            "kind": "CustomVariable",
+            "spec": {"name": "job", "current": {"text": "api", "value": "api"}}
+        }]);
+        json["spec"]["elements"]["panel-1"]["spec"]["data"]["spec"]["queries"] = serde_json::json!([{
+            "kind": "PanelQuery",
+            "spec": {
+                "hidden": false,
+                "refId": "A",
+                "query": {
+                    "kind": "DataQuery",
+                    "group": "prometheus",
+                    "spec": {"expr": "up{job=~\"${job:regex}\", cluster=\"$cluster\"}"}
+                }
+            }
+        }]);
+
+        let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+        let diagnostics = variable_diagnostics(&dashboard, &dashboard.vars);
+
+        assert_eq!(diagnostics.len(), 2);
+        assert!(diagnostics.iter().all(|diagnostic| {
+            diagnostic.path
+                == "spec.elements[\"panel-1\"].spec.data.spec.queries[0].spec.query.spec.expr"
+        }));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "unsupported_variable_modifier")
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "unresolved_variable")
+        );
     }
 
     #[test]
