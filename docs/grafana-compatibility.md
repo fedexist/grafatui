@@ -18,20 +18,35 @@ and what Grafatui currently supports.
 
 ## Dashboard Schema Models
 
-Grafatui currently imports only the non-resource Classic JSON model. In Grafana
-13, use **Export as code → Advanced options → Model: Classic**. See the
+Grafatui imports the non-resource Classic JSON model and a fixed-grid subset of
+the V2 Resource JSON model. In Grafana 13, use **Export as code → Advanced
+options → Model: Classic** as the fallback for advanced V2 dashboards. See the
 [dashboard import guide](grafana-dashboard-import.md) for detailed steps.
 
 | Model | Status | Notes |
 |---|---|---|
-| Classic JSON | ✅ Supported | Expected by `--grafana-json`; the remaining tables describe support for its fields |
+| Classic JSON | ✅ Supported | Accepted by `--grafana-json`; the remaining tables describe support for its fields |
 | V1 Resource JSON | ❌ Not Implemented | The Kubernetes-style `dashboard.grafana.app/v1` resource envelope is not accepted |
-| V2 Resource JSON | ❌ Not Implemented | Exact `dashboard.grafana.app/v2` compatibility is planned in [issue #79](https://github.com/fedexist/grafatui/issues/79) |
+| V2 Resource JSON | 🔶 Partial | JSON-only exact `dashboard.grafana.app/v2` resources with `GridLayout` are supported |
 | Resource YAML | ❌ Not Implemented | `--grafana-json` accepts JSON only |
 
-Grafana V2 Resource features that do not have a Classic equivalent—including
-tabs, auto-grid layouts, repeat layouts, and conditional rendering—are separate
-roadmap items and are not part of the initial compatibility work.
+### V2 Resource JSON Subset
+
+| V2 field or behavior | Status | Notes |
+|---|---|---|
+| Exact `apiVersion: dashboard.grafana.app/v2` | ✅ Supported | Other resource versions are rejected |
+| `spec.layout.kind: GridLayout` | ✅ Supported | `GridLayoutItem` coordinates map to Grafatui's fixed 24-column grid |
+| Inline `Panel` elements | ✅ Supported | Supported panel visualization groups map through the Classic-equivalent importer |
+| Prometheus `PanelQuery` queries | ✅ Supported | Non-Prometheus datasources emit import diagnostics and are skipped |
+| Top-level `spec.variables` | 🔶 Partial | Supported variable kinds map to Grafatui variables; unsupported kinds emit diagnostics |
+| `spec.timeSettings.autoRefresh` | ✅ Supported | Used as the dashboard refresh interval |
+| `vizConfig.spec.fieldConfig` | 🔶 Partial | The supported Classic-equivalent field configuration subset applies |
+| Rows, Tabs, and Auto-grid layouts | ❌ Not Implemented | Rejected as fatal import errors |
+| Repeated grid items | ❌ Not Implemented | Rejected as fatal import errors |
+| Conditional rendering, nested variables, and library panels | ❌ Not Implemented | Deferred V2 features |
+
+Grafana V2 Resource YAML remains unsupported. Use a Classic export for any
+advanced V2 dashboard outside this fixed-grid subset.
 
 ---
 

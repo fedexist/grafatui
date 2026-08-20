@@ -204,7 +204,7 @@ with a clear import error rather than silently changing the dashboard.
 
 | Feature | Grafana field / behavior | User value | Complexity | Status |
 |---|---|---|---|---|
-| **V2 Resource JSON compatibility** | `apiVersion: dashboard.grafana.app/v2` with a `GridLayout` | Imports Grafana 13's default JSON format without requiring a Classic export | 🔴 | 🔜 |
+| **V2 Resource JSON compatibility** | `apiVersion: dashboard.grafana.app/v2` with a `GridLayout` | Imports Grafana 13's default JSON format without requiring a Classic export | 🔴 | ✅ |
 | **Rows layout** | `RowsLayout` and nested row layouts | Preserves dashboard grouping and collapsed sections | 🔴 | 📋 |
 | **Tabs layout** | `TabsLayout` and nested tabs | Preserves tabbed dashboard organization | 🔴 | 📋 |
 | **Auto-grid layout** | `AutoGridLayout` | Preserves automatic panel placement and sizing | 🔴 | 📋 |
