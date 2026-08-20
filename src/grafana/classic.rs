@@ -55,7 +55,6 @@ struct RawPanel {
     #[serde(rename = "fieldConfig")]
     field_config: Option<RawFieldConfig>,
     options: Option<RawPanelOptions>,
-    transformations: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -272,11 +271,7 @@ fn normalize_panels(panels: Vec<RawPanel>, path: &str, out: &mut Vec<model::Pane
                 .and_then(|options| options.reduce_options)
                 .is_some()
                 .then(|| format!("{source_path}.options.reduceOptions")),
-            transformations_path: panel
-                .transformations
-                .as_ref()
-                .is_some_and(non_empty_json_value)
-                .then(|| format!("{source_path}.transformations")),
+            transformations_path: None,
         });
     }
 }

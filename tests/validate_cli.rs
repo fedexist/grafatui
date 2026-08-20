@@ -47,6 +47,45 @@ fn validate_strict_exits_nonzero_when_warnings_exist() {
 }
 
 #[test]
+fn validate_strict_accepts_classic_transformations_without_warnings() {
+    let path = write_dashboard(
+        "classic-transformations",
+        r#"{
+            "title": "Classic transformations",
+            "panels": [{
+                "type": "timeseries",
+                "title": "CPU",
+                "targets": [{"expr": "up"}],
+                "transformations": [{"id": "reduce"}]
+            }]
+        }"#,
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+        .args([
+            "--validate",
+            "--strict",
+            "--format",
+            "json",
+            "--grafana-json",
+        ])
+        .arg(&path)
+        .output()
+        .unwrap();
+    fs::remove_file(path).unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summary["panel_count"], 1);
+    assert_eq!(summary["diagnostics"], serde_json::json!([]));
+}
+
+#[test]
 fn validate_json_outputs_machine_readable_summary() {
     let path = write_dashboard(
         "json",
