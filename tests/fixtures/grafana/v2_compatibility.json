@@ -1,0 +1,55 @@
+{
+  "apiVersion": "dashboard.grafana.app/v2",
+  "kind": "Dashboard",
+  "metadata": {"name": "compatibility"},
+  "spec": {
+    "title": "Compatibility",
+    "elements": {
+      "panel-1": {
+        "kind": "Panel",
+        "spec": {
+          "id": 1,
+          "title": "Requests",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {"kind": "PanelQuery", "spec": {"hidden": true, "refId": "A", "query": {"kind": "DataQuery", "group": "prometheus", "version": "v0", "spec": {"expr": "hidden"}}}},
+                {"kind": "PanelQuery", "spec": {"hidden": false, "refId": "B", "query": {"kind": "DataQuery", "group": "prometheus", "version": "v0", "spec": {"expr": "rate(requests_total{job=\"$job\"}[5m])", "legendFormat": "{{instance}}", "instant": false}}}}
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.0.0",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "reqps", "decimals": 1, "noValue": "n/a", "min": 0, "max": 100,
+                  "thresholds": {"mode": "absolute", "steps": [{"value": null, "color": "green"}, {"value": 80, "color": "red"}]},
+                  "custom": {"drawStyle": "bars", "showPoints": "always", "fillOpacity": 25, "axisPlacement": "hidden", "lineInterpolation": "smooth", "stacking": {"mode": "normal"}, "axisGridShow": false, "thresholdsStyle": {"mode": "dashed"}}
+                },
+                "overrides": []
+              },
+              "options": {}
+            }
+          }
+        }
+      }
+    },
+    "layout": {
+      "kind": "GridLayout",
+      "spec": {"items": [{
+        "kind": "GridLayoutItem",
+        "spec": {"x": 1, "y": 2, "width": 12, "height": 8, "element": {"kind": "ElementReference", "name": "panel-1"}}
+      }]}
+    },
+    "variables": [],
+    "timeSettings": {"from": "now-6h", "to": "now", "autoRefresh": ""}
+  },
+  "status": {}
+}

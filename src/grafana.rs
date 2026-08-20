@@ -16,11 +16,13 @@
 
 use anyhow::{Context, Result};
 use serde::Serialize;
+use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
 mod classic;
 mod import;
 mod model;
+mod v2;
 
 /// Result of importing a Grafana dashboard.
 #[derive(Debug, Clone, Default)]
@@ -110,7 +112,21 @@ pub(crate) fn load_grafana_dashboard(path: &std::path::Path) -> Result<Dashboard
 
 fn parse_grafana_dashboard(data: &str) -> Result<DashboardImport> {
     let value = serde_json::from_str(data).context("parsing Grafana dashboard JSON")?;
-    import::finish(classic::adapt(value)?)
+    import::finish(detect_and_adapt(value)?)
+}
+
+fn detect_and_adapt(value: Value) -> Result<model::Dashboard> {
+    match value.get("apiVersion") {
+        None => classic::adapt(value),
+        Some(Value::String(version)) if version == v2::V2_API_VERSION => v2::adapt(value),
+        Some(Value::String(version)) => anyhow::bail!(
+            "unsupported Grafana dashboard resource apiVersion `{version}` at apiVersion; supported resource version is `{}`",
+            v2::V2_API_VERSION
+        ),
+        Some(_) => anyhow::bail!(
+            "invalid Grafana dashboard resource apiVersion at apiVersion: expected a string"
+        ),
+    }
 }
 
 pub(crate) fn variable_diagnostics(
@@ -287,6 +303,244 @@ fn is_variable_name_char(ch: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn minimal_v2_with_layout(layout: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "apiVersion": "dashboard.grafana.app/v2",
+            "kind": "Dashboard",
+            "metadata": {"name": "test"},
+            "spec": {
+                "title": "Test",
+                "elements": {},
+                "layout": layout,
+                "variables": [],
+                "timeSettings": {"from": "now-6h", "to": "now", "autoRefresh": ""}
+            },
+            "status": {}
+        })
+    }
+
+    fn valid_v2_resource() -> serde_json::Value {
+        serde_json::json!({
+            "apiVersion": "dashboard.grafana.app/v2",
+            "kind": "Dashboard",
+            "spec": {
+                "title": "Test",
+                "elements": {
+                    "panel-1": {
+                        "kind": "Panel",
+                        "spec": {
+                            "title": "Panel",
+                            "data": {"kind": "QueryGroup", "spec": {"queries": [], "transformations": [], "queryOptions": {}}},
+                            "vizConfig": {"kind": "VizConfig", "group": "timeseries", "version": "v0", "spec": {"fieldConfig": {"defaults": {}}, "options": {}}}
+                        }
+                    }
+                },
+                "layout": {"kind": "GridLayout", "spec": {"items": [{
+                    "kind": "GridLayoutItem",
+                    "spec": {"x": 0, "y": 0, "width": 1, "height": 1, "element": {"kind": "ElementReference", "name": "panel-1"}}
+                }]}},
+                "variables": [],
+                "timeSettings": {"from": "now-6h", "to": "now", "autoRefresh": ""}
+            }
+        })
+    }
+
+    #[test]
+    fn v2_fixed_grid_panel_matches_classic_semantics() {
+        let classic = parse_grafana_dashboard(include_str!(
+            "../tests/fixtures/grafana/classic_compatibility.json"
+        ))
+        .unwrap();
+        let v2 = parse_grafana_dashboard(include_str!(
+            "../tests/fixtures/grafana/v2_compatibility.json"
+        ))
+        .unwrap();
+
+        assert_eq!(v2.title, classic.title);
+        assert_eq!(v2.queries.len(), 1);
+        let (actual, expected) = (&v2.queries[0], &classic.queries[0]);
+        assert_eq!(actual.title, expected.title);
+        assert_eq!(actual.exprs, expected.exprs);
+        assert_eq!(actual.legends, expected.legends);
+        assert_eq!(actual.query_modes, expected.query_modes);
+        assert_eq!(actual.panel_type, expected.panel_type);
+        assert_eq!(actual.display, expected.display);
+        assert_eq!(actual.options, expected.options);
+        assert_eq!((actual.min, actual.max), (expected.min, expected.max));
+        assert_eq!(actual.autogrid, expected.autogrid);
+        assert_eq!(
+            actual.grid.map(|grid| (grid.x, grid.y, grid.w, grid.h)),
+            expected.grid.map(|grid| (grid.x, grid.y, grid.w, grid.h))
+        );
+        assert_eq!(
+            actual.expr_paths,
+            ["spec.elements[\"panel-1\"].spec.data.spec.queries[1].spec.query.spec.expr"]
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_resource_versions() {
+        for version in [
+            "dashboard.grafana.app/v1",
+            "dashboard.grafana.app/v2alpha1",
+            "dashboard.grafana.app/v2beta1",
+        ] {
+            let json = format!(r#"{{"apiVersion":"{version}","kind":"Dashboard","spec":{{}}}}"#);
+            let error = parse_grafana_dashboard(&json).unwrap_err().to_string();
+            assert!(error.contains(version));
+            assert!(error.contains("apiVersion"));
+        }
+    }
+
+    #[test]
+    fn rejects_unsupported_v2_layouts() {
+        for kind in ["RowsLayout", "TabsLayout", "AutoGridLayout"] {
+            let json = minimal_v2_with_layout(serde_json::json!({"kind": kind, "spec": {}}));
+            let error = parse_grafana_dashboard(&json.to_string())
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(kind));
+            assert!(error.contains("spec.layout.kind"));
+            assert!(error.contains("GridLayout"));
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_v2_resource_kind() {
+        for kind in [None, Some("Folder")] {
+            let mut json = valid_v2_resource();
+            if let Some(kind) = kind {
+                json["kind"] = serde_json::json!(kind);
+            } else {
+                json.as_object_mut().unwrap().remove("kind");
+            }
+            assert!(
+                parse_grafana_dashboard(&json.to_string())
+                    .unwrap_err()
+                    .to_string()
+                    .contains("kind")
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_missing_or_non_object_v2_spec() {
+        for spec in [None, Some(serde_json::json!([]))] {
+            let mut json = valid_v2_resource();
+            if let Some(spec) = spec {
+                json["spec"] = spec;
+            } else {
+                json.as_object_mut().unwrap().remove("spec");
+            }
+            assert!(
+                parse_grafana_dashboard(&json.to_string())
+                    .unwrap_err()
+                    .to_string()
+                    .contains("spec")
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_v2_grid_item_repeat_presence() {
+        let mut json = valid_v2_resource();
+        json["spec"]["layout"]["spec"]["items"][0]["spec"]["repeat"] = serde_json::Value::Null;
+        assert!(
+            parse_grafana_dashboard(&json.to_string())
+                .unwrap_err()
+                .to_string()
+                .contains("spec.layout.spec.items[0].spec.repeat")
+        );
+    }
+
+    #[test]
+    fn rejects_wrong_v2_grid_item_kind() {
+        let mut json = valid_v2_resource();
+        json["spec"]["layout"]["spec"]["items"][0]["kind"] = serde_json::json!("RowsLayoutItem");
+        assert!(
+            parse_grafana_dashboard(&json.to_string())
+                .unwrap_err()
+                .to_string()
+                .contains("spec.layout.spec.items[0].kind")
+        );
+    }
+
+    #[test]
+    fn rejects_wrong_v2_element_reference_kind() {
+        let mut json = valid_v2_resource();
+        json["spec"]["layout"]["spec"]["items"][0]["spec"]["element"]["kind"] =
+            serde_json::json!("Panel");
+        assert!(
+            parse_grafana_dashboard(&json.to_string())
+                .unwrap_err()
+                .to_string()
+                .contains("spec.layout.spec.items[0].spec.element.kind")
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_v2_grid_coordinate() {
+        for value in [
+            None,
+            Some(serde_json::json!("0")),
+            Some(serde_json::json!(2147483648_u64)),
+        ] {
+            let mut json = valid_v2_resource();
+            if let Some(value) = value {
+                json["spec"]["layout"]["spec"]["items"][0]["spec"]["x"] = value;
+            } else {
+                json["spec"]["layout"]["spec"]["items"][0]["spec"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("x");
+            }
+            assert!(
+                parse_grafana_dashboard(&json.to_string())
+                    .unwrap_err()
+                    .to_string()
+                    .contains("spec.layout.spec.items[0].spec.x")
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_missing_v2_element_name() {
+        let mut json = valid_v2_resource();
+        json["spec"]["layout"]["spec"]["items"][0]["spec"]["element"]
+            .as_object_mut()
+            .unwrap()
+            .remove("name");
+        assert!(
+            parse_grafana_dashboard(&json.to_string())
+                .unwrap_err()
+                .to_string()
+                .contains("spec.layout.spec.items[0].spec.element.name")
+        );
+    }
+
+    #[test]
+    fn rejects_unresolved_v2_element_name() {
+        let mut json = valid_v2_resource();
+        json["spec"]["layout"]["spec"]["items"][0]["spec"]["element"]["name"] =
+            serde_json::json!("absent");
+        assert!(
+            parse_grafana_dashboard(&json.to_string())
+                .unwrap_err()
+                .to_string()
+                .contains("spec.layout.spec.items[0].spec.element.name")
+        );
+    }
+
+    #[test]
+    fn rejects_yaml_input() {
+        let error = parse_grafana_dashboard(
+            "apiVersion: dashboard.grafana.app/v2\\nkind: Dashboard\\nspec: {}\\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("parsing Grafana dashboard JSON"));
+    }
 
     #[test]
     fn classic_import_runs_through_normalized_model_without_semantic_changes() {
