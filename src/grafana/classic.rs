@@ -259,6 +259,7 @@ fn normalize_panels(panels: Vec<RawPanel>, path: &str, out: &mut Vec<model::Pane
                     hidden: target.hide == Some(true),
                 })
                 .collect(),
+            count_as_skipped_if_empty: false,
             grid: panel.grid_pos.map(|grid| model::GridPos {
                 x: grid.x,
                 y: grid.y,

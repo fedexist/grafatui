@@ -10,7 +10,9 @@
       "request-rate": {
         "kind": "Panel",
         "spec": {
+          "id": 1,
           "title": "HTTP Request Rate by Status Code",
+          "links": [],
           "data": {
             "kind": "QueryGroup",
             "spec": {
@@ -65,7 +67,9 @@
       "memory": {
         "kind": "Panel",
         "spec": {
+          "id": 2,
           "title": "Process Resident Memory",
+          "links": [],
           "data": {
             "kind": "QueryGroup",
             "spec": {
@@ -162,9 +166,16 @@
             }
           },
           "definition": "label_values(up, job)",
+          "regex": "",
+          "allValue": "",
+          "hide": "dontHide",
+          "refresh": "onDashboardLoad",
+          "skipUrlSync": false,
+          "sort": "disabled",
           "options": [],
           "multi": false,
-          "includeAll": false
+          "includeAll": false,
+          "allowCustomValue": true
         }
       }
     ],
