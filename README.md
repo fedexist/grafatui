@@ -36,7 +36,7 @@ cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheu
 ## Features
 
 - Prometheus range and instant queries with async fetching.
-- Grafana Classic dashboard JSON import for graph, timeseries, stat, gauge, bar gauge, table, and heatmap panels.
+- Grafana Classic and fixed-grid V2 Resource JSON import for graph, timeseries, stat, gauge, bar gauge, table, and heatmap panels.
 - Template variables, Grafana built-in PromQL variables, legend formatting, thresholds, and grid layout support.
 - Grafana timeseries draw styles for lines, points, bars, area fill, hidden axes, and per-panel grid visibility.
 - Keyboard-first navigation, panel search, fullscreen mode, mouse selection, and value inspection.
@@ -80,8 +80,9 @@ grafatui completions zsh
 grafatui man
 ```
 
-Grafana 13 users must export the dashboard with **Model: Classic** under
-**Export as code → Advanced options**. See the
+Grafana 13 users can import an exact `dashboard.grafana.app/v2` JSON resource
+with a `GridLayout`. For advanced V2 dashboards, export **Model: Classic**
+under **Export as code → Advanced options** instead. See the
 [dashboard import guide](https://fedexist.github.io/grafatui/grafana-dashboard-import.html)
 for the current format requirements.
 

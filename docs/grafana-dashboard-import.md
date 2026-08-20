@@ -1,13 +1,23 @@
 # Grafana Dashboard Import
 
-Grafatui can import Grafana Classic dashboard JSON files and render supported
+Grafatui imports supported Grafana dashboard JSON files and renders supported
 panels in the terminal.
 
-> Grafatui does not yet support Grafana V1 Resource or V2 Resource files. The
-> `--grafana-json` option expects a non-resource Classic JSON object with
-> top-level fields such as `title`, `panels`, and `templating`. YAML exports are
-> also unsupported. V2 Resource JSON support is tracked in
-> [issue #79](https://github.com/fedexist/grafatui/issues/79).
+| Format | Status | Requirements |
+|---|---|---|
+| Classic JSON | ✅ Supported | Non-resource object with fields such as `title`, `panels`, and `templating` |
+| V2 Resource JSON | 🔶 Partial | JSON only, exact `apiVersion: dashboard.grafana.app/v2`, and `spec.layout.kind: GridLayout` |
+| V1 Resource JSON | ❌ Unsupported | The `dashboard.grafana.app/v1` resource envelope is not accepted |
+| Resource YAML | ❌ Unsupported | `--grafana-json` accepts JSON only |
+
+The supported V2 subset maps inline `Panel` elements, Prometheus `PanelQuery`
+queries, top-level variables, `timeSettings.autoRefresh`, supported field
+configuration, and fixed-grid positions to the same Grafatui behavior as
+Classic JSON.
+
+V2 layouts other than `GridLayout` (including Rows, Tabs, and Auto-grid) are
+fatal import errors. Repeated grid items are also rejected rather than silently
+changing the dashboard.
 
 ## Export From Grafana
 
@@ -22,9 +32,9 @@ panels in the terminal.
 grafatui --prometheus-url http://localhost:9090 --grafana-json ./node-exporter.json
 ```
 
-Grafana 13 defaults to the V2 Resource model. Selecting **Classic** is required
-until Grafatui adds V2 Resource compatibility. Grafana documents the available
-models and export controls in
+Grafana 13 defaults to the V2 Resource model. Its fixed-grid JSON resources can
+be imported directly. For advanced V2 dashboards, use this Classic export path
+as the fallback. Grafana documents the available models and export controls in
 [Export a dashboard as code](https://grafana.com/docs/grafana/latest/visualizations/dashboards/share-dashboards-panels/#export-a-dashboard-as-code).
 
 ## Supported Panel Types
@@ -58,7 +68,8 @@ Prometheus query variables such as `label_values(up, instance)` and `query_resul
 Grafatui prints import warnings before starting the TUI when a dashboard uses
 important Grafana features that are skipped or ignored. Diagnostics include
 unsupported panel types, value mappings, reduce options, unresolved variables,
-and unsupported variable modifiers such as `${var:regex}`.
+unsupported V2 datasources, and unsupported variable modifiers such as
+`${var:regex}`. V2 diagnostics retain their `spec.*` source paths.
 
 Run a non-interactive check with:
 
@@ -70,7 +81,8 @@ Warnings do not make validation fail. A dashboard that can be parsed and
 imported exits successfully even if diagnostics are printed.
 
 Use `--strict` to make warnings fail validation, or `--format json` to emit a
-machine-readable summary:
+machine-readable summary. Fatal V2 layout and repeat errors fail validation in
+all modes; `--strict` additionally fails when import diagnostics are present:
 
 ```bash
 grafatui --validate --strict --grafana-json ./dash.json
