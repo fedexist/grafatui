@@ -12,7 +12,13 @@
 
 ## Quick Start
 
-Install the latest prebuilt binary:
+Install with Homebrew on macOS or Linux:
+
+```bash
+brew install fedexist/grafatui/grafatui
+```
+
+Or install the latest prebuilt binary:
 
 ```bash
 bash -o pipefail -c 'curl --proto =https --tlsv1.2 -LsSf https://raw.githubusercontent.com/fedexist/grafatui/main/install.sh | bash'

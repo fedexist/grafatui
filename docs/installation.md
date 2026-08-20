@@ -1,5 +1,13 @@
 # Installation
 
+## Homebrew
+
+Install Grafatui with Homebrew on macOS or Linux:
+
+```bash
+brew install fedexist/grafatui/grafatui
+```
+
 ## Installer Script
 
 Install the latest prebuilt release without requiring Rust:
