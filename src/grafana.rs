@@ -15,8 +15,12 @@
  */
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
+
+mod classic;
+mod import;
+mod model;
 
 /// Result of importing a Grafana dashboard.
 #[derive(Debug, Clone, Default)]
@@ -98,499 +102,15 @@ pub(crate) struct GridPos {
     pub(crate) h: i32,
 }
 
-#[derive(Debug, Deserialize)]
-struct RawDashboard {
-    title: Option<String>,
-    refresh: Option<serde_json::Value>,
-    panels: Option<Vec<RawPanel>>,
-    templating: Option<RawTemplating>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawTemplating {
-    list: Option<Vec<RawVar>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawVar {
-    name: String,
-    #[serde(rename = "type")]
-    var_type: Option<String>,
-    query: Option<RawVarQuery>,
-    definition: Option<String>,
-    regex: Option<String>,
-    current: Option<RawVarCurrent>,
-    /// The value to use when "All" is selected. Used to replace $__all in queries.
-    #[serde(rename = "allValue")]
-    all_value: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum RawVarQuery {
-    String(String),
-    Object { query: Option<String> },
-}
-
-#[derive(Debug, Deserialize)]
-struct RawVarCurrent {
-    text: Option<serde_json::Value>, // Can be string or array
-    value: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawPanel {
-    #[serde(rename = "type")]
-    panel_type: String,
-    title: Option<String>,
-    targets: Option<Vec<RawTarget>>,
-    #[serde(rename = "gridPos")]
-    grid_pos: Option<RawGridPos>,
-    panels: Option<Vec<RawPanel>>, // nested rows
-    #[serde(rename = "fieldConfig")]
-    field_config: Option<RawFieldConfig>,
-    options: Option<RawPanelOptions>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawPanelOptions {
-    #[serde(rename = "reduceOptions")]
-    reduce_options: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawFieldConfig {
-    defaults: Option<RawFieldConfigDefaults>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawFieldConfigDefaults {
-    unit: Option<String>,
-    decimals: Option<usize>,
-    #[serde(rename = "noValue")]
-    no_value: Option<String>,
-    min: Option<f64>,
-    max: Option<f64>,
-    thresholds: Option<RawThresholds>,
-    custom: Option<RawCustom>,
-    mappings: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawCustom {
-    #[serde(rename = "drawStyle")]
-    draw_style: Option<String>,
-    #[serde(rename = "showPoints")]
-    show_points: Option<String>,
-    #[serde(rename = "fillOpacity")]
-    fill_opacity: Option<u16>,
-    #[serde(rename = "axisPlacement")]
-    axis_placement: Option<String>,
-    #[serde(rename = "lineInterpolation")]
-    line_interpolation: Option<String>,
-    stacking: Option<RawStacking>,
-    #[serde(rename = "axisGridShow")]
-    axis_grid_show: Option<bool>,
-    #[serde(rename = "thresholdsStyle")]
-    thresholds_style: Option<RawThresholdsStyle>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawThresholdsStyle {
-    mode: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawStacking {
-    mode: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawThresholds {
-    mode: Option<String>,
-    steps: Option<Vec<RawThresholdStep>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawThresholdStep {
-    value: Option<f64>,
-    color: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawTarget {
-    expr: Option<String>,
-    #[serde(rename = "legendFormat")]
-    legend_format: Option<String>,
-    instant: Option<bool>,
-    hide: Option<bool>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawGridPos {
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-}
-
 pub(crate) fn load_grafana_dashboard(path: &std::path::Path) -> Result<DashboardImport> {
     let data = std::fs::read_to_string(path)
         .with_context(|| format!("reading grafana dashboard: {}", path.display()))?;
-    let raw: RawDashboard =
-        serde_json::from_str(&data).with_context(|| "parsing grafana dashboard JSON")?;
-
-    let mut vars = HashMap::new();
-    let mut query_vars = Vec::new();
-    if let Some(templating) = raw.templating
-        && let Some(list) = templating.list
-    {
-        for (var_idx, v) in list.into_iter().enumerate() {
-            // Heuristic: prefer 'value' over 'text', handle arrays by taking first or joining?
-            // Grafana 'current' value can be "All" or ["val1", "val2"].
-            // For simple PromQL substitution, we usually want the raw value.
-            // If it's "All", it might be $__all, which is tricky.
-            // Let's try to get a string representation.
-            let val = v
-                .current
-                .as_ref()
-                .and_then(|c| c.value.as_ref())
-                .or(v.current.as_ref().and_then(|c| c.text.as_ref()));
-
-            if let Some(val) = val {
-                let mut s = match val {
-                    serde_json::Value::String(s) => s.clone(),
-                    serde_json::Value::Array(arr) => {
-                        // If array, maybe join with pipe for regex? or just take first?
-                        // For now, let's take the first string we find.
-                        arr.iter()
-                            .find_map(|x| x.as_str())
-                            .unwrap_or("")
-                            .to_string()
-                    }
-                    serde_json::Value::Number(n) => n.to_string(),
-                    _ => String::new(),
-                };
-
-                // Handle $__all
-                if s == "$__all" {
-                    // Use allValue if present, otherwise permissive regex
-                    s = v.all_value.clone().unwrap_or_else(|| ".*".to_string());
-                }
-
-                if !s.is_empty() {
-                    vars.insert(v.name.clone(), s);
-                }
-            }
-
-            if v.var_type.as_deref() == Some("query")
-                && !v.current_is_all()
-                && let Some(query) = v.query_string()
-            {
-                query_vars.push(TemplateQueryVar {
-                    name: v.name,
-                    query,
-                    regex: v.regex.filter(|regex| !regex.trim().is_empty()),
-                    query_path: format!("templating.list[{var_idx}].query"),
-                });
-            }
-        }
-    }
-
-    let mut out = DashboardImport {
-        title: raw.title.unwrap_or_default(),
-        refresh_rate_ms: raw.refresh.as_ref().and_then(parse_refresh_rate_ms),
-        queries: vec![],
-        vars,
-        query_vars,
-        skipped_panels: 0,
-        diagnostics: vec![],
-    };
-
-    if let Some(panels) = raw.panels {
-        collect_panels(&mut out, panels, "panels")?;
-    }
-    Ok(out)
+    parse_grafana_dashboard(&data)
 }
 
-impl RawVar {
-    fn query_string(&self) -> Option<String> {
-        let query = self
-            .query
-            .as_ref()
-            .and_then(|query| match query {
-                RawVarQuery::String(query) => Some(query.as_str()),
-                RawVarQuery::Object { query } => query.as_deref(),
-            })
-            .or(self.definition.as_deref())?;
-
-        let query = query.trim();
-        (!query.is_empty()).then(|| query.to_string())
-    }
-
-    fn current_is_all(&self) -> bool {
-        self.current.as_ref().is_some_and(|current| {
-            value_is_all(current.value.as_ref()) || value_is_all(current.text.as_ref())
-        })
-    }
-}
-
-fn value_is_all(value: Option<&serde_json::Value>) -> bool {
-    match value {
-        Some(serde_json::Value::String(value)) => {
-            value == "$__all" || value.eq_ignore_ascii_case("all")
-        }
-        Some(serde_json::Value::Array(values)) => {
-            values.iter().any(|value| value_is_all(Some(value)))
-        }
-        _ => false,
-    }
-}
-
-fn query_mode_for_target(
-    instant: Option<bool>,
-    panel_type: crate::app::PanelType,
-) -> crate::app::QueryMode {
-    match instant {
-        Some(true) => crate::app::QueryMode::Instant,
-        Some(false) => crate::app::QueryMode::Range,
-        None => default_query_mode_for_panel(panel_type),
-    }
-}
-
-fn default_query_mode_for_panel(panel_type: crate::app::PanelType) -> crate::app::QueryMode {
-    match panel_type {
-        crate::app::PanelType::Gauge
-        | crate::app::PanelType::BarGauge
-        | crate::app::PanelType::Table => crate::app::QueryMode::Instant,
-        _ => crate::app::QueryMode::Range,
-    }
-}
-
-fn graph_options_from_custom(custom: Option<&RawCustom>) -> crate::app::GraphOptions {
-    let Some(custom) = custom else {
-        return crate::app::GraphOptions::default();
-    };
-
-    crate::app::GraphOptions {
-        draw_style: parse_graph_draw_style(custom.draw_style.as_deref()),
-        show_points: parse_graph_point_mode(custom.show_points.as_deref()),
-        fill_opacity: custom.fill_opacity.map(|value| value.min(100) as u8),
-        axis_placement: parse_graph_axis_placement(custom.axis_placement.as_deref()),
-        line_interpolation: custom
-            .line_interpolation
-            .as_ref()
-            .filter(|value| !value.trim().is_empty())
-            .cloned(),
-        stacking: parse_graph_stacking_mode(
-            custom
-                .stacking
-                .as_ref()
-                .and_then(|stacking| stacking.mode.as_deref()),
-        ),
-    }
-}
-
-fn parse_graph_draw_style(value: Option<&str>) -> crate::app::GraphDrawStyle {
-    match value {
-        Some("points") => crate::app::GraphDrawStyle::Points,
-        Some("bars") => crate::app::GraphDrawStyle::Bars,
-        _ => crate::app::GraphDrawStyle::Line,
-    }
-}
-
-fn parse_graph_point_mode(value: Option<&str>) -> crate::app::GraphPointMode {
-    match value {
-        Some("always") => crate::app::GraphPointMode::Always,
-        Some("never") => crate::app::GraphPointMode::Never,
-        _ => crate::app::GraphPointMode::Auto,
-    }
-}
-
-fn parse_graph_axis_placement(value: Option<&str>) -> crate::app::GraphAxisPlacement {
-    match value {
-        Some("hidden") => crate::app::GraphAxisPlacement::Hidden,
-        _ => crate::app::GraphAxisPlacement::Visible,
-    }
-}
-
-fn parse_graph_stacking_mode(value: Option<&str>) -> crate::app::GraphStackingMode {
-    match value {
-        Some("normal") => crate::app::GraphStackingMode::Normal,
-        Some("percent") => crate::app::GraphStackingMode::Percent,
-        _ => crate::app::GraphStackingMode::Off,
-    }
-}
-
-fn collect_panels(out: &mut DashboardImport, panels: Vec<RawPanel>, path: &str) -> Result<()> {
-    for (panel_idx, p) in panels.into_iter().enumerate() {
-        let panel_path = format!("{path}[{panel_idx}]");
-        if let Some(children) = p.panels {
-            collect_panels(out, children, &format!("{panel_path}.panels"))?;
-        }
-        let kind = p.panel_type;
-        let title = p.title.unwrap_or_default();
-
-        let panel_type = match kind.as_str() {
-            "graph" | "timeseries" => crate::app::PanelType::Graph,
-            "stat" => crate::app::PanelType::Stat,
-            "gauge" => crate::app::PanelType::Gauge,
-            "bargauge" => crate::app::PanelType::BarGauge,
-            "table" => crate::app::PanelType::Table,
-            "heatmap" => crate::app::PanelType::Heatmap,
-            _ => crate::app::PanelType::Unknown,
-        };
-
-        if panel_type != crate::app::PanelType::Unknown {
-            let mut exprs = Vec::new();
-            let mut expr_paths = Vec::new();
-            let mut legends = Vec::new();
-            let mut query_modes = Vec::new();
-
-            for (target_idx, t) in p.targets.unwrap_or_default().into_iter().enumerate() {
-                let target_path = format!("{panel_path}.targets[{target_idx}]");
-                if t.hide == Some(true) {
-                    continue;
-                }
-                if let Some(e) = t.expr {
-                    exprs.push(e);
-                    expr_paths.push(format!("{target_path}.expr"));
-                    legends.push(t.legend_format);
-                    query_modes.push(query_mode_for_target(t.instant, panel_type));
-                }
-            }
-
-            let mut thresholds = None;
-            let mut min = None;
-            let mut max = None;
-            let mut autogrid = None;
-            let mut display = crate::ui::DisplayFormat::default();
-            let mut graph_options = crate::app::GraphOptions::default();
-
-            if let Some(options) = p.options
-                && options.reduce_options.is_some()
-            {
-                out.diagnostics.push(ImportDiagnostic::new(
-                    "ignored_field",
-                    format!("{panel_path}.options.reduceOptions"),
-                    "`options.reduceOptions` is not supported yet; Grafatui will use default value selection",
-                ));
-            }
-
-            if let Some(fc) = p.field_config
-                && let Some(defaults) = fc.defaults
-            {
-                if defaults.mappings.as_ref().is_some_and(non_empty_json_value) {
-                    out.diagnostics.push(ImportDiagnostic::new(
-                        "ignored_field",
-                        format!("{panel_path}.fieldConfig.defaults.mappings"),
-                        "`fieldConfig.defaults.mappings` is not supported yet; value mappings will be ignored",
-                    ));
-                }
-
-                graph_options = graph_options_from_custom(defaults.custom.as_ref());
-                display = crate::ui::DisplayFormat {
-                    unit: defaults.unit,
-                    decimals: defaults.decimals,
-                    no_value: defaults.no_value,
-                };
-                min = defaults.min;
-                max = defaults.max;
-                autogrid = defaults
-                    .custom
-                    .as_ref()
-                    .and_then(|custom| custom.axis_grid_show);
-
-                if let Some(th) = defaults.thresholds {
-                    let mode = match th.mode.as_deref() {
-                        Some("percentage") => crate::app::ThresholdMode::Percentage,
-                        _ => crate::app::ThresholdMode::Absolute,
-                    };
-
-                    let mut steps = Vec::new();
-                    if let Some(raw_steps) = th.steps {
-                        for s in raw_steps {
-                            let color = s.color.unwrap_or_else(|| "green".to_string());
-                            let parsed_color = crate::theme::parse_grafana_color(&color);
-                            steps.push(crate::app::ThresholdStep {
-                                value: s.value,
-                                color: parsed_color,
-                            });
-                        }
-                        steps.sort_by(|a, b| {
-                            let a_val = a.value.unwrap_or(f64::NEG_INFINITY);
-                            let b_val = b.value.unwrap_or(f64::NEG_INFINITY);
-                            a_val
-                                .partial_cmp(&b_val)
-                                .unwrap_or(std::cmp::Ordering::Equal)
-                        });
-                    }
-
-                    if !steps.is_empty() {
-                        let style = defaults
-                            .custom
-                            .as_ref()
-                            .and_then(|c| c.thresholds_style.as_ref())
-                            .and_then(|t| t.mode.clone())
-                            .unwrap_or_else(|| "line".to_string());
-
-                        thresholds = Some(crate::app::Thresholds {
-                            mode,
-                            steps,
-                            style: Some(style),
-                        });
-                    }
-                }
-            }
-
-            if !exprs.is_empty() {
-                let gp = p.grid_pos.map(|g| GridPos {
-                    x: g.x,
-                    y: g.y,
-                    w: g.w,
-                    h: g.h,
-                });
-                let options = match panel_type {
-                    crate::app::PanelType::Graph => crate::app::PanelOptions::Graph(graph_options),
-                    _ => crate::app::PanelOptions::None,
-                };
-                out.queries.push(QueryPanel {
-                    title,
-                    exprs,
-                    expr_paths,
-                    legends,
-                    query_modes,
-                    grid: gp,
-                    panel_type,
-                    thresholds,
-                    min,
-                    max,
-                    autogrid,
-                    display,
-                    options,
-                });
-            }
-        } else if !kind.is_empty() && kind != "row" {
-            // Count skipped panels (ignore rows)
-            out.skipped_panels += 1;
-            out.diagnostics.push(ImportDiagnostic::new(
-                "skipped_panel",
-                panel_path,
-                format!("unsupported panel type `{kind}` skipped for panel `{title}`"),
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn non_empty_json_value(value: &serde_json::Value) -> bool {
-    match value {
-        serde_json::Value::Array(values) => !values.is_empty(),
-        serde_json::Value::Object(values) => !values.is_empty(),
-        serde_json::Value::String(value) => !value.trim().is_empty(),
-        serde_json::Value::Null => false,
-        serde_json::Value::Bool(_) | serde_json::Value::Number(_) => true,
-    }
+fn parse_grafana_dashboard(data: &str) -> Result<DashboardImport> {
+    let value = serde_json::from_str(data).context("parsing Grafana dashboard JSON")?;
+    import::finish(classic::adapt(value)?)
 }
 
 pub(crate) fn variable_diagnostics(
@@ -764,22 +284,60 @@ fn is_variable_name_char(ch: char) -> bool {
     ch == '_' || ch.is_ascii_alphanumeric()
 }
 
-fn parse_refresh_rate_ms(value: &serde_json::Value) -> Option<u64> {
-    let refresh = value.as_str()?.trim();
-    if refresh.is_empty()
-        || refresh.eq_ignore_ascii_case("false")
-        || refresh.eq_ignore_ascii_case("off")
-    {
-        return None;
-    }
-
-    let duration = humantime::parse_duration(refresh).ok()?;
-    u64::try_from(duration.as_millis()).ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classic_import_runs_through_normalized_model_without_semantic_changes() {
+        let dashboard = parse_grafana_dashboard(
+            r#"{
+          "title":"Classic parity",
+          "refresh":"15s",
+          "templating":{"list":[{
+            "name":"job",
+            "type":"query",
+            "query":"label_values(up, job)",
+            "current":{"text":"api","value":"api"},
+            "regex":""
+          }]},
+          "panels":[{
+            "type":"timeseries",
+            "title":"Requests",
+            "gridPos":{"x":1,"y":2,"w":12,"h":8},
+            "targets":[
+              {"expr":"hidden","hide":true},
+              {"expr":"rate(requests_total{job=\"$job\"}[5m])","legendFormat":"{{instance}}","instant":false}
+            ],
+            "fieldConfig":{"defaults":{"unit":"reqps","decimals":1,"min":0,"max":100}},
+            "options":{"reduceOptions":{"calcs":["lastNotNull"]}}
+          }]
+        }"#,
+        )
+        .unwrap();
+
+        assert_eq!(dashboard.title, "Classic parity");
+        assert_eq!(dashboard.refresh_rate_ms, Some(15_000));
+        assert_eq!(dashboard.vars.get("job").map(String::as_str), Some("api"));
+        assert_eq!(dashboard.query_vars[0].query, "label_values(up, job)");
+        assert_eq!(dashboard.queries.len(), 1);
+        let panel = &dashboard.queries[0];
+        assert_eq!(panel.title, "Requests");
+        assert_eq!(panel.exprs, ["rate(requests_total{job=\"$job\"}[5m])"]);
+        assert_eq!(panel.expr_paths, ["panels[0].targets[1].expr"]);
+        assert_eq!(panel.legends, [Some("{{instance}}".to_string())]);
+        assert_eq!(panel.query_modes, [crate::app::QueryMode::Range]);
+        assert_eq!((panel.grid.unwrap().x, panel.grid.unwrap().y), (1, 2));
+        assert_eq!((panel.grid.unwrap().w, panel.grid.unwrap().h), (12, 8));
+        assert_eq!(panel.display.unit.as_deref(), Some("reqps"));
+        assert_eq!(panel.display.decimals, Some(1));
+        assert_eq!((panel.min, panel.max), (Some(0.0), Some(100.0)));
+        assert_eq!(dashboard.diagnostics[0].code, "ignored_field");
+        assert_eq!(
+            dashboard.diagnostics[0].path,
+            "panels[0].options.reduceOptions"
+        );
+    }
 
     #[test]
     fn test_parse_dashboard_vars() {
@@ -801,20 +359,14 @@ mod tests {
         }
         "#;
 
-        let raw: RawDashboard = serde_json::from_str(json).unwrap();
+        let dashboard = parse_grafana_dashboard(json).unwrap();
 
-        assert_eq!(raw.title.as_deref(), Some("Test Dash"));
-        let list = raw.templating.unwrap().list.unwrap();
-        assert_eq!(list.len(), 2);
-        assert_eq!(list[0].name, "job");
-
-        let v = &list[0];
-        let val = v
-            .current
-            .as_ref()
-            .and_then(|c| c.value.as_ref())
-            .or(v.current.as_ref().and_then(|c| c.text.as_ref()));
-        assert_eq!(val.unwrap().as_str(), Some("node-exporter"));
+        assert_eq!(dashboard.title, "Test Dash");
+        assert_eq!(
+            dashboard.vars.get("job"),
+            Some(&"node-exporter".to_string())
+        );
+        assert_eq!(dashboard.vars.get("instance"), Some(&"server1".to_string()));
     }
 
     #[test]
@@ -1062,18 +614,7 @@ mod tests {
             }]
         }"#;
 
-        let raw: RawDashboard = serde_json::from_str(json).unwrap();
-        let mut out = DashboardImport {
-            title: raw.title.unwrap_or_default(),
-            refresh_rate_ms: None,
-            queries: vec![],
-            vars: HashMap::new(),
-            query_vars: vec![],
-            skipped_panels: 0,
-            diagnostics: vec![],
-        };
-
-        collect_panels(&mut out, raw.panels.unwrap(), "panels").unwrap();
+        let out = parse_grafana_dashboard(json).unwrap();
 
         let options = match &out.queries[0].options {
             crate::app::PanelOptions::Graph(options) => options,
@@ -1119,18 +660,7 @@ mod tests {
             ]
         }"#;
 
-        let raw: RawDashboard = serde_json::from_str(json).unwrap();
-        let mut out = DashboardImport {
-            title: raw.title.unwrap_or_default(),
-            refresh_rate_ms: None,
-            queries: vec![],
-            vars: HashMap::new(),
-            query_vars: vec![],
-            skipped_panels: 0,
-            diagnostics: vec![],
-        };
-
-        collect_panels(&mut out, raw.panels.unwrap(), "panels").unwrap();
+        let out = parse_grafana_dashboard(json).unwrap();
 
         let graph_options = match &out.queries[0].options {
             crate::app::PanelOptions::Graph(options) => options,
