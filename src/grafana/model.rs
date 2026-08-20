@@ -8,6 +8,7 @@ pub(super) struct Dashboard {
     pub(super) refresh: Option<String>,
     pub(super) variables: Vec<Variable>,
     pub(super) panels: Vec<Panel>,
+    pub(super) skipped_panels: usize,
     pub(super) diagnostics: Vec<ImportDiagnostic>,
 }
 

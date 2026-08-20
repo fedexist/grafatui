@@ -6,6 +6,7 @@ pub(super) fn finish(dashboard: model::Dashboard) -> Result<DashboardImport> {
     let mut out = DashboardImport {
         title: dashboard.title,
         refresh_rate_ms: dashboard.refresh.as_deref().and_then(parse_refresh_rate_ms),
+        skipped_panels: dashboard.skipped_panels,
         diagnostics: dashboard.diagnostics,
         ..DashboardImport::default()
     };
