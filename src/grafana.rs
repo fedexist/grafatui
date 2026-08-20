@@ -675,6 +675,7 @@ mod tests {
             let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
 
             assert!(dashboard.queries.is_empty());
+            assert_eq!(dashboard.skipped_panels, 1);
             assert_eq!(dashboard.diagnostics.len(), 1);
             assert_eq!(dashboard.diagnostics[0].code, "unsupported_element");
             assert_eq!(

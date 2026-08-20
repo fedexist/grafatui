@@ -74,6 +74,8 @@ pub(super) fn adapt(value: Value) -> Result<model::Dashboard> {
             &mut dashboard.diagnostics,
         )? {
             dashboard.panels.push(panel);
+        } else {
+            dashboard.skipped_panels += 1;
         }
     }
     Ok(dashboard)
