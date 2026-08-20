@@ -13,6 +13,12 @@ struct ResolvedGridItem {
     position: model::GridPos,
 }
 
+#[derive(Deserialize)]
+struct RawVariableOption {
+    text: Option<Value>,
+    value: Option<Value>,
+}
+
 pub(super) fn adapt(value: Value) -> Result<model::Dashboard> {
     let root = value
         .as_object()
@@ -37,6 +43,20 @@ pub(super) fn adapt(value: Value) -> Result<model::Dashboard> {
         title,
         ..model::Dashboard::default()
     };
+    dashboard.refresh = match spec.get("timeSettings") {
+        None => None,
+        Some(Value::Object(settings)) => match settings.get("autoRefresh") {
+            None => None,
+            Some(Value::String(refresh)) => Some(refresh.clone()),
+            Some(_) => anyhow::bail!(
+                "invalid Grafana V2 auto refresh at spec.timeSettings.autoRefresh: expected a string"
+            ),
+        },
+        Some(_) => anyhow::bail!(
+            "invalid Grafana V2 time settings at spec.timeSettings: expected an object"
+        ),
+    };
+    dashboard.variables = normalize_variables(spec, &mut dashboard.diagnostics)?;
     for (index, item) in items.iter().enumerate() {
         let item_path = format!("spec.layout.spec.items[{index}]");
         let grid = parse_grid_item(item, &item_path)?;
@@ -57,6 +77,153 @@ pub(super) fn adapt(value: Value) -> Result<model::Dashboard> {
         }
     }
     Ok(dashboard)
+}
+
+fn normalize_variables(
+    dashboard_spec: &JsonObject,
+    diagnostics: &mut Vec<super::ImportDiagnostic>,
+) -> Result<Vec<model::Variable>> {
+    let variables = match dashboard_spec.get("variables") {
+        None => return Ok(Vec::new()),
+        Some(Value::Array(variables)) => variables,
+        Some(_) => {
+            anyhow::bail!("invalid Grafana V2 variables at spec.variables: expected an array")
+        }
+    };
+
+    let mut normalized = Vec::new();
+    for (index, variable) in variables.iter().enumerate() {
+        let path = format!("spec.variables[{index}]");
+        let variable = variable
+            .as_object()
+            .ok_or_else(|| anyhow!("invalid Grafana V2 variable at {path}: expected an object"))?;
+        let kind = require_string_from(variable, "kind", &format!("{path}.kind"))?;
+        let spec = require_object_from(variable, "spec", &format!("{path}.spec"))?;
+        let variable = match kind {
+            "QueryVariable" => normalize_query_variable(spec, index, diagnostics)?,
+            "TextVariable" | "ConstantVariable" | "DatasourceVariable" | "IntervalVariable"
+            | "CustomVariable" | "GroupByVariable" => Some(normalize_option_variable(spec, index)?),
+            "SwitchVariable" => Some(normalize_switch_variable(spec, index)?),
+            "AdhocVariable" => {
+                diagnostics.push(super::ImportDiagnostic::new(
+                    "unsupported_variable",
+                    path,
+                    "unsupported Grafana V2 variable kind `AdhocVariable` skipped",
+                ));
+                None
+            }
+            other => {
+                diagnostics.push(super::ImportDiagnostic::new(
+                    "unsupported_variable",
+                    path,
+                    format!("unsupported Grafana V2 variable kind `{other}` skipped"),
+                ));
+                None
+            }
+        };
+        if let Some(variable) = variable {
+            normalized.push(variable);
+        }
+    }
+    Ok(normalized)
+}
+
+fn normalize_query_variable(
+    spec: &JsonObject,
+    index: usize,
+    _diagnostics: &mut Vec<super::ImportDiagnostic>,
+) -> Result<Option<model::Variable>> {
+    let source_path = format!("spec.variables[{index}]");
+    let name = require_string_from(spec, "name", &format!("{source_path}.spec.name"))?.to_string();
+    let query_spec = spec.get("query").and_then(Value::as_object);
+    let is_prometheus = query_spec
+        .and_then(|query| query.get("group"))
+        .and_then(Value::as_str)
+        == Some("prometheus");
+    let query = query_spec
+        .and_then(|query| query.get("spec"))
+        .and_then(Value::as_object)
+        .and_then(|query_spec| query_spec.get("query"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|query| !query.is_empty())
+        .map(|query| {
+            (
+                query.to_string(),
+                format!("{source_path}.spec.query.spec.query"),
+            )
+        })
+        .or_else(|| {
+            spec.get("definition")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|definition| !definition.is_empty())
+                .map(|definition| {
+                    (
+                        definition.to_string(),
+                        format!("{source_path}.spec.definition"),
+                    )
+                })
+        });
+
+    Ok(Some(model::Variable {
+        name,
+        kind: is_prometheus.then_some("query".to_string()),
+        current: current_from_option(spec),
+        query: query.as_ref().map(|(query, _)| query.clone()),
+        regex: optional_string(spec, "regex"),
+        all_value: optional_string(spec, "allValue"),
+        source_path,
+        query_path: query.map(|(_, path)| path),
+    }))
+}
+
+fn normalize_option_variable(spec: &JsonObject, index: usize) -> Result<model::Variable> {
+    let source_path = format!("spec.variables[{index}]");
+    Ok(model::Variable {
+        name: require_string_from(spec, "name", &format!("{source_path}.spec.name"))?.to_string(),
+        kind: None,
+        current: current_from_option(spec),
+        query: None,
+        regex: None,
+        all_value: None,
+        source_path,
+        query_path: None,
+    })
+}
+
+fn normalize_switch_variable(spec: &JsonObject, index: usize) -> Result<model::Variable> {
+    let source_path = format!("spec.variables[{index}]");
+    Ok(model::Variable {
+        name: require_string_from(spec, "name", &format!("{source_path}.spec.name"))?.to_string(),
+        kind: None,
+        current: spec.get("current").and_then(Value::as_str).map(|current| {
+            model::VariableCurrent {
+                text: None,
+                value: Some(Value::String(current.to_string())),
+            }
+        }),
+        query: None,
+        regex: None,
+        all_value: None,
+        source_path,
+        query_path: None,
+    })
+}
+
+fn current_from_option(spec: &JsonObject) -> Option<model::VariableCurrent> {
+    let option = spec
+        .get("current")
+        .filter(|current| current.is_object())
+        .and_then(|current| serde_json::from_value::<RawVariableOption>(current.clone()).ok())?;
+    Some(model::VariableCurrent {
+        text: option.text,
+        value: option.value,
+    })
+}
+
+fn optional_string(spec: &JsonObject, key: &str) -> Option<String> {
+    spec.get(key).and_then(Value::as_str).map(str::to_string)
 }
 
 fn require_object_from<'a>(

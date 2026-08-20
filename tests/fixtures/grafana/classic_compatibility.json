@@ -1,5 +1,6 @@
 {
   "title": "Compatibility",
+  "refresh": "30s",
   "panels": [{
     "type": "timeseries",
     "title": "Requests",
@@ -15,5 +16,23 @@
     }},
     "options": {}
   }],
-  "templating": {"list": []}
+  "templating": {
+    "list": [
+      {
+        "name": "job",
+        "type": "query",
+        "query": "label_values(up, job)",
+        "definition": "label_values(up, job)",
+        "current": {"text": "api", "value": "api"},
+        "regex": "/api|worker/",
+        "allValue": ".*"
+      },
+      {
+        "name": "region",
+        "type": "custom",
+        "query": "eu-west-1",
+        "current": {"text": "eu-west-1", "value": "eu-west-1"}
+      }
+    ]
+  }
 }

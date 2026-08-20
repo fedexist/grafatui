@@ -358,6 +358,16 @@ mod tests {
         .unwrap();
 
         assert_eq!(v2.title, classic.title);
+        assert_eq!(v2.refresh_rate_ms, classic.refresh_rate_ms);
+        assert_eq!(v2.vars, classic.vars);
+        assert_eq!(v2.query_vars.len(), 1);
+        assert_eq!(v2.query_vars[0].name, classic.query_vars[0].name);
+        assert_eq!(v2.query_vars[0].query, classic.query_vars[0].query);
+        assert_eq!(v2.query_vars[0].regex, classic.query_vars[0].regex);
+        assert_eq!(
+            v2.query_vars[0].query_path,
+            "spec.variables[0].spec.query.spec.query"
+        );
         assert_eq!(v2.queries.len(), 1);
         let (actual, expected) = (&v2.queries[0], &classic.queries[0]);
         assert_eq!(actual.title, expected.title);
@@ -440,6 +450,155 @@ mod tests {
                     .contains("spec")
             );
         }
+    }
+
+    #[test]
+    fn rejects_malformed_v2_time_settings_fields() {
+        let mut non_object_settings = valid_v2_resource();
+        non_object_settings["spec"]["timeSettings"] = serde_json::json!("30s");
+        let error = parse_grafana_dashboard(&non_object_settings.to_string())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("spec.timeSettings"));
+
+        let mut non_string_refresh = valid_v2_resource();
+        non_string_refresh["spec"]["timeSettings"]["autoRefresh"] = serde_json::json!(30);
+        let error = parse_grafana_dashboard(&non_string_refresh.to_string())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("spec.timeSettings.autoRefresh"));
+    }
+
+    #[test]
+    fn v2_query_variable_falls_back_to_definition_with_its_native_path() {
+        let mut json = valid_v2_resource();
+        json["spec"]["variables"] = serde_json::json!([{
+            "kind": "QueryVariable",
+            "spec": {
+                "name": "instance",
+                "current": {"text": "node-1", "value": "node-1"},
+                "query": {"kind": "DataQuery", "group": "prometheus", "version": "v0", "spec": {"query": "  "}},
+                "definition": "  label_values(up, instance)  "
+            }
+        }]);
+
+        let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+
+        assert_eq!(
+            dashboard.vars.get("instance").map(String::as_str),
+            Some("node-1")
+        );
+        assert_eq!(dashboard.query_vars.len(), 1);
+        assert_eq!(dashboard.query_vars[0].query, "label_values(up, instance)");
+        assert_eq!(
+            dashboard.query_vars[0].query_path,
+            "spec.variables[0].spec.definition"
+        );
+    }
+
+    #[test]
+    fn v2_supported_option_variables_import_object_current_values() {
+        let mut json = valid_v2_resource();
+        json["spec"]["variables"] = serde_json::json!([
+            {"kind": "TextVariable", "spec": {"name": "text", "current": {"text": "one", "value": "one"}}},
+            {"kind": "ConstantVariable", "spec": {"name": "constant", "current": {"text": "two", "value": "two"}}},
+            {"kind": "DatasourceVariable", "spec": {"name": "datasource", "current": {"text": "three", "value": "three"}}},
+            {"kind": "IntervalVariable", "spec": {"name": "interval", "current": {"text": "four", "value": "four"}}},
+            {"kind": "CustomVariable", "spec": {"name": "custom", "current": {"text": "five", "value": "five"}}},
+            {"kind": "GroupByVariable", "spec": {"name": "group_by", "current": {"text": "six", "value": "six"}}}
+        ]);
+
+        let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+
+        for (name, value) in [
+            ("text", "one"),
+            ("constant", "two"),
+            ("datasource", "three"),
+            ("interval", "four"),
+            ("custom", "five"),
+            ("group_by", "six"),
+        ] {
+            assert_eq!(dashboard.vars.get(name).map(String::as_str), Some(value));
+        }
+    }
+
+    #[test]
+    fn v2_switch_variable_imports_direct_current_value() {
+        let mut json = valid_v2_resource();
+        json["spec"]["variables"] = serde_json::json!([{
+            "kind": "SwitchVariable",
+            "spec": {"name": "show_total", "current": "true"}
+        }]);
+
+        let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+
+        assert_eq!(
+            dashboard.vars.get("show_total").map(String::as_str),
+            Some("true")
+        );
+    }
+
+    #[test]
+    fn v2_non_prometheus_query_variable_is_not_dynamic() {
+        let mut json = valid_v2_resource();
+        json["spec"]["variables"] = serde_json::json!([{
+            "kind": "QueryVariable",
+            "spec": {
+                "name": "service",
+                "current": {"text": "api", "value": "api"},
+                "query": {"kind": "DataQuery", "group": "loki", "version": "v0", "spec": {"query": "label_values(service)"}}
+            }
+        }]);
+
+        let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+
+        assert_eq!(
+            dashboard.vars.get("service").map(String::as_str),
+            Some("api")
+        );
+        assert!(dashboard.query_vars.is_empty());
+        assert!(dashboard.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn v2_query_variable_uses_its_all_value_for_all_current_selection() {
+        let mut json = valid_v2_resource();
+        json["spec"]["variables"] = serde_json::json!([{
+            "kind": "QueryVariable",
+            "spec": {
+                "name": "job",
+                "current": {"text": "All", "value": "$__all"},
+                "query": {"kind": "DataQuery", "group": "prometheus", "version": "v0", "spec": {"query": "label_values(up, job)"}},
+                "allValue": "api|worker"
+            }
+        }]);
+
+        let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+
+        assert_eq!(
+            dashboard.vars.get("job").map(String::as_str),
+            Some("api|worker")
+        );
+        assert!(dashboard.query_vars.is_empty());
+    }
+
+    #[test]
+    fn v2_unsupported_variable_kinds_are_skipped_with_native_paths() {
+        let mut json = valid_v2_resource();
+        json["spec"]["variables"] = serde_json::json!([
+            {"kind": "AdhocVariable", "spec": {"name": "adhoc"}},
+            {"kind": "FutureVariable", "spec": {"name": "future"}}
+        ]);
+
+        let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+
+        assert!(dashboard.vars.is_empty());
+        assert!(dashboard.query_vars.is_empty());
+        assert_eq!(dashboard.diagnostics.len(), 2);
+        assert_eq!(dashboard.diagnostics[0].code, "unsupported_variable");
+        assert_eq!(dashboard.diagnostics[0].path, "spec.variables[0]");
+        assert_eq!(dashboard.diagnostics[1].code, "unsupported_variable");
+        assert_eq!(dashboard.diagnostics[1].path, "spec.variables[1]");
     }
 
     #[test]

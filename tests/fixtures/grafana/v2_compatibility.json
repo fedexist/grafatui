@@ -48,8 +48,42 @@
         "spec": {"x": 1, "y": 2, "width": 12, "height": 8, "element": {"kind": "ElementReference", "name": "panel-1"}}
       }]}
     },
-    "variables": [],
-    "timeSettings": {"from": "now-6h", "to": "now", "autoRefresh": ""}
+    "variables": [
+      {
+        "kind": "QueryVariable",
+        "spec": {
+          "name": "job",
+          "current": {"text": "api", "value": "api"},
+          "query": {"kind": "DataQuery", "group": "prometheus", "version": "v0", "spec": {"query": "label_values(up, job)"}},
+          "definition": "label_values(up, job)",
+          "regex": "/api|worker/",
+          "allValue": ".*",
+          "hide": "dontHide",
+          "refresh": "onDashboardLoad",
+          "skipUrlSync": false,
+          "sort": "disabled",
+          "options": [],
+          "multi": false,
+          "includeAll": true,
+          "allowCustomValue": true
+        }
+      },
+      {
+        "kind": "CustomVariable",
+        "spec": {
+          "name": "region",
+          "query": "eu-west-1",
+          "current": {"text": "eu-west-1", "value": "eu-west-1"},
+          "options": [{"selected": true, "text": "eu-west-1", "value": "eu-west-1"}],
+          "multi": false,
+          "includeAll": false,
+          "hide": "dontHide",
+          "skipUrlSync": false,
+          "allowCustomValue": true
+        }
+      }
+    ],
+    "timeSettings": {"from": "now-6h", "to": "now", "autoRefresh": "30s"}
   },
   "status": {}
 }
