@@ -377,6 +377,24 @@ mod tests {
         assert_eq!(actual.panel_type, expected.panel_type);
         assert_eq!(actual.display, expected.display);
         assert_eq!(actual.options, expected.options);
+        let (actual_thresholds, expected_thresholds) = (
+            actual.thresholds.as_ref().unwrap(),
+            expected.thresholds.as_ref().unwrap(),
+        );
+        assert_eq!(actual_thresholds.mode, expected_thresholds.mode);
+        assert_eq!(actual_thresholds.style, expected_thresholds.style);
+        assert_eq!(
+            actual_thresholds.steps.len(),
+            expected_thresholds.steps.len()
+        );
+        for (actual_step, expected_step) in actual_thresholds
+            .steps
+            .iter()
+            .zip(&expected_thresholds.steps)
+        {
+            assert_eq!(actual_step.value, expected_step.value);
+            assert_eq!(actual_step.color, expected_step.color);
+        }
         assert_eq!((actual.min, actual.max), (expected.min, expected.max));
         assert_eq!(actual.autogrid, expected.autogrid);
         assert_eq!(
@@ -554,6 +572,70 @@ mod tests {
     }
 
     #[test]
+    fn rejects_malformed_v2_query_variable_wrappers_at_native_paths() {
+        for (case, expected_path) in [
+            ("missing_query", "spec.variables[0].spec.query"),
+            ("wrong_query_type", "spec.variables[0].spec.query"),
+            ("missing_kind", "spec.variables[0].spec.query.kind"),
+            ("wrong_kind", "spec.variables[0].spec.query.kind"),
+            ("wrong_kind_type", "spec.variables[0].spec.query.kind"),
+            ("missing_group", "spec.variables[0].spec.query.group"),
+            ("wrong_group_type", "spec.variables[0].spec.query.group"),
+        ] {
+            let mut json = valid_v2_resource();
+            json["spec"]["variables"] = serde_json::json!([{
+                "kind": "QueryVariable",
+                "spec": {
+                    "name": "instance",
+                    "current": {"text": "node-1", "value": "node-1"},
+                    "query": {
+                        "kind": "DataQuery",
+                        "group": "prometheus",
+                        "spec": {"query": "label_values(up, instance)"}
+                    },
+                    "definition": "label_values(up, instance)"
+                }
+            }]);
+
+            let variable_spec = json["spec"]["variables"][0]["spec"]
+                .as_object_mut()
+                .unwrap();
+            match case {
+                "missing_query" => {
+                    variable_spec.remove("query");
+                }
+                "wrong_query_type" => {
+                    variable_spec.insert("query".into(), serde_json::json!([]));
+                }
+                "missing_kind" => {
+                    variable_spec["query"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("kind");
+                }
+                "wrong_kind" => variable_spec["query"]["kind"] = serde_json::json!("FutureQuery"),
+                "wrong_kind_type" => variable_spec["query"]["kind"] = serde_json::json!(1),
+                "missing_group" => {
+                    variable_spec["query"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("group");
+                }
+                "wrong_group_type" => variable_spec["query"]["group"] = serde_json::json!(1),
+                _ => unreachable!(),
+            };
+
+            let error = parse_grafana_dashboard(&json.to_string())
+                .expect_err(case)
+                .to_string();
+            assert!(
+                error.contains(expected_path),
+                "{case}: expected `{expected_path}` in `{error}`"
+            );
+        }
+    }
+
+    #[test]
     fn v2_supported_option_variables_import_object_current_values() {
         let mut json = valid_v2_resource();
         json["spec"]["variables"] = serde_json::json!([
@@ -642,6 +724,216 @@ mod tests {
             Some("api|worker")
         );
         assert!(dashboard.query_vars.is_empty());
+    }
+
+    #[test]
+    fn v2_custom_variable_all_selection_matches_classic_all_value_behavior() {
+        let classic = parse_grafana_dashboard(
+            r#"{
+                "title": "Classic",
+                "templating": {"list": [{
+                    "name": "region",
+                    "type": "custom",
+                    "current": {"text": "All", "value": "$__all"},
+                    "allValue": "eu-west-1|us-east-1"
+                }]}
+            }"#,
+        )
+        .unwrap();
+        let mut json = valid_v2_resource();
+        json["spec"]["variables"] = serde_json::json!([{
+            "kind": "CustomVariable",
+            "spec": {
+                "name": "region",
+                "current": {"text": "All", "value": "$__all"},
+                "allValue": "eu-west-1|us-east-1"
+            }
+        }]);
+
+        let v2 = parse_grafana_dashboard(&json.to_string()).unwrap();
+
+        assert_eq!(
+            v2.vars.get("region").map(String::as_str),
+            Some("eu-west-1|us-east-1")
+        );
+        assert_eq!(v2.vars.get("region"), classic.vars.get("region"));
+    }
+
+    #[test]
+    fn rejects_malformed_required_v2_panel_fields_at_native_paths() {
+        let cases = [
+            ("missing_title", "spec.elements[\"panel-1\"].spec.title"),
+            ("wrong_title_type", "spec.elements[\"panel-1\"].spec.title"),
+            (
+                "missing_transformations",
+                "spec.elements[\"panel-1\"].spec.data.spec.transformations",
+            ),
+            (
+                "wrong_transformations_type",
+                "spec.elements[\"panel-1\"].spec.data.spec.transformations",
+            ),
+            (
+                "missing_hidden",
+                "spec.elements[\"panel-1\"].spec.data.spec.queries[0].spec.hidden",
+            ),
+            (
+                "wrong_hidden_type",
+                "spec.elements[\"panel-1\"].spec.data.spec.queries[0].spec.hidden",
+            ),
+            (
+                "missing_data_query_group",
+                "spec.elements[\"panel-1\"].spec.data.spec.queries[0].spec.query.group",
+            ),
+            (
+                "wrong_data_query_group_type",
+                "spec.elements[\"panel-1\"].spec.data.spec.queries[0].spec.query.group",
+            ),
+            (
+                "missing_data_query_spec",
+                "spec.elements[\"panel-1\"].spec.data.spec.queries[0].spec.query.spec",
+            ),
+            (
+                "wrong_data_query_spec_type",
+                "spec.elements[\"panel-1\"].spec.data.spec.queries[0].spec.query.spec",
+            ),
+            (
+                "missing_viz_group",
+                "spec.elements[\"panel-1\"].spec.vizConfig.group",
+            ),
+            (
+                "wrong_viz_group_type",
+                "spec.elements[\"panel-1\"].spec.vizConfig.group",
+            ),
+            (
+                "missing_viz_spec",
+                "spec.elements[\"panel-1\"].spec.vizConfig.spec",
+            ),
+            (
+                "wrong_viz_spec_type",
+                "spec.elements[\"panel-1\"].spec.vizConfig.spec",
+            ),
+            (
+                "missing_field_config",
+                "spec.elements[\"panel-1\"].spec.vizConfig.spec.fieldConfig",
+            ),
+            (
+                "wrong_field_config_type",
+                "spec.elements[\"panel-1\"].spec.vizConfig.spec.fieldConfig",
+            ),
+            (
+                "missing_defaults",
+                "spec.elements[\"panel-1\"].spec.vizConfig.spec.fieldConfig.defaults",
+            ),
+            (
+                "wrong_defaults_type",
+                "spec.elements[\"panel-1\"].spec.vizConfig.spec.fieldConfig.defaults",
+            ),
+            (
+                "missing_options",
+                "spec.elements[\"panel-1\"].spec.vizConfig.spec.options",
+            ),
+            (
+                "wrong_options_type",
+                "spec.elements[\"panel-1\"].spec.vizConfig.spec.options",
+            ),
+        ];
+
+        for (case, expected_path) in cases {
+            let mut json: serde_json::Value = serde_json::from_str(include_str!(
+                "../tests/fixtures/grafana/v2_compatibility.json"
+            ))
+            .unwrap();
+            let panel = &mut json["spec"]["elements"]["panel-1"]["spec"];
+            match case {
+                "missing_title" => {
+                    panel.as_object_mut().unwrap().remove("title");
+                }
+                "wrong_title_type" => panel["title"] = serde_json::json!(1),
+                "missing_transformations" => {
+                    panel["data"]["spec"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("transformations");
+                }
+                "wrong_transformations_type" => {
+                    panel["data"]["spec"]["transformations"] = serde_json::json!({})
+                }
+                "missing_hidden" => {
+                    panel["data"]["spec"]["queries"][0]["spec"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("hidden");
+                }
+                "wrong_hidden_type" => {
+                    panel["data"]["spec"]["queries"][0]["spec"]["hidden"] =
+                        serde_json::json!("false")
+                }
+                "missing_data_query_group" => {
+                    panel["data"]["spec"]["queries"][0]["spec"]["query"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("group");
+                }
+                "wrong_data_query_group_type" => {
+                    panel["data"]["spec"]["queries"][0]["spec"]["query"]["group"] =
+                        serde_json::json!(1)
+                }
+                "missing_data_query_spec" => {
+                    panel["data"]["spec"]["queries"][0]["spec"]["query"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("spec");
+                }
+                "wrong_data_query_spec_type" => {
+                    panel["data"]["spec"]["queries"][0]["spec"]["query"]["spec"] =
+                        serde_json::json!([])
+                }
+                "missing_viz_group" => {
+                    panel["vizConfig"].as_object_mut().unwrap().remove("group");
+                }
+                "wrong_viz_group_type" => panel["vizConfig"]["group"] = serde_json::json!(1),
+                "missing_viz_spec" => {
+                    panel["vizConfig"].as_object_mut().unwrap().remove("spec");
+                }
+                "wrong_viz_spec_type" => panel["vizConfig"]["spec"] = serde_json::json!([]),
+                "missing_field_config" => {
+                    panel["vizConfig"]["spec"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("fieldConfig");
+                }
+                "wrong_field_config_type" => {
+                    panel["vizConfig"]["spec"]["fieldConfig"] = serde_json::json!([])
+                }
+                "missing_defaults" => {
+                    panel["vizConfig"]["spec"]["fieldConfig"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("defaults");
+                }
+                "wrong_defaults_type" => {
+                    panel["vizConfig"]["spec"]["fieldConfig"]["defaults"] = serde_json::json!([])
+                }
+                "missing_options" => {
+                    panel["vizConfig"]["spec"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("options");
+                }
+                "wrong_options_type" => {
+                    panel["vizConfig"]["spec"]["options"] = serde_json::json!([])
+                }
+                _ => unreachable!(),
+            };
+
+            let error = parse_grafana_dashboard(&json.to_string())
+                .expect_err(case)
+                .to_string();
+            assert!(
+                error.contains(expected_path),
+                "{case}: expected `{expected_path}` in `{error}`"
+            );
+        }
     }
 
     #[test]

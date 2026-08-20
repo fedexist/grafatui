@@ -137,20 +137,20 @@ fn normalize_query_variable(
 ) -> Result<Option<model::Variable>> {
     let source_path = format!("spec.variables[{index}]");
     let name = require_string_from(spec, "name", &format!("{source_path}.spec.name"))?.to_string();
-    let query_spec = spec.get("query").and_then(Value::as_object);
-    let datasource = query_spec
-        .and_then(|query| query.get("group"))
-        .and_then(Value::as_str);
-    let is_prometheus = datasource == Some("prometheus");
-    if let Some(datasource) = datasource.filter(|datasource| *datasource != "prometheus") {
+    let query_path = format!("{source_path}.spec.query");
+    let query = require_object_from(spec, "query", &query_path)?;
+    require_expected_kind(query, &query_path, "DataQuery")?;
+    let datasource = require_string_from(query, "group", &format!("{query_path}.group"))?;
+    let is_prometheus = datasource == "prometheus";
+    if datasource != "prometheus" {
         diagnostics.push(super::ImportDiagnostic::new(
             "unsupported_datasource",
-            format!("{source_path}.spec.query"),
+            query_path,
             format!("unsupported Grafana V2 datasource `{datasource}` skipped"),
         ));
     }
-    let query = query_spec
-        .and_then(|query| query.get("spec"))
+    let query = query
+        .get("spec")
         .and_then(Value::as_object)
         .and_then(|query_spec| query_spec.get("query"))
         .and_then(Value::as_str)
@@ -195,7 +195,7 @@ fn normalize_option_variable(spec: &JsonObject, index: usize) -> Result<model::V
         current: current_from_option(spec),
         query: None,
         regex: None,
-        all_value: None,
+        all_value: optional_string(spec, "allValue"),
         source_path,
         query_path: None,
     })
@@ -258,6 +258,13 @@ fn require_string_from<'a>(object: &'a JsonObject, key: &str, path: &str) -> Res
         .get(key)
         .and_then(Value::as_str)
         .ok_or_else(|| anyhow!("invalid Grafana V2 resource at {path}: expected a string"))
+}
+
+fn require_bool_from(object: &JsonObject, key: &str, path: &str) -> Result<bool> {
+    object
+        .get(key)
+        .and_then(Value::as_bool)
+        .ok_or_else(|| anyhow!("invalid Grafana V2 resource at {path}: expected a boolean"))
 }
 
 fn require_i32_from(object: &JsonObject, key: &str, path: &str) -> Result<i32> {
@@ -325,7 +332,7 @@ fn parse_panel(
         ));
         return Ok(None);
     }
-    validate_panel_kinds(element, path)?;
+    validate_panel_structure(element, path)?;
 
     let raw: RawPanelElement = serde_json::from_value(value.clone())
         .with_context(|| format!("parsing Grafana V2 panel at {path}"))?;
@@ -422,9 +429,10 @@ fn parse_panel(
     }))
 }
 
-fn validate_panel_kinds(element: &JsonObject, path: &str) -> Result<()> {
+fn validate_panel_structure(element: &JsonObject, path: &str) -> Result<()> {
     let panel_path = format!("{path}.spec");
     let panel = require_object_from(element, "spec", &panel_path)?;
+    require_string_from(panel, "title", &format!("{panel_path}.title"))?;
 
     let data_path = format!("{panel_path}.data");
     let data = require_object_from(panel, "data", &data_path)?;
@@ -433,6 +441,11 @@ fn validate_panel_kinds(element: &JsonObject, path: &str) -> Result<()> {
     let data_spec = require_object_from(data, "spec", &data_spec_path)?;
     let queries_path = format!("{data_spec_path}.queries");
     let queries = require_array_from(data_spec, "queries", &queries_path)?;
+    require_array_from(
+        data_spec,
+        "transformations",
+        &format!("{data_spec_path}.transformations"),
+    )?;
     for (index, query) in queries.iter().enumerate() {
         let query_path = format!("{queries_path}[{index}]");
         let query = query.as_object().ok_or_else(|| {
@@ -441,14 +454,28 @@ fn validate_panel_kinds(element: &JsonObject, path: &str) -> Result<()> {
         require_expected_kind(query, &query_path, "PanelQuery")?;
         let query_spec_path = format!("{query_path}.spec");
         let query_spec = require_object_from(query, "spec", &query_spec_path)?;
+        require_bool_from(query_spec, "hidden", &format!("{query_spec_path}.hidden"))?;
         let data_query_path = format!("{query_spec_path}.query");
         let data_query = require_object_from(query_spec, "query", &data_query_path)?;
         require_expected_kind(data_query, &data_query_path, "DataQuery")?;
+        require_string_from(data_query, "group", &format!("{data_query_path}.group"))?;
+        require_object_from(data_query, "spec", &format!("{data_query_path}.spec"))?;
     }
 
     let viz_path = format!("{panel_path}.vizConfig");
     let viz = require_object_from(panel, "vizConfig", &viz_path)?;
     require_expected_kind(viz, &viz_path, "VizConfig")?;
+    require_string_from(viz, "group", &format!("{viz_path}.group"))?;
+    let viz_spec_path = format!("{viz_path}.spec");
+    let viz_spec = require_object_from(viz, "spec", &viz_spec_path)?;
+    let field_config_path = format!("{viz_spec_path}.fieldConfig");
+    let field_config = require_object_from(viz_spec, "fieldConfig", &field_config_path)?;
+    require_object_from(
+        field_config,
+        "defaults",
+        &format!("{field_config_path}.defaults"),
+    )?;
+    require_object_from(viz_spec, "options", &format!("{viz_spec_path}.options"))?;
     Ok(())
 }
 
