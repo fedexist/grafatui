@@ -18,3 +18,14 @@ jobs:
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
+
+  installer:
+    name: Installer (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v4
+    - name: Test installer
+      run: tests/install.sh
