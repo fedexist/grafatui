@@ -506,38 +506,54 @@ impl AppState {
     }
 
     pub(crate) async fn refresh(&mut self) -> Result<()> {
-        let annotations_changed = self.annotations.refresh_if_changed().await;
-        if annotations_changed {
-            let eligible_titles = self
-                .panels
-                .iter()
-                .filter(|panel| panel.panel_type == PanelType::Graph)
-                .map(|panel| panel.title.clone())
-                .collect::<Vec<_>>();
-            self.annotations.reconcile_targets(&eligible_titles);
-        }
-
         let range = self.range;
         let step = self.step;
 
         // Calculate end timestamp: "now" minus time_offset
         let end_ts = chrono::Utc::now().timestamp() - self.time_offset.as_secs() as i64;
+        let annotation_context =
+            crate::annotations::AnnotationRefreshContext::from_unix_window(end_ts, range);
+        let eligible_titles = self
+            .panels
+            .iter()
+            .filter(|panel| panel.panel_type == PanelType::Graph)
+            .map(|panel| panel.title.clone())
+            .collect::<Vec<_>>();
 
-        let _ = refresh_query_variables(
+        let annotation_refresh = self.annotations.refresh(&annotation_context);
+        let prometheus_refresh = Self::refresh_prometheus_data(
             &self.prometheus,
             &self.query_vars,
             range,
             step,
             end_ts,
             &mut self.vars,
-        )
-        .await;
+            &mut self.panels,
+        );
+        let (annotations_changed, ()) = tokio::join!(annotation_refresh, prometheus_refresh);
 
-        let prometheus = &self.prometheus;
-        let vars = &self.vars;
+        if annotations_changed {
+            self.annotations.reconcile_targets(&eligible_titles);
+        }
+
+        self.view_end_ts = end_ts;
+        self.last_refresh = Instant::now();
+        Ok(())
+    }
+
+    async fn refresh_prometheus_data(
+        prometheus: &prom::PromClient,
+        query_vars: &[TemplateQueryVar],
+        range: Duration,
+        step: Duration,
+        end_ts: i64,
+        vars: &mut HashMap<String, String>,
+        panels: &mut [PanelState],
+    ) {
+        let _ = refresh_query_variables(prometheus, query_vars, range, step, end_ts, vars).await;
 
         // Create a stream of futures for fetching panel data
-        let mut futures = futures::stream::iter(self.panels.iter_mut())
+        let mut futures = futures::stream::iter(panels.iter_mut())
             .map(|p| Self::fetch_single_panel_data(prometheus, p, range, step, vars, end_ts))
             .buffer_unordered(4); // Max 4 concurrent panel refreshes
 
@@ -549,10 +565,6 @@ impl AppState {
             }
             p.last_error = err;
         }
-
-        self.view_end_ts = end_ts;
-        self.last_refresh = Instant::now();
-        Ok(())
     }
 
     async fn fetch_single_panel_data<'a>(
@@ -654,6 +666,14 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::annotations::{
+        AnnotationProvider, AnnotationRefreshContext, AnnotationSnapshot, ProviderFuture,
+        ProviderPoll,
+    };
+    use std::sync::{Arc, Mutex};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    use tokio::sync::Notify;
 
     fn temp_annotation_path(name: &str) -> std::path::PathBuf {
         let suffix = std::time::SystemTime::now()
@@ -703,6 +723,40 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct RecordingProvider {
+        captured: Arc<Mutex<Option<AnnotationRefreshContext>>>,
+    }
+
+    impl AnnotationProvider for RecordingProvider {
+        fn refresh<'a>(&'a mut self, context: &'a AnnotationRefreshContext) -> ProviderFuture<'a> {
+            let captured = Arc::clone(&self.captured);
+            let context = context.clone();
+            Box::pin(async move {
+                *captured.lock().unwrap() = Some(context);
+                ProviderPoll::Loaded(AnnotationSnapshot::new(Vec::new()))
+            })
+        }
+    }
+
+    #[derive(Debug)]
+    struct HandshakeProvider {
+        provider_started: Arc<Notify>,
+        metrics_started: Arc<Notify>,
+    }
+
+    impl AnnotationProvider for HandshakeProvider {
+        fn refresh<'a>(&'a mut self, _context: &'a AnnotationRefreshContext) -> ProviderFuture<'a> {
+            let provider_started = Arc::clone(&self.provider_started);
+            let metrics_started = Arc::clone(&self.metrics_started);
+            Box::pin(async move {
+                provider_started.notify_one();
+                metrics_started.notified().await;
+                ProviderPoll::Loaded(AnnotationSnapshot::new(Vec::new()))
+            })
+        }
+    }
+
     #[tokio::test]
     async fn test_empty_panels() {
         let mut app = create_test_app();
@@ -730,6 +784,72 @@ mod tests {
 
         assert_eq!(app.annotations.snapshot().unwrap().len(), 1);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn refresh_uses_same_window_for_annotations_and_rendered_data() {
+        let captured = Arc::new(Mutex::new(None));
+        let mut app = create_test_app();
+        app.annotations =
+            crate::annotations::AnnotationState::from_provider(Some(Box::new(RecordingProvider {
+                captured: Arc::clone(&captured),
+            })));
+
+        app.refresh().await.unwrap();
+
+        let captured = captured.lock().unwrap().clone().unwrap();
+        assert_eq!(captured.to.timestamp(), app.view_end_ts);
+        assert_eq!(captured.from, captured.to - chrono::TimeDelta::hours(1));
+    }
+
+    #[tokio::test]
+    async fn refresh_starts_annotation_and_prometheus_work_concurrently() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let provider_started = Arc::new(Notify::new());
+        let metrics_started = Arc::new(Notify::new());
+        let http_provider_started = Arc::clone(&provider_started);
+        let http_metrics_started = Arc::clone(&metrics_started);
+        let http_task = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0_u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let read = socket.read(&mut chunk).await.unwrap();
+                assert!(read > 0, "connection closed before request headers");
+                request.extend_from_slice(&chunk[..read]);
+            }
+            http_metrics_started.notify_one();
+            http_provider_started.notified().await;
+
+            let body = r#"{"status":"success","data":{"resultType":"matrix","result":[]}}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body,
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+        });
+
+        let mut app = create_test_app();
+        app.prometheus = prom::PromClient::new(format!("http://{address}"));
+        let mut panel = test_panel("Up", PanelType::Graph);
+        panel.exprs = vec!["up".to_string()];
+        panel.legends = vec![None];
+        panel.query_modes = vec![QueryMode::Range];
+        app.panels = vec![panel];
+        app.annotations =
+            crate::annotations::AnnotationState::from_provider(Some(Box::new(HandshakeProvider {
+                provider_started,
+                metrics_started,
+            })));
+
+        tokio::time::timeout(Duration::from_secs(2), app.refresh())
+            .await
+            .expect("annotation and Prometheus refresh did not start concurrently")
+            .unwrap();
+        http_task.await.unwrap();
+        assert!(app.panels[0].last_error.is_none());
     }
 
     #[tokio::test]

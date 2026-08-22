@@ -16,11 +16,17 @@ grafatui --prometheus-url http://prometheus.example.com:9090
 
 ## Import a Grafana Dashboard
 
-Export a Grafana dashboard as JSON, then pass it to Grafatui:
+Export a Grafana dashboard using the **Classic** JSON model, then pass it to
+Grafatui. In Grafana 13, choose **Export as code → Advanced options → Model:
+Classic**:
 
 ```bash
 grafatui --prometheus-url http://localhost:9090 --grafana-json ./dashboard.json
 ```
+
+V1 Resource, V2 Resource, and YAML dashboard files are not currently
+supported. See [Grafana Dashboard Import](grafana-dashboard-import.md) for the
+full export procedure.
 
 Override dashboard variables with repeated `--var` options:
 

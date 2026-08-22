@@ -8,7 +8,7 @@ oriented around two priorities:
 2. **User-visible product value** - parity work should make real dashboards
    easier to read, debug, and share.
 
-> **Current version**: 0.1.10 · **Status**: Active development, pre-1.0
+> **Current version**: 0.1.11 · **Status**: Active development, pre-1.0
 
 **Legend**:
 - 🟢 Low complexity · 🟡 Medium complexity · 🔴 High complexity
@@ -38,7 +38,7 @@ These features are shipped and available today:
 | UI | **Mouse support** | Click to select, scroll, drag cursor in fullscreen inspect mode |
 | UI | **Value inspection** | Cursor-based point-in-time data exploration |
 | UI | **Series toggling** | Show/hide individual series with `1`-`9` |
-| Annotations | **External JSONL point annotations (iteration 1)** | Read-only JSONL events on graph/timeseries panels, counted same-column markers, inline inspection, export, and recording parity |
+| Annotations | **External annotation providers (iterations 1–3)** | Read-only file/command JSONL events on graph/timeseries panels, targeting, tag filtering, bounded provider protocol, concurrent refresh, export, and recording parity |
 | Rendering | **Smart caching** | Request deduplication and caching for identical queries |
 | Rendering | **Downsampling** | Max-pooling to preserve peaks while fitting the terminal |
 | Rendering | **Adaptive time labels** | Date/time axis labels adjust to the selected range |
@@ -62,12 +62,27 @@ refreshed alongside parity work so it stays aligned with the current release.
 
 | Iteration | Scope | Status |
 |---|---|---|
-| 1 | External JSONL point annotations | ✅ Implemented by the current iteration-1 PR |
-| 2 | Navigable annotation popup, panel targeting, and tag filtering | 📋 Future PR |
-| 3 | Annotation provider API | 📋 Future PR |
+| 1 | External JSONL point annotations | ✅ Shipped |
+| 2 | Navigable annotation popup, panel targeting, and tag filtering | ✅ Shipped |
+| 3 | Bounded command provider protocol and Prometheus-coordinated refresh | ✅ Implemented by this PR |
 
 These iterations are separate from Grafana `annotations` and `annotations.list`,
 which remain unsupported.
+
+### Provider Ecosystem and Integrations (Post-Core)
+
+| Item | User value | Complexity | Status |
+|---|---|---|---|
+| Independent provider scheduling and redraw | Refresh slow providers without coupling them to Prometheus redraws | 🟡 | 📋 |
+| Stable public Rust provider API | Build supported native providers outside Grafatui | 🟡 | 📋 |
+| Possible Python SDK | Make provider authoring accessible without Rust | 🟡 | 💡 |
+| Long-running providers | Reuse authenticated clients and streams safely | 🔴 | 📋 |
+| Multiple annotation sources | Combine independent event systems in one overlay | 🔴 | 📋 |
+| Range events | Show maintenance windows and other duration-based annotations | 🟡 | 📋 |
+| Stable event IDs | Support deduplication and reliable provider updates | 🟡 | 📋 |
+| Per-panel tag filters | Let each panel narrow the shared annotation stream | 🟡 | 📋 |
+| Reference/community CI/CD providers | Turn durable CI/CD deployment records into useful overlays | 🟡 | 📋 |
+| HTTP, Grafana, and vendor adapters | Add integrations only where demonstrated demand exists | 🔴 | 💡 |
 
 ---
 
@@ -179,6 +194,24 @@ This is the main backlog, ordered by Grafana parity domain.
 | **Mixed datasource warnings** | Mixed panels and unsupported datasources | Makes unsupported imports clear | 🟢 | 📋 |
 | **Loki support** | Logs datasource and logs panel | Useful terminal observability companion | 🔴 | 💡 |
 | **InfluxDB support** | Influx datasource | Broadens dashboard compatibility | 🔴 | 💡 |
+
+### 9. Grafana Dashboard Schema v2
+
+The first v2 milestone is format compatibility: accept JSON resources with the
+exact `dashboard.grafana.app/v2` API version and map the subset that has an
+existing Grafatui equivalent. Unsupported v2-only layout semantics must fail
+with a clear import error rather than silently changing the dashboard.
+
+| Feature | Grafana field / behavior | User value | Complexity | Status |
+|---|---|---|---|---|
+| **V2 Resource JSON compatibility** | `apiVersion: dashboard.grafana.app/v2` with a `GridLayout` | Imports Grafana 13's default JSON format without requiring a Classic export | 🔴 | 🔜 |
+| **Rows layout** | `RowsLayout` and nested row layouts | Preserves dashboard grouping and collapsed sections | 🔴 | 📋 |
+| **Tabs layout** | `TabsLayout` and nested tabs | Preserves tabbed dashboard organization | 🔴 | 📋 |
+| **Auto-grid layout** | `AutoGridLayout` | Preserves automatic panel placement and sizing | 🔴 | 📋 |
+| **Repeat and dynamic layouts** | Layout and element `repeat` settings | Expands panels or groups from variable values | 🔴 | 📋 |
+| **Conditional rendering** | `conditionalRendering` on supported containers | Shows or hides content using v2 conditions | 🔴 | 📋 |
+| **Nested layout variables** | Variables scoped to rows and tabs | Preserves local variable scope in dynamic dashboards | 🔴 | 📋 |
+| **V2 Resource YAML** | YAML representation of the v2 resource | Supports Grafana's alternative as-code export format | 🟡 | 💡 |
 
 ---
 
