@@ -1,18 +1,31 @@
 # Grafana Dashboard Import
 
-Grafatui can import Grafana dashboard JSON files and render supported panels in the terminal.
+Grafatui can import Grafana Classic dashboard JSON files and render supported
+panels in the terminal.
+
+> Grafatui does not yet support Grafana V1 Resource or V2 Resource files. The
+> `--grafana-json` option expects a non-resource Classic JSON object with
+> top-level fields such as `title`, `panels`, and `templating`. YAML exports are
+> also unsupported. V2 Resource JSON support is tracked in
+> [issue #79](https://github.com/fedexist/grafatui/issues/79).
 
 ## Export From Grafana
 
 1. Open the dashboard in Grafana.
-2. Open dashboard settings.
-3. Choose the JSON model view.
-4. Copy the JSON into a local file.
-5. Run Grafatui with `--grafana-json`.
+2. In the toolbar, open **Export** and select **Export as code**.
+3. Expand **Advanced options**.
+4. Set **Model** to **Classic**.
+5. Download the file, or copy the JSON into a local `.json` file.
+6. Run Grafatui with `--grafana-json`.
 
 ```bash
 grafatui --prometheus-url http://localhost:9090 --grafana-json ./node-exporter.json
 ```
+
+Grafana 13 defaults to the V2 Resource model. Selecting **Classic** is required
+until Grafatui adds V2 Resource compatibility. Grafana documents the available
+models and export controls in
+[Export a dashboard as code](https://grafana.com/docs/grafana/latest/visualizations/dashboards/share-dashboards-panels/#export-a-dashboard-as-code).
 
 ## Supported Panel Types
 

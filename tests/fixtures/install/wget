@@ -1,0 +1,51 @@
+#!/bin/sh
+
+set -eu
+
+output=''
+url=''
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output-document=*)
+      output="${1#--output-document=}"
+      ;;
+    --output-document|-O)
+      shift
+      output="$1"
+      ;;
+    http://*|https://*)
+      url="$1"
+      ;;
+  esac
+  shift
+done
+
+printf '%s\n' "${url}" >> "${TEST_DOWNLOAD_LOG}"
+
+case "${url}" in
+  */grafatui-checksums.txt)
+    if [ "${TEST_CHECKSUM_MODE}" = 'missing' ]; then
+      printf '  HTTP/1.1 404 Not Found\n' >&2
+      exit 8
+    fi
+    cp "${TEST_CHECKSUMS}" "${output}"
+    ;;
+  *.tar.gz)
+    cp "${TEST_ARCHIVE}" "${output}"
+    ;;
+  *)
+    printf 'unexpected URL: %s\n' "${url}" >&2
+    exit 2
+    ;;
+esac
+
+case "${url}" in
+  */releases/latest/download/*)
+    prefix="${url%%/releases/latest/download/*}"
+    filename="${url##*/}"
+    printf '  HTTP/1.1 302 Found\n  Location: %s/releases/download/%s/%s\n' \
+      "${prefix}" "${TEST_RESOLVED_TAG:-v0.1.11}" "${filename}" >&2
+    ;;
+esac
+printf '  HTTP/1.1 200 OK\n' >&2

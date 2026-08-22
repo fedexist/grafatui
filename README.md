@@ -12,7 +12,19 @@
 
 ## Quick Start
 
-Install from crates.io:
+Install with Homebrew on macOS or Linux:
+
+```bash
+brew install fedexist/grafatui/grafatui
+```
+
+Or install the latest prebuilt binary:
+
+```bash
+bash -o pipefail -c 'curl --proto =https --tlsv1.2 -LsSf https://raw.githubusercontent.com/fedexist/grafatui/main/install.sh | bash'
+```
+
+Or install from crates.io:
 
 ```bash
 cargo install grafatui
@@ -36,13 +48,13 @@ cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheu
 ## Features
 
 - Prometheus range and instant queries with async fetching.
-- Grafana dashboard JSON import for graph, timeseries, stat, gauge, bar gauge, table, and heatmap panels.
+- Grafana Classic dashboard JSON import for graph, timeseries, stat, gauge, bar gauge, table, and heatmap panels.
 - Template variables, Grafana built-in PromQL variables, legend formatting, thresholds, and grid layout support.
 - Grafana timeseries draw styles for lines, points, bars, area fill, hidden axes, and per-panel grid visibility.
 - Keyboard-first navigation, panel search, fullscreen mode, mouse selection, and value inspection.
 - SVG/PNG export and changed-frame recording bundles.
 - TOML configuration and built-in themes.
-- Read-only external JSONL point annotations with panel targeting, tag filtering, and navigable cluster details.
+- Read-only external file or command-backed JSONL point annotations with panel targeting, tag filtering, and navigable cluster details.
 
 ## Documentation
 
@@ -72,10 +84,18 @@ grafatui --theme tokyo-night
 # Overlay read-only JSONL point events
 grafatui --grafana-json ./dashboard.json --annotations-file ./events.jsonl
 
+# Query read-only annotations through a command provider
+grafatui --grafana-json ./dashboard.json --annotations-command ./target/debug/examples/git_annotation_provider --annotations-command-arg=.
+
 # Generate shell completions or a man page
 grafatui completions zsh
 grafatui man
 ```
+
+Grafana 13 users must export the dashboard with **Model: Classic** under
+**Export as code → Advanced options**. See the
+[dashboard import guide](https://fedexist.github.io/grafatui/grafana-dashboard-import.html)
+for the current format requirements.
 
 ## Contributing
 

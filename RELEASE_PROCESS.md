@@ -144,6 +144,7 @@ GitHub Actions workflow that:
 GitHub Actions workflow that:
 - Triggers on GitHub release creation or manual dispatch
 - Builds and uploads release assets for each supported target
+- Publishes `grafatui-checksums.txt` with SHA-256 hashes for the Unix archives
 - Updates the `fedexist/homebrew-grafatui` tap after assets are uploaded
 - Recomputes all platform-specific SHA256 values in the Homebrew formula
 

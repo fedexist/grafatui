@@ -1,13 +1,15 @@
 # External Annotations
 
-Grafatui can overlay read-only, external point events from one JSONL file. It
-never edits or writes the source file. External JSONL is deliberately separate
-from Grafana dashboard annotations: Grafatui does not implement Grafana
-annotation queries, APIs, `annotations`, or `annotations.list`.
+Grafatui can overlay read-only, external point events from exactly one source:
+a JSONL file or a command provider. It never edits or writes either source.
+External annotations are deliberately separate from Grafana dashboard
+annotations: Grafatui does not implement Grafana annotation queries, APIs,
+`annotations`, or `annotations.list`.
 
 ## Enable Annotations
 
-Pass the source path on the command line:
+Select exactly one source. For a file source, pass the path on the command
+line:
 
 ```bash
 grafatui \
@@ -15,14 +17,67 @@ grafatui \
   --annotations-file ./events.jsonl
 ```
 
-Or configure the same single source in TOML:
+Or configure the file source in TOML:
 
 ```toml
 annotations_file = "./events.jsonl"
 ```
 
-The CLI option overrides the configured path. This source is opt-in and
-read-only; Grafatui does not create, edit, or otherwise write the file.
+For a command source, configure an executable that accepts the request protocol
+below. The command receives no shell interpolation:
+
+```toml
+[annotations_command]
+program = "./target/debug/examples/git_annotation_provider"
+args = ["."]
+timeout = "10s"
+```
+
+Or select it from the command line:
+
+```bash
+grafatui \
+  --grafana-json ./dashboard.json \
+  --annotations-command ./target/debug/examples/git_annotation_provider \
+  --annotations-command-arg=.
+```
+
+File and command sources are mutually exclusive. A TOML configuration that
+sets both is rejected even if the CLI selects a source. A CLI file or command
+replaces the complete TOML annotation source; it never mixes a CLI program,
+arguments, or timeout with TOML values. Sources are opt-in and read-only;
+Grafatui does not create, edit, or otherwise write them.
+
+## Command Provider Protocol
+
+Grafatui writes exactly one version-1 request line to the command's standard
+input, then closes stdin. The request defines the complete refresh window:
+
+```json
+{"version":1,"range":{"from":"2026-08-12T10:00:00Z","to":"2026-08-12T10:05:00Z"}}
+```
+
+`range.from` and `range.to` are inclusive UTC RFC 3339 bounds. Grafatui
+defensively applies its visible-range filtering to the events returned.
+
+The provider writes zero or more existing JSONL events to stdout and diagnostics
+to stderr. Exit `0` with valid bounded JSONL replaces the complete annotation
+snapshot; an empty successful stdout clears it. A spawn failure, timeout,
+nonzero exit, invalid UTF-8 or JSONL, or oversized stdout keeps the last valid
+snapshot and shows a warning.
+
+The default timeout is 10 seconds. Grafatui accepts at most 10 MiB of stdout
+and captures at most 64 KiB of stderr. Providers inherit Grafatui's current
+directory and environment. Put credentials in that environment or use standard
+credential tooling; never place secrets in dashboard JSON or command arguments.
+
+The included Git provider is a practical starting point:
+
+```bash
+cargo build --example git_annotation_provider
+printf '%s\n' '{"version":1,"range":{"from":"2026-08-12T10:00:00Z","to":"2026-08-12T10:05:00Z"}}' \
+  | ./target/debug/examples/git_annotation_provider .
+```
 
 ## JSONL Event Format and Targeting
 
@@ -125,11 +180,13 @@ event details.
 
 ## Automatic Reload, Rendering, and Exports
 
-Grafatui checks the file metadata during each normal refresh, including while
-markers are hidden. When it changes, Grafatui reads, parses, and validates the
-full candidate file before atomically replacing the snapshot. A zero-byte file
-is a valid update that clears all events. Annotation loading is independent of
-Prometheus: annotation failures never fail startup or a Prometheus refresh.
+Grafatui refreshes both source types during each normal refresh, including
+while markers are hidden. It checks a file source's metadata and, when it
+changes, reads, parses, and validates the full candidate file before atomically
+replacing the snapshot. A zero-byte file is a valid update that clears all
+events. Command and Prometheus refreshes share the same time range, start
+together, and redraw together. Annotation loading is independent of Prometheus:
+annotation failures never fail startup or a Prometheus refresh.
 
 Only `graph` and `timeseries` panels receive annotation markers. Press `a` to
 toggle marker visibility. Events that project to the same terminal column are
@@ -144,16 +201,36 @@ the tag-filter and cluster modal chrome is not.
 
 ## Errors and Last Valid Snapshot
 
-If the file is missing, unreadable, or contains a malformed event, Grafatui
-keeps rendering the last valid snapshot and shows an annotation warning. A bad
-update does not replace the previously loaded events, fail startup, or fail the
-Prometheus refresh.
+If a file is missing, unreadable, or contains a malformed event, Grafatui keeps
+rendering the last valid snapshot and shows an annotation warning. Command
+provider failures follow the same rule. A bad update does not replace the
+previously loaded events, fail startup, or fail the Prometheus refresh.
+
+## CI/CD and Provider Integrations
+
+```text
+CI workflow → durable deployment/release record → command provider query
+            → normalized JSONL point events → Grafatui overlay
+```
+
+GitHub Actions is a useful concrete pattern: let a workflow record deployment,
+release, or workflow outcomes in an API, object store, database, or shared event
+log. A local provider receives Grafatui's requested range and queries that
+system of record, then emits normalized JSONL point events. Useful tags include
+repository, workflow, environment, status, commit, and deployment.
+
+Give the provider credentials through its environment or standard credential
+tooling, never dashboard JSON or command arguments. A shared JSONL file is a
+reasonable source only when the workflow and Grafatui genuinely share storage;
+do not commit an ever-growing event log to the application repository.
+Vendor-specific providers should normally live as user or community plugins.
+Built-in integrations remain demand-driven.
 
 ## Current Limits and Roadmap
 
-This feature supports one external JSONL source, point events, panel-title
-routing, and one global runtime-only tag filter. It has no stable event IDs, no
-per-panel tag filters, no multiple sources, no editing, and no provider or API
-work. It does not add Grafana annotation-query/API compatibility. Range events
-and a provider API remain future roadmap work. `--validate` validates Grafana
-dashboard imports only; it does not validate annotations.
+This feature supports one external file or command source, point events,
+panel-title routing, and one global runtime-only tag filter. It has no stable
+event IDs, no per-panel tag filters, no multiple sources, and no editing. It
+does not add Grafana annotation-query/API compatibility. Range events, stable
+event IDs, and per-panel tag filters remain deferred. `--validate` validates
+Grafana dashboard imports only; it does not validate annotations.
