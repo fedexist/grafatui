@@ -1,0 +1,70 @@
+#!/bin/sh
+
+set -eu
+
+output=''
+write_out=''
+headers=''
+url=''
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output|-o)
+      shift
+      output="$1"
+      ;;
+    --write-out|-w)
+      shift
+      write_out="$1"
+      ;;
+    --dump-header|-D)
+      shift
+      headers="$1"
+      ;;
+    http://*|https://*)
+      url="$1"
+      ;;
+  esac
+  shift
+done
+
+printf '%s\n' "${url}" >> "${TEST_DOWNLOAD_LOG}"
+
+case "${url}" in
+  */grafatui-checksums.txt)
+    if [ "${TEST_CHECKSUM_MODE}" = 'missing' ]; then
+      [ -z "${write_out}" ] || printf '404'
+      exit 22
+    fi
+    cp "${TEST_CHECKSUMS}" "${output}"
+    ;;
+  *.tar.gz)
+    cp "${TEST_ARCHIVE}" "${output}"
+    if [ -n "${TEST_CURL_READY_FILE:-}" ]; then
+      : > "${TEST_CURL_READY_FILE}"
+    fi
+    if [ -n "${TEST_CURL_DELAY_SECONDS:-}" ]; then
+      sleep "${TEST_CURL_DELAY_SECONDS}"
+    fi
+    ;;
+  *)
+    printf 'unexpected URL: %s\n' "${url}" >&2
+    exit 2
+    ;;
+esac
+
+if [ -n "${headers}" ]; then
+  case "${url}" in
+    */releases/latest/download/*)
+      prefix="${url%%/releases/latest/download/*}"
+      filename="${url##*/}"
+      printf 'HTTP/1.1 302 Found\nLocation: %s/releases/download/%s/%s\n\nHTTP/1.1 200 OK\n' \
+        "${prefix}" "${TEST_RESOLVED_TAG:-v0.1.11}" "${filename}" > "${headers}"
+      ;;
+    *)
+      printf 'HTTP/1.1 200 OK\n' > "${headers}"
+      ;;
+  esac
+fi
+
+[ -z "${write_out}" ] || printf '200'

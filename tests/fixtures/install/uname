@@ -1,0 +1,16 @@
+#!/bin/sh
+
+set -eu
+
+case "${1:-}" in
+  -s)
+    printf '%s\n' "${TEST_UNAME_S}"
+    ;;
+  -m)
+    printf '%s\n' "${TEST_UNAME_M}"
+    ;;
+  *)
+    printf 'unsupported uname arguments: %s\n' "$*" >&2
+    exit 2
+    ;;
+esac

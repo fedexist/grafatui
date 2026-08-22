@@ -1,0 +1,4 @@
+interface:
+  display_name: "Testing Ratatui TUIs"
+  short_description: "Test Ratatui TUIs with screenshots and PTYs"
+  default_prompt: "Use $testing-ratatui-tuis to validate this Ratatui TUI change with deterministic screenshots and PTY interactions."
