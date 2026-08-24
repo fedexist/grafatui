@@ -243,7 +243,12 @@ fn build_footer_detail(app: &AppState) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{export::ExportOptions, prom::PromClient, theme::Theme};
+    use crate::{
+        app::{GridUnit, PanelType, SeriesView, YAxisMode},
+        export::ExportOptions,
+        prom::PromClient,
+        theme::Theme,
+    };
     use ratatui::{Terminal, backend::TestBackend};
 
     fn test_app() -> AppState {
@@ -280,6 +285,156 @@ mod tests {
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
             options: crate::app::PanelOptions::None,
+        }
+    }
+
+    fn v2_compatibility_app() -> AppState {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("dashboards")
+            .join("grafana_v2_compatibility.json");
+        let dashboard = crate::grafana::load_grafana_dashboard(&path).unwrap();
+        let skipped_panels = dashboard.skipped_panels;
+        let title = dashboard.title;
+        let panels = dashboard
+            .queries
+            .into_iter()
+            .map(|panel| {
+                let series = match panel.panel_type {
+                    PanelType::Graph => vec![SeriesView {
+                        name: "200".to_string(),
+                        value: Some(4.0),
+                        points: vec![
+                            (1_699_999_940.0, 1.0),
+                            (1_699_999_970.0, 3.0),
+                            (1_700_000_000.0, 4.0),
+                        ],
+                        visible: true,
+                    }],
+                    PanelType::Stat => vec![SeriesView {
+                        name: "Memory".to_string(),
+                        value: Some(128.0),
+                        points: vec![
+                            (1_699_999_940.0, 120.0),
+                            (1_699_999_970.0, 124.0),
+                            (1_700_000_000.0, 128.0),
+                        ],
+                        visible: true,
+                    }],
+                    other => panic!("unexpected V2 example panel type: {other:?}"),
+                };
+                PanelState {
+                    title: panel.title,
+                    exprs: panel.exprs,
+                    legends: panel.legends,
+                    query_modes: panel.query_modes,
+                    series,
+                    last_error: None,
+                    last_url: None,
+                    last_samples: 3,
+                    grid: panel.grid.map(|grid| GridUnit {
+                        x: grid.x,
+                        y: grid.y,
+                        w: grid.w,
+                        h: grid.h,
+                    }),
+                    y_axis_mode: YAxisMode::Auto,
+                    panel_type: panel.panel_type,
+                    thresholds: panel.thresholds,
+                    min: panel.min,
+                    max: panel.max,
+                    autogrid: panel.autogrid,
+                    display: panel.display,
+                    options: panel.options,
+                }
+            })
+            .collect();
+        let mut app = AppState::new(
+            PromClient::new("http://127.0.0.1:9".to_string()),
+            std::time::Duration::from_secs(60),
+            std::time::Duration::from_secs(5),
+            std::time::Duration::from_secs(5),
+            format!("{title} (imported)"),
+            panels,
+            skipped_panels,
+            Theme::default(),
+            "dashed-line".to_string(),
+            ExportOptions::default(),
+        );
+        app.view_end_ts = 1_700_000_000;
+        app
+    }
+
+    fn terminal_text(terminal: &Terminal<TestBackend>) -> String {
+        let buffer = terminal.backend().buffer();
+        let area = buffer.area;
+        (area.y..area.bottom())
+            .map(|y| {
+                (area.x..area.right())
+                    .map(|x| buffer.cell((x, y)).unwrap().symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn v2_example_fixed_grid_renders_at_supported_viewports() {
+        for (width, height) in [(120, 30), (80, 24)] {
+            let mut app = v2_compatibility_app();
+            assert_eq!(app.panels.len(), 2);
+            assert_eq!(app.selected_panel, 0);
+            assert_eq!(app.skipped_panels, 0);
+            assert_eq!(app.panels[0].panel_type, PanelType::Graph);
+            assert_eq!(app.panels[1].panel_type, PanelType::Stat);
+            assert_eq!(
+                app.panels[0]
+                    .grid
+                    .map(|grid| (grid.x, grid.y, grid.w, grid.h)),
+                Some((0, 0, 16, 8))
+            );
+            assert_eq!(
+                app.panels[1]
+                    .grid
+                    .map(|grid| (grid.x, grid.y, grid.w, grid.h)),
+                Some((16, 0, 8, 8))
+            );
+
+            let rects = crate::ui::visible_panel_rects(Rect::new(0, 0, width, height), &app);
+            assert_eq!(rects.len(), 2);
+            assert_eq!((rects[0].1, rects[1].1), (0, 1));
+            let (left, right) = (rects[0].0, rects[1].0);
+            assert_eq!(left.y, right.y);
+            assert_eq!(left.height, right.height);
+            assert_eq!(left.width, right.width * 2);
+            assert!(left.right() <= right.x);
+
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+            let text = terminal_text(&terminal);
+            assert!(text.contains("HTTP Request Rate by Status Code"));
+            assert!(text.contains("Process Resident"));
+            assert!(text.contains("panels=2 (skipped 0)"));
+            assert!(!text.contains("No panels"));
+            assert!(!text.contains("panic"));
+            assert_eq!(
+                terminal
+                    .backend()
+                    .buffer()
+                    .cell((left.x, left.y))
+                    .unwrap()
+                    .fg,
+                app.theme.border_selected
+            );
+            assert_eq!(
+                terminal
+                    .backend()
+                    .buffer()
+                    .cell((right.x, right.y))
+                    .unwrap()
+                    .fg,
+                app.theme.border
+            );
         }
     }
 
