@@ -75,6 +75,15 @@ behavior used by Gauge, Bar Gauge, and Table panels.
 Demonstrates threshold rendering, threshold marker styles, and explicit field
 min/max bounds.
 
+### `grafana_v2_compatibility.json`
+An exact Grafana V2 resource with a `GridLayout`, a dynamic Prometheus `job`
+variable, refresh settings, and two supported panels. Run it against the bundled
+demo stack:
+
+```bash
+cargo run -- --grafana-json examples/dashboards/grafana_v2_compatibility.json --prometheus-url http://localhost:19090
+```
+
 ### Usage
 
 ```bash

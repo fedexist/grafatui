@@ -44,6 +44,11 @@ When creating test dashboards for new features:
 3. Document them in `examples/README.md`
 4. Use realistic Prometheus queries that work with `prometheus_http_*` metrics
 
+### UI/UX Example Rule
+
+Every new UI/UX feature must update an existing example or add a new one. Each
+example must remain compatible with the bundled mock/demo environment.
+
 ## Project Structure
 
 ```

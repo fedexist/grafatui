@@ -1,0 +1,38 @@
+{
+  "title": "Compatibility",
+  "refresh": "30s",
+  "panels": [{
+    "type": "timeseries",
+    "title": "Requests",
+    "gridPos": {"x": 1, "y": 2, "w": 12, "h": 8},
+    "targets": [
+      {"expr": "hidden", "hide": true},
+      {"expr": "rate(requests_total{job=\"$job\"}[5m])", "legendFormat": "{{instance}}", "instant": false}
+    ],
+    "fieldConfig": {"defaults": {
+      "unit": "reqps", "decimals": 1, "noValue": "n/a", "min": 0, "max": 100,
+      "thresholds": {"mode": "absolute", "steps": [{"value": null, "color": "green"}, {"value": 80, "color": "red"}]},
+      "custom": {"drawStyle": "bars", "showPoints": "always", "fillOpacity": 25, "axisPlacement": "hidden", "lineInterpolation": "smooth", "stacking": {"mode": "normal"}, "axisGridShow": false, "thresholdsStyle": {"mode": "dashed"}}
+    }},
+    "options": {}
+  }],
+  "templating": {
+    "list": [
+      {
+        "name": "job",
+        "type": "query",
+        "query": "label_values(up, job)",
+        "definition": "label_values(up, job)",
+        "current": {"text": "api", "value": "api"},
+        "regex": "/api|worker/",
+        "allValue": ".*"
+      },
+      {
+        "name": "region",
+        "type": "custom",
+        "query": "eu-west-1",
+        "current": {"text": "eu-west-1", "value": "eu-west-1"}
+      }
+    ]
+  }
+}

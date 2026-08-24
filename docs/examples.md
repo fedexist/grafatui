@@ -30,6 +30,12 @@ docker-compose down -v
 - `examples/dashboards/all_visualizations.json`: compact dashboard showing the supported visualization types, including timeseries bars, area fill, point mode, and hidden-axis examples.
 - `examples/dashboards/instant_queries.json`: demonstrates explicit instant targets and the default instant behavior for summary panels.
 - `examples/dashboards/thresholds_demo.json`: demonstrates thresholds, field bounds, and threshold marker rendering.
+- `examples/dashboards/grafana_v2_compatibility.json`: exact Grafana V2 resource with a `GridLayout`, a dynamic Prometheus `job` variable, refresh settings, and two supported panels. Run it with:
+
+  ```bash
+  cargo run -- --grafana-json examples/dashboards/grafana_v2_compatibility.json --prometheus-url http://localhost:19090
+  ```
+
 - `examples/demo/vllm/grafana.json`: vLLM-oriented dashboard for the mock demo services.
 
 ## More Detail
