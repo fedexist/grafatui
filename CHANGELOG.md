@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.1.12] - 2026-08-24
+
+### ⛰️  Features
+
+- Add shell installer ([5508d64](https://github.com/fedexist/grafatui/commit/5508d6476aa96662612c216cc9b11f22d123a396))
+
+### 📚 Documentation
+
+- Clarify Grafana dashboard export compatibility ([facf84a](https://github.com/fedexist/grafatui/commit/facf84a39de35c8194d20de3c43c8b0c347b6aaf))
+- Add Homebrew installation ([adee71d](https://github.com/fedexist/grafatui/commit/adee71d4133122a4dd503e3971231a99a8cf66c9))
+
+### 🧪 Testing
+
+- Include gzip in installer fixture path ([37e0867](https://github.com/fedexist/grafatui/commit/37e0867664000bdf91c98338052c062cc9c99936))
+- Cover Grafana v2 dashboard rendering ([f251f38](https://github.com/fedexist/grafatui/commit/f251f38c8242887e6fcce68e0549ea43a5b161c5))
+
+
 ## [0.1.11] - 2026-08-12
 
 ### ⛰️  Features
