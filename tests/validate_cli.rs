@@ -13,6 +13,21 @@ fn write_dashboard(name: &str, json: &str) -> PathBuf {
     path
 }
 
+fn fixture(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("grafana")
+        .join(name)
+}
+
+fn example_dashboard(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("dashboards")
+        .join(name)
+}
+
 #[test]
 fn validate_strict_exits_nonzero_when_warnings_exist() {
     let path = write_dashboard(
@@ -36,6 +51,45 @@ fn validate_strict_exits_nonzero_when_warnings_exist() {
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("warning[grafana.import.skipped_panel]"));
     assert!(stderr.contains("validation failed with 1 warning(s)"));
+}
+
+#[test]
+fn validate_strict_accepts_classic_transformations_without_warnings() {
+    let path = write_dashboard(
+        "classic-transformations",
+        r#"{
+            "title": "Classic transformations",
+            "panels": [{
+                "type": "timeseries",
+                "title": "CPU",
+                "targets": [{"expr": "up"}],
+                "transformations": [{"id": "reduce"}]
+            }]
+        }"#,
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+        .args([
+            "--validate",
+            "--strict",
+            "--format",
+            "json",
+            "--grafana-json",
+        ])
+        .arg(&path)
+        .output()
+        .unwrap();
+    fs::remove_file(path).unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summary["panel_count"], 1);
+    assert_eq!(summary["diagnostics"], serde_json::json!([]));
 }
 
 #[test]
@@ -74,4 +128,80 @@ fn validate_json_outputs_machine_readable_summary() {
     assert_eq!(summary["panel_count"], 1);
     assert_eq!(summary["diagnostics"][0]["code"], "skipped_panel");
     assert_eq!(summary["diagnostics"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn validate_accepts_supported_v2_resource_json() {
+    let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+        .args(["--validate", "--format", "json", "--grafana-json"])
+        .arg(fixture("v2_compatibility.json"))
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summary["title"], "Compatibility");
+    assert_eq!(summary["panel_count"], 1);
+    assert_eq!(summary["diagnostics"], serde_json::json!([]));
+}
+
+#[test]
+fn validate_accepts_live_grafana_v2_compatibility_example() {
+    let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+        .args(["--validate", "--format", "json", "--grafana-json"])
+        .arg(example_dashboard("grafana_v2_compatibility.json"))
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summary["title"], "Grafana V2 Compatibility");
+    assert_eq!(summary["panel_count"], 2);
+    assert_eq!(summary["diagnostics"], serde_json::json!([]));
+}
+
+#[test]
+fn validate_rejects_unsupported_v2_layout() {
+    let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+        .args(["--validate", "--grafana-json"])
+        .arg(fixture("v2_rows_layout.json"))
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("RowsLayout"));
+    assert!(stderr.contains("spec.layout.kind"));
+    assert!(stderr.contains("GridLayout"));
+}
+
+#[test]
+fn validate_strict_rejects_v2_unsupported_datasource_warning() {
+    let mut value: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(fixture("v2_compatibility.json")).unwrap())
+            .unwrap();
+    value["spec"]["elements"]["panel-1"]["spec"]["data"]["spec"]["queries"][1]["spec"]["query"]["group"] =
+        "loki".into();
+    let path = write_dashboard("v2-strict", &value.to_string());
+
+    let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+        .args(["--validate", "--strict", "--grafana-json"])
+        .arg(&path)
+        .output()
+        .unwrap();
+    fs::remove_file(path).unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("warning[grafana.import.unsupported_datasource]"));
+    assert!(stderr.contains("validation failed with 1 warning(s)"));
 }
