@@ -4,11 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-## [0.1.12] - 2026-08-24
+## [0.1.12] - 2026-08-25
 
 ### ⛰️  Features
 
 - Add shell installer ([5508d64](https://github.com/fedexist/grafatui/commit/5508d6476aa96662612c216cc9b11f22d123a396))
+- Add Ratatui TUI testing skill ([179cb34](https://github.com/fedexist/grafatui/commit/179cb347a6d23c777740088a55f5d8b298a790bf))
+- Add Grafana v2 resource JSON compatibility ([350a171](https://github.com/fedexist/grafatui/commit/350a171094fe5195c6053f75984e6d5cd63baa85))
+
+### 🐛 Bug Fixes
+
+- Allow `release_tag` input to override the default GitHub ref for RPM asset uploads ([0d93f4f](https://github.com/fedexist/grafatui/commit/0d93f4f916959e70bfdae054f861935671e93e38))
 
 ### 📚 Documentation
 
