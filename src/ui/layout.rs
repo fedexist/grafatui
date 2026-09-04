@@ -210,7 +210,10 @@ pub(crate) fn visible_panel_rects(area: Rect, app: &AppState) -> Vec<(Rect, usiz
     });
 
     if app.mode == AppMode::Fullscreen || app.mode == AppMode::FullscreenInspect {
-        return vec![(inner_area, app.selected_panel)];
+        return app
+            .selected_panel_index()
+            .map(|index| vec![(inner_area, index)])
+            .unwrap_or_default();
     }
 
     if app.panels.iter().any(|p| p.grid.is_some()) {

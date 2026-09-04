@@ -143,7 +143,7 @@ async fn main() -> Result<()> {
     let prom = prom::PromClient::new(prometheus_url);
 
     // Build panels from Grafana import or simple queries.
-    let (title, panels, skipped_panels) = if let Some(path) = dashboard_path {
+    let (title, panels, skipped_panels, imported_layout) = if let Some(path) = dashboard_path {
         let d = grafana::load_grafana_dashboard(&path)?;
         let import_context = build_import_context(&d, config.vars.clone(), &args.var);
         print_import_diagnostics(&import_context.diagnostics);
@@ -179,10 +179,20 @@ async fn main() -> Result<()> {
                 options: q.options,
             })
             .collect();
-        (format!("{} (imported)", d.title), ps, d.skipped_panels)
+        (
+            format!("{} (imported)", d.title),
+            ps,
+            d.skipped_panels,
+            Some(d.layout),
+        )
     } else {
         merge_user_vars(&mut vars, config.vars.clone(), &args.var);
-        ("grafatui".to_string(), app::default_queries(args.query), 0)
+        (
+            "grafatui".to_string(),
+            app::default_queries(args.query),
+            0,
+            None,
+        )
     };
 
     // Determine theme
@@ -221,6 +231,7 @@ async fn main() -> Result<()> {
         }
         .validate()?,
     );
+    apply_imported_layout(&mut state, imported_layout);
     state.annotations = annotations::AnnotationState::from_source(annotation_source);
     state.autogrid_enabled = autogrid_enabled;
     state.autogrid_color = autogrid_color;
@@ -256,6 +267,15 @@ async fn main() -> Result<()> {
     terminal.show_cursor()?;
 
     res
+}
+
+fn apply_imported_layout(
+    state: &mut app::AppState,
+    imported_layout: Option<dashboard::DashboardLayout>,
+) {
+    if let Some(layout) = imported_layout {
+        state.apply_layout(layout);
+    }
 }
 
 fn load_startup_config(path: Option<std::path::PathBuf>) -> Result<Config> {
@@ -459,6 +479,7 @@ fn print_validation_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dashboard::{DashboardLayout, DashboardLayoutItem, DashboardRow, RowId};
 
     fn temp_config_path(name: &str) -> std::path::PathBuf {
         let suffix = std::time::SystemTime::now()
@@ -469,6 +490,33 @@ mod tests {
             "grafatui-{name}-{}-{suffix}.toml",
             std::process::id()
         ))
+    }
+
+    #[test]
+    fn imported_layout_replaces_the_initial_flat_layout() {
+        let mut state = app::AppState::new(
+            prom::PromClient::new("http://localhost:9090".to_string()),
+            Duration::from_secs(60),
+            Duration::from_secs(5),
+            Duration::from_secs(1),
+            "test".to_string(),
+            app::default_queries(vec!["up".to_string()]),
+            0,
+            Theme::default(),
+            "dashed-line".to_string(),
+            export::ExportOptions::default(),
+        );
+        let layout = DashboardLayout::new(vec![DashboardLayoutItem::Row(DashboardRow::new(
+            RowId::new(0),
+            "Collapsed",
+            true,
+            false,
+            vec![DashboardLayoutItem::Panel(0)],
+        ))]);
+
+        apply_imported_layout(&mut state, Some(layout));
+
+        assert_eq!(state.visible_panel_indices(), Vec::<usize>::new());
     }
 
     #[test]
