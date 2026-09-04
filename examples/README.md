@@ -84,6 +84,16 @@ demo stack:
 cargo run -- --grafana-json examples/dashboards/grafana_v2_compatibility.json --prometheus-url http://localhost:19090
 ```
 
+### `grafana_v2_rows.json`
+An exact Grafana V2 `RowsLayout` resource demonstrating expanded, nested, and
+initially collapsed rows with three Prometheus panels. It also includes a
+hidden-header container, whose child panel flows directly beneath its parent
+row. Run it against the bundled demo stack:
+
+```bash
+cargo run -- --grafana-json examples/dashboards/grafana_v2_rows.json --prometheus-url http://localhost:19090
+```
+
 ### Usage
 
 ```bash

@@ -170,6 +170,24 @@ fn validate_accepts_live_grafana_v2_compatibility_example() {
 }
 
 #[test]
+fn validate_accepts_live_grafana_v2_rows_example() {
+    let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+        .args(["--validate", "--format", "json", "--grafana-json"])
+        .arg(example_dashboard("grafana_v2_rows.json"))
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summary["title"], "Grafana V2 Rows");
+    assert_eq!(summary["panel_count"], 3);
+}
+
+#[test]
 fn validate_accepts_v2_rows_layout() {
     let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
         .args(["--validate", "--format", "json", "--grafana-json"])
