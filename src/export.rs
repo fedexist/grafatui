@@ -294,13 +294,30 @@ pub(crate) fn render_svg(app: &AppState, viewport: Rect) -> String {
     .unwrap();
     render_header(app, &mut out, width, &text, &border);
 
-    for (rect, index) in ui::visible_panel_rects(viewport, app) {
-        let Some(panel) = app.panels.get(index) else {
-            continue;
-        };
-        let selected = Some(index) == app.selected_panel_index();
-        let panel_rect = scaled_rect(rect);
-        render_panel(app, index, panel, panel_rect, selected, &mut out);
+    for item in ui::visible_dashboard_rects(viewport, app) {
+        let selected = app.selected_item == Some(item.id);
+        match item.kind {
+            ui::DashboardRectKind::Panel { index } => {
+                let Some(panel) = app.panels.get(index) else {
+                    continue;
+                };
+                let panel_rect = scaled_rect(item.rect);
+                render_panel(app, index, panel, panel_rect, selected, &mut out);
+            }
+            ui::DashboardRectKind::Row {
+                row_id,
+                depth,
+                collapsed,
+            } => render_row_header(
+                app,
+                row_id,
+                depth,
+                collapsed,
+                scaled_rect(item.rect),
+                selected,
+                &mut out,
+            ),
+        }
     }
 
     render_footer(app, &mut out, width, height, &text, &border);
@@ -320,9 +337,63 @@ fn render_header(app: &AppState, out: &mut String, width: f64, text: &str, borde
         app.title,
         humantime::format_duration(app.range),
         humantime::format_duration(app.step),
-        app.panels.len()
+        displayed_panel_count(app)
     );
     write_text(out, width / 2.0, 31.0, &title, text, "middle", FONT_SIZE);
+}
+
+fn displayed_panel_count(app: &AppState) -> String {
+    let total = app.panels.len();
+    let visible = if app
+        .layout
+        .items
+        .iter()
+        .all(|item| matches!(item, crate::dashboard::DashboardLayoutItem::Panel(_)))
+    {
+        total
+    } else {
+        app.layout.visible_panel_count()
+    };
+    if visible == total {
+        total.to_string()
+    } else {
+        format!("{visible}/{total}")
+    }
+}
+
+fn render_row_header(
+    app: &AppState,
+    row_id: crate::dashboard::RowId,
+    depth: usize,
+    collapsed: bool,
+    rect: PlotRect,
+    selected: bool,
+    out: &mut String,
+) {
+    let Some(row) = app.layout.row(row_id) else {
+        return;
+    };
+    let color = color_hex(
+        if selected {
+            app.theme.border_selected
+        } else {
+            app.theme.border
+        },
+        "#555555",
+    );
+    let marker = if collapsed { '▶' } else { '▼' };
+    let title = format!("{marker} {}{}", "  ".repeat(depth), row.title);
+    write_rect(out, rect, "none", &color, if selected { 2.0 } else { 1.0 });
+    write_styled_text(
+        out,
+        rect.left + 4.0,
+        rect.top + (rect.height * 0.75),
+        &title,
+        &color,
+        "start",
+        FONT_SIZE,
+        selected,
+    );
 }
 
 fn render_footer(
@@ -1483,6 +1554,26 @@ fn write_text(out: &mut String, x: f64, y: f64, text: &str, color: &str, anchor:
     .unwrap();
 }
 
+#[allow(clippy::too_many_arguments)]
+fn write_styled_text(
+    out: &mut String,
+    x: f64,
+    y: f64,
+    text: &str,
+    color: &str,
+    anchor: &str,
+    size: f64,
+    bold: bool,
+) {
+    let weight = if bold { r#" font-weight="bold""# } else { "" };
+    write!(
+        out,
+        r#"<text x="{x:.2}" y="{y:.2}" fill="{color}" font-size="{size:.1}" text-anchor="{anchor}"{weight}>{}</text>"#,
+        escape_xml(text)
+    )
+    .unwrap();
+}
+
 fn write_rect(out: &mut String, rect: PlotRect, fill: &str, stroke: &str, stroke_width: f64) {
     write!(
         out,
@@ -1657,6 +1748,9 @@ mod tests {
         GraphAxisPlacement, GraphDrawStyle, GraphOptions, GraphPointMode, GraphStackingMode,
         PanelOptions, PanelState, SeriesView, YAxisMode,
     };
+    use crate::dashboard::{
+        DashboardItemId, DashboardLayout, DashboardLayoutItem, DashboardRow, RowId,
+    };
 
     fn test_panel(start: f64) -> PanelState {
         PanelState {
@@ -1714,6 +1808,35 @@ mod tests {
     fn test_app_with_panel_type(panel_type: PanelType) -> AppState {
         let mut app = test_app(ExportOptions::default());
         app.panels[0].panel_type = panel_type;
+        app
+    }
+
+    fn nested_row_export_app() -> AppState {
+        let mut app = test_app(ExportOptions {
+            dir: test_export_dir("nested-row"),
+            format: ExportFormat::Svg,
+            record_max_frames: 10,
+        });
+        app.panels.push(test_panel(app.view_end_ts as f64 - 100.0));
+        app.panels[0].title = "Visible child".to_string();
+        app.panels[1].title = "Collapsed child".to_string();
+        app.layout = DashboardLayout::new(vec![DashboardLayoutItem::Row(DashboardRow::new(
+            RowId::new(0),
+            "Expanded",
+            false,
+            false,
+            vec![
+                DashboardLayoutItem::Panel(0),
+                DashboardLayoutItem::Row(DashboardRow::new(
+                    RowId::new(1),
+                    "Nested",
+                    true,
+                    false,
+                    vec![DashboardLayoutItem::Panel(1)],
+                )),
+            ],
+        ))]);
+        app.selected_item = Some(DashboardItemId::Row(RowId::new(0)));
         app
     }
 
@@ -1841,6 +1964,89 @@ mod tests {
         assert!(svg.contains("CPU &lt;main&gt;"));
         assert!(svg.contains("<line "));
         assert!(svg.contains("<path "));
+    }
+
+    #[test]
+    fn svg_renders_rows_and_omits_collapsed_descendants() {
+        let app = nested_row_export_app();
+
+        let svg = render_svg(&app, Rect::new(0, 0, 100, 40));
+
+        assert!(svg.contains("▼ Expanded"));
+        assert!(svg.contains("▶   Nested"));
+        assert!(svg.contains("Visible child"));
+        assert!(!svg.contains("Collapsed child"));
+    }
+
+    #[test]
+    fn svg_selected_row_uses_theme_style_and_escapes_title() {
+        let mut app = nested_row_export_app();
+        app.layout = DashboardLayout::new(vec![DashboardLayoutItem::Row(DashboardRow::new(
+            RowId::new(0),
+            "Expanded <&>",
+            false,
+            false,
+            vec![DashboardLayoutItem::Panel(0)],
+        ))]);
+
+        let svg = render_svg(&app, Rect::new(0, 0, 100, 40));
+
+        assert!(svg.contains("▼ Expanded &lt;&amp;&gt;"));
+        assert!(svg.contains(r##"stroke="#d6c343" stroke-width="2.00""##));
+        assert!(svg.contains(r#"font-weight="bold""#));
+        assert!(svg.contains("panels=1/2"));
+    }
+
+    #[test]
+    fn svg_keeps_hidden_header_rows_transparent() {
+        let mut app = nested_row_export_app();
+        app.layout = DashboardLayout::new(vec![DashboardLayoutItem::Row(DashboardRow::new(
+            RowId::new(0),
+            "Hidden row",
+            true,
+            true,
+            vec![DashboardLayoutItem::Panel(0)],
+        ))]);
+
+        let svg = render_svg(&app, Rect::new(0, 0, 100, 40));
+
+        assert!(svg.contains("Visible child"));
+        assert!(!svg.contains("Hidden row"));
+        assert!(svg.contains("panels=1/2"));
+    }
+
+    #[test]
+    fn toggling_a_header_only_row_changes_the_recorded_frame() {
+        let mut app = test_app(ExportOptions {
+            dir: test_export_dir("header-only-row-recording"),
+            format: ExportFormat::Svg,
+            record_max_frames: 10,
+        });
+        app.layout = DashboardLayout::new(vec![DashboardLayoutItem::Row(DashboardRow::new(
+            RowId::new(0),
+            "Header only",
+            false,
+            false,
+            vec![],
+        ))]);
+        app.selected_item = Some(DashboardItemId::Row(RowId::new(0)));
+        start_recording(&mut app, Rect::new(0, 0, 100, 40)).unwrap();
+        let expanded_svg = app.recording.as_ref().unwrap().last_svg.clone().unwrap();
+
+        app.layout.set_row_collapsed(RowId::new(0), true).unwrap();
+        capture_recording_frame(&mut app, Rect::new(0, 0, 100, 40)).unwrap();
+
+        let recording = app.recording.as_ref().unwrap();
+        assert!(expanded_svg.contains("▼ Header only"));
+        assert!(
+            recording
+                .last_svg
+                .as_deref()
+                .unwrap()
+                .contains("▶ Header only")
+        );
+        assert_ne!(recording.last_svg.as_deref().unwrap(), expanded_svg);
+        assert_eq!(recording.frame_count, 2);
     }
 
     #[test]
