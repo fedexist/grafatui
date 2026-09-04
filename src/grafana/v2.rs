@@ -31,13 +31,6 @@ pub(super) fn adapt(value: Value) -> Result<model::Dashboard> {
     let title = require_string_from(spec, "title", "spec.title")?.to_string();
     let elements = require_object_from(spec, "elements", "spec.elements")?;
     let layout = require_object_from(spec, "layout", "spec.layout")?;
-    let layout_kind = require_string_from(layout, "kind", "spec.layout.kind")?;
-    ensure!(
-        layout_kind == "GridLayout",
-        "unsupported Grafana V2 layout `{layout_kind}` at spec.layout.kind; this release supports `GridLayout` only"
-    );
-    let layout_spec = require_object_from(layout, "spec", "spec.layout.spec")?;
-    let items = require_array_from(layout_spec, "items", "spec.layout.spec.items")?;
 
     let mut dashboard = model::Dashboard {
         title,
@@ -57,8 +50,41 @@ pub(super) fn adapt(value: Value) -> Result<model::Dashboard> {
         ),
     };
     dashboard.variables = normalize_variables(spec, &mut dashboard.diagnostics)?;
+    dashboard.layout = parse_layout(layout, elements, "spec.layout", &mut dashboard.diagnostics)?;
+    dashboard.skipped_panels += dashboard
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "unsupported_element")
+        .count();
+    Ok(dashboard)
+}
+
+fn parse_layout(
+    layout: &JsonObject,
+    elements: &JsonObject,
+    path: &str,
+    diagnostics: &mut Vec<super::ImportDiagnostic>,
+) -> Result<Vec<model::LayoutNode>> {
+    match require_string_from(layout, "kind", &format!("{path}.kind"))? {
+        "GridLayout" => parse_grid_layout(layout, elements, path, diagnostics),
+        "RowsLayout" => parse_rows_layout(layout, elements, path, diagnostics),
+        kind => anyhow::bail!("unsupported Grafana V2 layout `{kind}` at {path}.kind"),
+    }
+}
+
+fn parse_grid_layout(
+    layout: &JsonObject,
+    elements: &JsonObject,
+    path: &str,
+    diagnostics: &mut Vec<super::ImportDiagnostic>,
+) -> Result<Vec<model::LayoutNode>> {
+    let spec_path = format!("{path}.spec");
+    let spec = require_object_from(layout, "spec", &spec_path)?;
+    let items_path = format!("{spec_path}.items");
+    let items = require_array_from(spec, "items", &items_path)?;
+    let mut nodes = Vec::new();
     for (index, item) in items.iter().enumerate() {
-        let item_path = format!("spec.layout.spec.items[{index}]");
+        let item_path = format!("{items_path}[{index}]");
         let grid = parse_grid_item(item, &item_path)?;
         let element_path = format!("spec.elements[{:?}]", grid.element_name);
         let element = elements.get(&grid.element_name).ok_or_else(|| {
@@ -67,18 +93,80 @@ pub(super) fn adapt(value: Value) -> Result<model::Dashboard> {
                 grid.element_name
             )
         })?;
-        if let Some(panel) = parse_panel(
-            element,
-            &element_path,
-            grid.position,
-            &mut dashboard.diagnostics,
-        )? {
-            dashboard.layout.push(model::LayoutNode::Panel(panel));
-        } else {
-            dashboard.skipped_panels += 1;
+        if let Some(panel) = parse_panel(element, &element_path, grid.position, diagnostics)? {
+            nodes.push(model::LayoutNode::Panel(panel));
         }
     }
-    Ok(dashboard)
+    Ok(nodes)
+}
+
+fn parse_rows_layout(
+    layout: &JsonObject,
+    elements: &JsonObject,
+    path: &str,
+    diagnostics: &mut Vec<super::ImportDiagnostic>,
+) -> Result<Vec<model::LayoutNode>> {
+    let spec_path = format!("{path}.spec");
+    let spec = require_object_from(layout, "spec", &spec_path)?;
+    let rows_path = format!("{spec_path}.rows");
+    let rows = require_array_from(spec, "rows", &rows_path)?;
+    let mut nodes = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        let row_path = format!("{rows_path}[{index}]");
+        let row = row
+            .as_object()
+            .ok_or_else(|| anyhow!("invalid Grafana V2 row at {row_path}: expected an object"))?;
+        require_expected_kind(row, &row_path, "RowsLayoutRow")?;
+        let row_spec_path = format!("{row_path}.spec");
+        let row_spec = require_object_from(row, "spec", &row_spec_path)?;
+        let title = match row_spec.get("title") {
+            None => String::new(),
+            Some(Value::String(title)) => title.clone(),
+            Some(_) => anyhow::bail!(
+                "invalid Grafana V2 resource at {row_spec_path}.title: expected a string"
+            ),
+        };
+        let collapsed = optional_bool_from(row_spec, "collapse", &row_spec_path)?;
+        let hidden_header = optional_bool_from(row_spec, "hideHeader", &row_spec_path)?;
+
+        for (field, description) in [
+            ("repeat", "repeated row"),
+            ("conditionalRendering", "conditional row rendering"),
+        ] {
+            ensure!(
+                !row_spec.contains_key(field),
+                "unsupported Grafana V2 {description} at {row_spec_path}.{field}"
+            );
+        }
+
+        let variables_path = format!("{row_spec_path}.variables");
+        match row_spec.get("variables") {
+            None => {}
+            Some(Value::Array(variables)) => ensure!(
+                variables.is_empty(),
+                "unsupported Grafana V2 row variables at {variables_path}"
+            ),
+            Some(_) => {
+                anyhow::bail!("invalid Grafana V2 resource at {variables_path}: expected an array")
+            }
+        }
+
+        if optional_bool_from(row_spec, "fillScreen", &row_spec_path)? {
+            anyhow::bail!("unsupported Grafana V2 full-screen row at {row_spec_path}.fillScreen");
+        }
+
+        let child_path = format!("{row_spec_path}.layout");
+        let child_layout = require_object_from(row_spec, "layout", &child_path)?;
+        let children = parse_layout(child_layout, elements, &child_path, diagnostics)?;
+        nodes.push(model::LayoutNode::Row(model::Row {
+            title,
+            collapsed,
+            hidden_header,
+            source_path: row_path,
+            children,
+        }));
+    }
+    Ok(nodes)
 }
 
 fn normalize_variables(
@@ -265,6 +353,14 @@ fn require_bool_from(object: &JsonObject, key: &str, path: &str) -> Result<bool>
         .get(key)
         .and_then(Value::as_bool)
         .ok_or_else(|| anyhow!("invalid Grafana V2 resource at {path}: expected a boolean"))
+}
+
+fn optional_bool_from(object: &JsonObject, key: &str, path: &str) -> Result<bool> {
+    match object.get(key) {
+        None => Ok(false),
+        Some(Value::Bool(value)) => Ok(*value),
+        Some(_) => anyhow::bail!("invalid Grafana V2 resource at {path}.{key}: expected a boolean"),
+    }
 }
 
 fn require_i32_from(object: &JsonObject, key: &str, path: &str) -> Result<i32> {

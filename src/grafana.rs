@@ -406,6 +406,40 @@ mod tests {
         })
     }
 
+    fn v2_row_resource_with_field(field: &str, value: serde_json::Value) -> serde_json::Value {
+        let mut json = valid_v2_resource();
+        let mut row_spec = serde_json::json!({
+            "title": "Row",
+            "layout": {"kind": "GridLayout", "spec": {"items": []}}
+        });
+        row_spec
+            .as_object_mut()
+            .unwrap()
+            .insert(field.into(), value);
+        json["spec"]["layout"] = serde_json::json!({
+            "kind": "RowsLayout",
+            "spec": {
+                "rows": [{"kind": "RowsLayoutRow", "spec": row_spec}]
+            }
+        });
+        json
+    }
+
+    fn make_v2_panel_importable(json: &mut serde_json::Value) {
+        json["spec"]["elements"]["panel-1"]["spec"]["data"]["spec"]["queries"] = serde_json::json!([{
+            "kind": "PanelQuery",
+            "spec": {
+                "hidden": false,
+                "refId": "A",
+                "query": {
+                    "kind": "DataQuery",
+                    "group": "prometheus",
+                    "spec": {"expr": "up"}
+                }
+            }
+        }]);
+    }
+
     #[test]
     fn v2_fixed_grid_panel_matches_classic_semantics() {
         let classic = parse_grafana_dashboard(include_str!(
@@ -497,14 +531,222 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_v2_layouts() {
-        for kind in ["RowsLayout", "TabsLayout", "AutoGridLayout"] {
+        for kind in ["TabsLayout", "AutoGridLayout"] {
             let json = minimal_v2_with_layout(serde_json::json!({"kind": kind, "spec": {}}));
             let error = parse_grafana_dashboard(&json.to_string())
                 .unwrap_err()
                 .to_string();
             assert!(error.contains(kind));
             assert!(error.contains("spec.layout.kind"));
-            assert!(error.contains("GridLayout"));
+        }
+    }
+
+    #[test]
+    fn v2_rows_import_expanded_collapsed_and_nested_content() {
+        let dashboard = parse_grafana_dashboard(include_str!(
+            "../tests/fixtures/grafana/v2_rows_layout.json"
+        ))
+        .unwrap();
+
+        assert_eq!(dashboard.queries.len(), 3);
+        assert_eq!(dashboard.layout.visible_panel_indices(), vec![0]);
+    }
+
+    #[test]
+    fn v2_rows_hidden_header_is_transparent_even_when_collapsed() {
+        let mut json = valid_v2_resource();
+        make_v2_panel_importable(&mut json);
+        let grid = json["spec"]["layout"].clone();
+        json["spec"]["layout"] = serde_json::json!({
+            "kind": "RowsLayout",
+            "spec": {"rows": [{
+                "kind": "RowsLayoutRow",
+                "spec": {
+                    "title": "Hidden",
+                    "collapse": true,
+                    "hideHeader": true,
+                    "layout": grid
+                }
+            }]}
+        });
+
+        let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+
+        assert_eq!(dashboard.queries.len(), 1);
+        assert_eq!(dashboard.layout.visible_panel_indices(), vec![0]);
+        assert_eq!(dashboard.layout.visible_items().len(), 1);
+    }
+
+    #[test]
+    fn v2_rows_reject_deferred_semantics_at_native_paths() {
+        for (field, value) in [
+            (
+                "repeat",
+                serde_json::json!({"mode": "variable", "value": "job"}),
+            ),
+            (
+                "conditionalRendering",
+                serde_json::json!({"kind": "ConditionalRenderingGroup", "spec": {}}),
+            ),
+            (
+                "variables",
+                serde_json::json!([{"kind": "TextVariable", "spec": {"name": "x"}}]),
+            ),
+            ("fillScreen", serde_json::json!(true)),
+        ] {
+            let error =
+                parse_grafana_dashboard(&v2_row_resource_with_field(field, value).to_string())
+                    .unwrap_err()
+                    .to_string();
+            assert!(
+                error.contains(&format!("spec.layout.spec.rows[0].spec.{field}")),
+                "unexpected error for {field}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn v2_rows_default_absent_title_to_empty_string() {
+        let mut json = valid_v2_resource();
+        let grid = json["spec"]["layout"].clone();
+        json["spec"]["layout"] = serde_json::json!({
+            "kind": "RowsLayout",
+            "spec": {"rows": [{
+                "kind": "RowsLayoutRow",
+                "spec": {"layout": grid}
+            }]}
+        });
+
+        let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+
+        assert_eq!(
+            dashboard
+                .layout
+                .row(crate::dashboard::RowId::new(0))
+                .unwrap()
+                .title,
+            ""
+        );
+    }
+
+    #[test]
+    fn v2_rows_default_absent_collapse_and_hide_header_to_false() {
+        let mut json = valid_v2_resource();
+        make_v2_panel_importable(&mut json);
+        let grid = json["spec"]["layout"].clone();
+        json["spec"]["layout"] = serde_json::json!({
+            "kind": "RowsLayout",
+            "spec": {"rows": [{
+                "kind": "RowsLayoutRow",
+                "spec": {"title": "Defaults", "layout": grid}
+            }]}
+        });
+
+        let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+        let row = dashboard
+            .layout
+            .row(crate::dashboard::RowId::new(0))
+            .unwrap();
+
+        assert!(!row.collapsed);
+        assert!(!row.hidden_header);
+        assert_eq!(dashboard.layout.visible_panel_indices(), vec![0]);
+        assert_eq!(
+            dashboard
+                .layout
+                .visible_items()
+                .into_iter()
+                .map(|item| item.id)
+                .collect::<Vec<_>>(),
+            vec![
+                crate::dashboard::DashboardItemId::Row(crate::dashboard::RowId::new(0)),
+                crate::dashboard::DashboardItemId::Panel(0),
+            ]
+        );
+    }
+
+    #[test]
+    fn v2_rows_accept_empty_deferred_fields() {
+        for (field, value) in [
+            ("variables", serde_json::json!([])),
+            ("fillScreen", serde_json::json!(false)),
+        ] {
+            let dashboard =
+                parse_grafana_dashboard(&v2_row_resource_with_field(field, value).to_string())
+                    .unwrap();
+            assert!(dashboard.layout.visible_panel_indices().is_empty());
+        }
+    }
+
+    #[test]
+    fn v2_rows_reject_malformed_rows_at_native_paths() {
+        let cases = [
+            (
+                serde_json::json!({"kind": "RowsLayout", "spec": {"rows": {}}}),
+                "spec.layout.spec.rows",
+            ),
+            (
+                serde_json::json!({"kind": "RowsLayout", "spec": {"rows": [null]}}),
+                "spec.layout.spec.rows[0]",
+            ),
+            (
+                serde_json::json!({"kind": "RowsLayout", "spec": {"rows": [{"kind": "GridLayoutItem", "spec": {}}]}}),
+                "spec.layout.spec.rows[0].kind",
+            ),
+            (
+                serde_json::json!({"kind": "RowsLayout", "spec": {"rows": [{"kind": "RowsLayoutRow", "spec": []}]}}),
+                "spec.layout.spec.rows[0].spec",
+            ),
+            (
+                serde_json::json!({"kind": "RowsLayout", "spec": {"rows": [{"kind": "RowsLayoutRow", "spec": {"title": 7, "layout": {"kind": "GridLayout", "spec": {"items": []}}}}]}}),
+                "spec.layout.spec.rows[0].spec.title",
+            ),
+            (
+                serde_json::json!({"kind": "RowsLayout", "spec": {"rows": [{"kind": "RowsLayoutRow", "spec": {"title": "Row", "layout": []}}]}}),
+                "spec.layout.spec.rows[0].spec.layout",
+            ),
+        ];
+
+        for (layout, expected_path) in cases {
+            let json = minimal_v2_with_layout(layout);
+            let error = parse_grafana_dashboard(&json.to_string())
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains(expected_path),
+                "expected {expected_path}, got {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn v2_rows_reject_non_boolean_options_at_native_paths() {
+        for field in ["collapse", "hideHeader", "fillScreen"] {
+            let error = parse_grafana_dashboard(
+                &v2_row_resource_with_field(field, serde_json::json!("false")).to_string(),
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(
+                error.contains(&format!("spec.layout.spec.rows[0].spec.{field}")),
+                "unexpected error for {field}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn v2_rows_reject_nested_unsupported_layouts_at_native_paths() {
+        for kind in ["TabsLayout", "AutoGridLayout"] {
+            let json =
+                v2_row_resource_with_field("layout", serde_json::json!({"kind": kind, "spec": {}}));
+            let error = parse_grafana_dashboard(&json.to_string())
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(kind));
+            assert!(
+                error.contains("spec.layout.spec.rows[0].spec.layout.kind"),
+                "unexpected error for {kind}: {error}"
+            );
         }
     }
 
