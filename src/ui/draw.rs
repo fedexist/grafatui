@@ -14,9 +14,10 @@
  * limitations under the License.
  */
 
-use super::layout::{calculate_grid_layout, calculate_two_column_layout, centered_rect};
+use super::layout::{DashboardRectKind, centered_rect, visible_dashboard_rects};
 use super::panels::render_panel;
 use crate::app::{AppMode, AppState, PanelState};
+use crate::{dashboard::DashboardRow, theme::Theme};
 use humantime::format_duration;
 use ratatui::{
     prelude::*,
@@ -42,7 +43,7 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
         app.title,
         format_duration(app.range),
         format_duration(app.step),
-        app.panels.len(),
+        normal_panel_count(app),
         if app.is_live() { "" } else { "⏸ PAUSED " }
     );
     let title_block = Block::default()
@@ -69,33 +70,38 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
                 render_panel(frame, inner_area, panel_index, p, app, true, app.cursor_x);
         }
     } else {
-        let has_grid = app.panels.iter().any(|p| p.grid.is_some());
-
-        let panel_rects = if has_grid {
-            calculate_grid_layout(inner_area, app)
-        } else {
-            calculate_two_column_layout(inner_area, app)
-        };
-
-        for (rect, panel_idx) in &panel_rects {
-            // eprintln!("Rendering panel {} at {:?}", panel_idx, rect);
-            if let Some(p) = app.panels.get(*panel_idx) {
-                let is_selected = Some(*panel_idx) == app.selected_panel_index();
-                let rendered_cluster =
-                    render_panel(frame, *rect, *panel_idx, p, app, is_selected, app.cursor_x);
-                if is_selected {
-                    selected_rendered_cluster = rendered_cluster;
+        for item in visible_dashboard_rects(size, app) {
+            match item.kind {
+                DashboardRectKind::Panel { index } => {
+                    if let Some(panel) = app.panels.get(index) {
+                        let is_selected = app.selected_item == Some(item.id);
+                        let rendered_cluster = render_panel(
+                            frame,
+                            item.rect,
+                            index,
+                            panel,
+                            app,
+                            is_selected,
+                            app.cursor_x,
+                        );
+                        if is_selected {
+                            selected_rendered_cluster = rendered_cluster;
+                        }
+                    }
+                }
+                DashboardRectKind::Row { row_id, depth, .. } => {
+                    if let Some(row) = app.layout.row(row_id) {
+                        render_row_header(
+                            frame,
+                            item.rect,
+                            row,
+                            depth,
+                            app.selected_item == Some(item.id),
+                            &app.theme,
+                        );
+                    }
                 }
             }
-        }
-
-        if !has_grid && app.panels.is_empty() {
-            // No panels to render
-        } else if has_grid {
-            // Check if we need to render extras (panels without grid)
-            // The calculate_grid_layout should handle extras too?
-            // The original code handled extras by stacking them below.
-            // Let's make calculate_grid_layout return extras too.
         }
     }
     app.rendered_annotation_cluster = selected_rendered_cluster;
@@ -106,7 +112,7 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
         if app.mode == AppMode::Fullscreen || app.mode == AppMode::FullscreenInspect {
             "1 (Fullscreen)".to_string()
         } else {
-            format!("{}", app.panels.len())
+            normal_panel_count(app)
         };
 
     let mode_display = match app.mode {
@@ -141,7 +147,7 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
     if app.mode == AppMode::Search {
         let area = centered_rect(60, 20, size);
         let block = Block::default()
-            .title(" Search Panels ")
+            .title(" Search Dashboard ")
             .borders(Borders::ALL)
             .border_style(Style::default().fg(app.theme.border_selected));
         frame.render_widget(Clear, area); // Clear background
@@ -165,16 +171,19 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
         let results: Vec<ListItem> = app
             .search_results
             .iter()
-            .filter_map(|item| {
-                let crate::dashboard::DashboardItemId::Panel(index) = item else {
-                    return None;
-                };
-                let panel = app.panels.get(*index)?;
-                Some(ListItem::new(format!("• {}", panel.title)))
+            .filter_map(|item| match item {
+                crate::dashboard::DashboardItemId::Row(row_id) => {
+                    let row = app.layout.row(*row_id)?;
+                    let marker = if row.collapsed { '▶' } else { '▼' };
+                    Some(ListItem::new(format!("{marker} {}", row.title)))
+                }
+                crate::dashboard::DashboardItemId::Panel(index) => {
+                    let panel = app.panels.get(*index)?;
+                    Some(ListItem::new(format!("• {}", panel.title)))
+                }
             })
             .collect();
         let list = List::new(results)
-            .block(Block::default().borders(Borders::TOP))
             .highlight_style(
                 Style::default()
                     .fg(app.theme.title)
@@ -191,6 +200,49 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
     }
 
     super::render_annotation_modal(frame, app);
+}
+
+fn normal_panel_count(app: &AppState) -> String {
+    let total = app.panels.len();
+    let visible = if app
+        .layout
+        .items
+        .iter()
+        .all(|item| matches!(item, crate::dashboard::DashboardLayoutItem::Panel(_)))
+    {
+        total
+    } else {
+        app.layout.visible_panel_count()
+    };
+    if visible == total {
+        total.to_string()
+    } else {
+        format!("{visible}/{total}")
+    }
+}
+
+pub(crate) fn render_row_header(
+    frame: &mut Frame,
+    rect: Rect,
+    row: &DashboardRow,
+    depth: usize,
+    selected: bool,
+    theme: &Theme,
+) {
+    let marker = if row.collapsed { '▶' } else { '▼' };
+    let text = format!("{marker} {}{}", "  ".repeat(depth), row.title);
+    let style = Style::default()
+        .fg(if selected {
+            theme.border_selected
+        } else {
+            theme.border
+        })
+        .add_modifier(if selected {
+            Modifier::BOLD
+        } else {
+            Modifier::empty()
+        });
+    frame.render_widget(Paragraph::new(text).style(style), rect);
 }
 
 fn build_footer_detail(app: &AppState) -> String {
@@ -287,6 +339,35 @@ mod tests {
         }
     }
 
+    fn nested_row_app() -> AppState {
+        use crate::dashboard::{
+            DashboardItemId, DashboardLayout, DashboardLayoutItem, DashboardRow, RowId,
+        };
+
+        let mut app = test_app();
+        app.panels = vec![graph_panel("Visible child"), graph_panel("Collapsed child")];
+        app.apply_layout(DashboardLayout::new(vec![DashboardLayoutItem::Row(
+            DashboardRow::new(
+                RowId::new(0),
+                "Expanded",
+                false,
+                false,
+                vec![
+                    DashboardLayoutItem::Panel(0),
+                    DashboardLayoutItem::Row(DashboardRow::new(
+                        RowId::new(1),
+                        "Nested",
+                        true,
+                        false,
+                        vec![DashboardLayoutItem::Panel(1)],
+                    )),
+                ],
+            ),
+        )]));
+        app.selected_item = Some(DashboardItemId::Row(RowId::new(0)));
+        app
+    }
+
     fn v2_compatibility_app() -> AppState {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
@@ -375,6 +456,108 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    fn rect_text(terminal: &Terminal<TestBackend>, rect: Rect) -> String {
+        let buffer = terminal.backend().buffer();
+        (rect.y..rect.bottom())
+            .map(|y| {
+                (rect.x..rect.right())
+                    .map(|x| buffer.cell((x, y)).unwrap().symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn rows_render_disclosures_indentation_selection_and_visible_count() {
+        let mut app = nested_row_app();
+        let row_rects =
+            super::super::layout::visible_dashboard_rects(Rect::new(0, 0, 100, 40), &app);
+        let expanded = row_rects[0].rect;
+        let nested = row_rects[2].rect;
+        let mut terminal = Terminal::new(TestBackend::new(100, 40)).unwrap();
+
+        terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+
+        let text = terminal_text(&terminal);
+        assert!(text.contains("▼ Expanded"));
+        assert!(text.contains("▶   Nested"));
+        assert!(text.contains("Visible child"));
+        assert!(!text.contains("Collapsed child"));
+        assert!(text.contains("panels=1/2"));
+        assert_eq!(
+            terminal
+                .backend()
+                .buffer()
+                .cell((expanded.x, expanded.y))
+                .unwrap()
+                .fg,
+            app.theme.border_selected
+        );
+        assert_eq!(
+            terminal
+                .backend()
+                .buffer()
+                .cell((nested.x, nested.y))
+                .unwrap()
+                .fg,
+            app.theme.border
+        );
+    }
+
+    #[test]
+    fn row_free_dashboard_uses_legacy_count_without_fraction() {
+        let mut app = test_app();
+        app.panels = vec![graph_panel("CPU"), graph_panel("Memory")];
+        app.apply_layout(crate::dashboard::DashboardLayout::flat(2));
+        let mut terminal = Terminal::new(TestBackend::new(100, 40)).unwrap();
+
+        terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+
+        let text = terminal_text(&terminal);
+        assert!(text.contains("panels=2"));
+        assert!(!text.contains("panels=2/2"));
+        assert!(!text.contains('▼'));
+        assert!(!text.contains('▶'));
+    }
+
+    #[test]
+    fn structurally_flat_layout_growth_uses_rendered_panel_count() {
+        let mut app = test_app();
+        app.panels = vec![graph_panel("CPU")];
+        app.apply_layout(crate::dashboard::DashboardLayout::flat(1));
+        app.panels.push(graph_panel("Memory"));
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+
+        terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+
+        let text = terminal_text(&terminal);
+        assert!(text.contains("panels=2"));
+        assert!(!text.contains("panels=1/2"));
+        assert!(text.contains("CPU"));
+        assert!(text.contains("Memory"));
+    }
+
+    #[test]
+    fn row_search_overlay_renders_visible_row_candidate_at_narrow_viewport() {
+        let mut app = nested_row_app();
+        app.mode = AppMode::Search;
+        app.search_query = "Expanded".to_string();
+        app.search_results = vec![crate::dashboard::DashboardItemId::Row(
+            crate::dashboard::RowId::new(0),
+        )];
+        let size = Rect::new(0, 0, 72, 24);
+        let overlay = centered_rect(60, 20, size);
+        let mut terminal = Terminal::new(TestBackend::new(size.width, size.height)).unwrap();
+
+        terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+
+        let text = rect_text(&terminal, overlay);
+        assert!(text.contains("Search Dashboard"));
+        assert!(text.contains("> Expanded"));
+        assert!(text.contains("▼ Expanded"));
     }
 
     #[test]

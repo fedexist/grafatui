@@ -64,11 +64,11 @@ pub(super) async fn handle_key(
     }
 
     let action = match app.mode {
-        AppMode::Search => handle_search_key(key, app),
+        AppMode::Search => handle_search_key(key, terminal_size, app),
         AppMode::Inspect => handle_inspect_key(key, app),
         AppMode::Fullscreen => handle_fullscreen_key(key, app).await?,
         AppMode::FullscreenInspect => handle_fullscreen_inspect_key(key, app),
-        AppMode::Normal => handle_normal_key(key, app).await?,
+        AppMode::Normal => handle_normal_key(key, terminal_size, app).await?,
     };
     Ok(action)
 }
@@ -122,7 +122,7 @@ fn handle_annotation_modal_key(
     InputAction::Redraw
 }
 
-pub(super) fn handle_mouse(
+pub(super) async fn handle_mouse(
     mouse: MouseEvent,
     terminal_size: Size,
     app: &mut AppState,
@@ -134,17 +134,28 @@ pub(super) fn handle_mouse(
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left) => {
             let rect = Rect::new(0, 0, terminal_size.width, terminal_size.height);
-            if let Some((idx, panel_rect)) = ui::hit_test(app, rect, mouse.column, mouse.row) {
-                app.selected_item = Some(DashboardItemId::Panel(idx));
+            if let Some(item) = ui::hit_test(app, rect, mouse.column, mouse.row) {
+                let clicked_disclosure =
+                    matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+                        && item.disclosure_rect.is_some_and(|disclosure| {
+                            disclosure.contains(ratatui::layout::Position {
+                                x: mouse.column,
+                                y: mouse.row,
+                            })
+                        });
+                app.selected_item = Some(item.id);
+                if clicked_disclosure {
+                    app.toggle_selected_row().await?;
+                }
 
                 match app.mode {
                     AppMode::Normal | AppMode::Inspect => {}
                     AppMode::Fullscreen | AppMode::FullscreenInspect => {
                         app.mode = AppMode::FullscreenInspect;
 
-                        let chart_width = panel_rect.width.saturating_sub(2) as f64;
+                        let chart_width = item.rect.width.saturating_sub(2) as f64;
                         if chart_width > 0.0 {
-                            let relative_x = (mouse.column.saturating_sub(panel_rect.x + 1)) as f64;
+                            let relative_x = (mouse.column.saturating_sub(item.rect.x + 1)) as f64;
                             let fraction = (relative_x / chart_width).clamp(0.0, 1.0);
                             let (start_ts, _) = app.time_bounds();
                             app.cursor_x = Some(start_ts + fraction * app.range.as_secs_f64());
@@ -167,7 +178,7 @@ pub(super) fn handle_mouse(
     }
 }
 
-fn handle_search_key(key: KeyEvent, app: &mut AppState) -> InputAction {
+fn handle_search_key(key: KeyEvent, terminal_size: Size, app: &mut AppState) -> InputAction {
     match key.code {
         KeyCode::Esc => {
             app.mode = AppMode::Normal;
@@ -175,11 +186,17 @@ fn handle_search_key(key: KeyEvent, app: &mut AppState) -> InputAction {
             app.search_results.clear();
         }
         KeyCode::Enter => {
-            if let Some(&DashboardItemId::Panel(index)) = app.search_results.first() {
-                app.selected_item = Some(DashboardItemId::Panel(index));
-                app.mode = AppMode::Fullscreen;
+            if let Some(&item) = app.search_results.first() {
+                app.selected_item = Some(item);
+                app.mode = match item {
+                    DashboardItemId::Row(_) => AppMode::Normal,
+                    DashboardItemId::Panel(_) => AppMode::Fullscreen,
+                };
                 app.search_query.clear();
                 app.search_results.clear();
+                if matches!(item, DashboardItemId::Row(_)) {
+                    ensure_selected_item_visible(terminal_size, app);
+                }
             }
         }
         KeyCode::Backspace => {
@@ -271,7 +288,11 @@ fn handle_fullscreen_inspect_key(key: KeyEvent, app: &mut AppState) -> InputActi
     }
 }
 
-async fn handle_normal_key(key: KeyEvent, app: &mut AppState) -> Result<InputAction> {
+async fn handle_normal_key(
+    key: KeyEvent,
+    terminal_size: Size,
+    app: &mut AppState,
+) -> Result<InputAction> {
     let action = match key.code {
         KeyCode::Char('f') if app.selected_panel_index().is_some() => {
             app.mode = AppMode::Fullscreen;
@@ -284,10 +305,24 @@ async fn handle_normal_key(key: KeyEvent, app: &mut AppState) -> Result<InputAct
         }
         KeyCode::Up | KeyCode::Char('k') => {
             app.select_previous_item();
+            ensure_selected_item_visible(terminal_size, app);
             InputAction::Redraw
         }
         KeyCode::Down | KeyCode::Char('j') => {
             app.select_next_item();
+            ensure_selected_item_visible(terminal_size, app);
+            InputAction::Redraw
+        }
+        KeyCode::Enter | KeyCode::Char(' ') if key.modifiers.is_empty() => {
+            app.toggle_selected_row().await?;
+            InputAction::Redraw
+        }
+        KeyCode::Left if key.modifiers.is_empty() => {
+            app.set_selected_row_collapsed(true).await?;
+            InputAction::Redraw
+        }
+        KeyCode::Right if key.modifiers.is_empty() => {
+            app.set_selected_row_collapsed(false).await?;
             InputAction::Redraw
         }
         KeyCode::PageUp => {
@@ -323,6 +358,45 @@ async fn handle_normal_key(key: KeyEvent, app: &mut AppState) -> Result<InputAct
         _ => shared_key_action(handle_shared_keys(key, app).await?),
     };
     Ok(action)
+}
+
+fn ensure_selected_item_visible(terminal_size: Size, app: &mut AppState) {
+    let Some(selected) = app.selected_item else {
+        return;
+    };
+    let area = Rect::new(0, 0, terminal_size.width, terminal_size.height);
+    let is_visible = |app: &AppState| {
+        ui::visible_dashboard_rects(area, app)
+            .iter()
+            .any(|item| item.id == selected)
+    };
+    if is_visible(app) {
+        return;
+    }
+
+    let current = app.vertical_scroll;
+    let grid_extent = app
+        .panels
+        .iter()
+        .filter_map(|panel| panel.grid)
+        .filter_map(|grid| (grid.y >= 0 && grid.h > 0).then_some(grid.y.saturating_add(grid.h)))
+        .max()
+        .unwrap_or(0) as usize;
+    let search_limit = grid_extent
+        .saturating_add(app.layout.visible_items().len().saturating_mul(4))
+        .saturating_add(1);
+    for distance in 1..=search_limit {
+        for candidate in [
+            current.saturating_sub(distance),
+            current.saturating_add(distance),
+        ] {
+            app.vertical_scroll = candidate;
+            if is_visible(app) {
+                return;
+            }
+        }
+    }
+    app.vertical_scroll = current;
 }
 
 async fn handle_shared_keys(key: KeyEvent, app: &mut AppState) -> Result<SharedKeyResult> {
@@ -401,15 +475,21 @@ fn update_search_results(app: &mut AppState) {
     }
 
     let query = app.search_query.to_lowercase();
-    let visible_panels = app.visible_panel_indices();
     app.search_results = app
-        .panels
-        .iter()
-        .enumerate()
-        .filter(|(index, panel)| {
-            visible_panels.contains(index) && panel.title.to_lowercase().contains(&query)
+        .layout
+        .visible_items()
+        .into_iter()
+        .filter(|item| match item.id {
+            DashboardItemId::Row(row_id) => app
+                .layout
+                .row(row_id)
+                .is_some_and(|row| row.title.to_lowercase().contains(&query)),
+            DashboardItemId::Panel(index) => app
+                .panels
+                .get(index)
+                .is_some_and(|panel| panel.title.to_lowercase().contains(&query)),
         })
-        .map(|(index, _)| DashboardItemId::Panel(index))
+        .map(|item| item.id)
         .collect();
 }
 
@@ -454,6 +534,10 @@ mod tests {
 
     fn ctrl_key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
+    fn shift_key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::SHIFT)
     }
 
     fn size() -> Size {
@@ -531,6 +615,7 @@ mod tests {
             KeyCode::Char('f'),
             KeyCode::Char('v'),
             KeyCode::Char('y'),
+            KeyCode::Char('0'),
             KeyCode::Char('1'),
         ] {
             let mut app = row_selected_app();
@@ -559,6 +644,202 @@ mod tests {
                 "key {code:?} changed series visibility"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn row_keys_toggle_collapse_and_preserve_shift_time_panning() {
+        let mut app = row_selected_app();
+
+        handle_key(key(KeyCode::Enter), size(), &mut app)
+            .await
+            .unwrap();
+        assert!(app.layout.row(RowId::new(0)).unwrap().collapsed);
+        assert_eq!(app.selected_item, Some(DashboardItemId::Row(RowId::new(0))));
+
+        handle_key(key(KeyCode::Char(' ')), size(), &mut app)
+            .await
+            .unwrap();
+        assert!(!app.layout.row(RowId::new(0)).unwrap().collapsed);
+
+        handle_key(key(KeyCode::Left), size(), &mut app)
+            .await
+            .unwrap();
+        assert!(app.layout.row(RowId::new(0)).unwrap().collapsed);
+
+        handle_key(key(KeyCode::Right), size(), &mut app)
+            .await
+            .unwrap();
+        assert!(!app.layout.row(RowId::new(0)).unwrap().collapsed);
+
+        handle_key(shift_key(KeyCode::Left), size(), &mut app)
+            .await
+            .unwrap();
+        assert_eq!(app.time_offset, app.range / 4);
+        assert!(!app.layout.row(RowId::new(0)).unwrap().collapsed);
+
+        handle_key(shift_key(KeyCode::Right), size(), &mut app)
+            .await
+            .unwrap();
+        assert_eq!(app.time_offset, Duration::ZERO);
+        assert!(!app.layout.row(RowId::new(0)).unwrap().collapsed);
+    }
+
+    #[tokio::test]
+    async fn navigation_keys_traverse_visible_rows_and_panels() {
+        let mut app = row_selected_app();
+
+        for code in [KeyCode::Char('j'), KeyCode::Down] {
+            handle_key(key(code), size(), &mut app).await.unwrap();
+        }
+        assert_eq!(app.selected_item, Some(DashboardItemId::Panel(1)));
+        handle_key(key(KeyCode::Down), size(), &mut app)
+            .await
+            .unwrap();
+        assert_eq!(app.selected_item, Some(DashboardItemId::Panel(1)));
+
+        for code in [KeyCode::Char('k'), KeyCode::Up] {
+            handle_key(key(code), size(), &mut app).await.unwrap();
+        }
+        assert_eq!(app.selected_item, Some(DashboardItemId::Row(RowId::new(0))));
+        handle_key(key(KeyCode::Up), size(), &mut app)
+            .await
+            .unwrap();
+        assert_eq!(app.selected_item, Some(DashboardItemId::Row(RowId::new(0))));
+    }
+
+    #[tokio::test]
+    async fn navigation_scrolls_mixed_items_into_a_short_viewport() {
+        let mut app = test_app();
+        app.panels.truncate(1);
+        app.panels[0].grid = Some(crate::app::GridUnit {
+            x: 0,
+            y: 0,
+            w: 24,
+            h: 2,
+        });
+        app.apply_layout(DashboardLayout::new(vec![
+            DashboardLayoutItem::Panel(0),
+            DashboardLayoutItem::Row(DashboardRow::new(
+                RowId::new(0),
+                "Lower row",
+                true,
+                false,
+                vec![],
+            )),
+        ]));
+        let short = Size::new(100, 12);
+        let area = Rect::new(0, 0, short.width, short.height);
+
+        handle_key(key(KeyCode::Char('j')), short, &mut app)
+            .await
+            .unwrap();
+
+        assert_eq!(app.selected_item, Some(DashboardItemId::Row(RowId::new(0))));
+        assert!(
+            ui::visible_dashboard_rects(area, &app)
+                .iter()
+                .any(|item| item.id == DashboardItemId::Row(RowId::new(0)))
+        );
+
+        handle_key(key(KeyCode::Char('k')), short, &mut app)
+            .await
+            .unwrap();
+        assert_eq!(app.selected_item, Some(DashboardItemId::Panel(0)));
+        assert!(
+            ui::visible_dashboard_rects(area, &app)
+                .iter()
+                .any(|item| item.id == DashboardItemId::Panel(0))
+        );
+    }
+
+    #[tokio::test]
+    async fn search_acceptance_scrolls_selected_row_into_a_short_viewport() {
+        let mut app = test_app();
+        app.panels.truncate(1);
+        app.apply_layout(DashboardLayout::new(vec![
+            DashboardLayoutItem::Row(DashboardRow::new(
+                RowId::new(0),
+                "Top row",
+                false,
+                false,
+                vec![DashboardLayoutItem::Panel(0)],
+            )),
+            DashboardLayoutItem::Row(DashboardRow::new(
+                RowId::new(1),
+                "Offscreen row",
+                true,
+                false,
+                vec![],
+            )),
+        ]));
+        let short = Size::new(100, 12);
+        let area = Rect::new(0, 0, short.width, short.height);
+
+        handle_key(key(KeyCode::Char('/')), short, &mut app)
+            .await
+            .unwrap();
+        for character in "Offscreen row".chars() {
+            handle_key(key(KeyCode::Char(character)), short, &mut app)
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            app.search_results,
+            vec![DashboardItemId::Row(RowId::new(1))]
+        );
+
+        handle_key(key(KeyCode::Enter), short, &mut app)
+            .await
+            .unwrap();
+
+        assert_eq!(app.mode, AppMode::Normal);
+        assert_eq!(app.selected_item, Some(DashboardItemId::Row(RowId::new(1))));
+        assert!(app.search_query.is_empty());
+        assert!(app.search_results.is_empty());
+        assert!(app.vertical_scroll > 0);
+        assert!(
+            ui::visible_dashboard_rects(area, &app)
+                .iter()
+                .any(|item| item.id == DashboardItemId::Row(RowId::new(1)))
+        );
+    }
+
+    #[tokio::test]
+    async fn search_includes_visible_rows_and_panels_with_type_specific_acceptance() {
+        let mut app = row_selected_app();
+
+        handle_key(key(KeyCode::Char('/')), size(), &mut app)
+            .await
+            .unwrap();
+        for character in "row".chars() {
+            handle_key(key(KeyCode::Char(character)), size(), &mut app)
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            app.search_results,
+            vec![DashboardItemId::Row(RowId::new(0))]
+        );
+        handle_key(key(KeyCode::Enter), size(), &mut app)
+            .await
+            .unwrap();
+        assert_eq!(app.mode, AppMode::Normal);
+        assert_eq!(app.selected_item, Some(DashboardItemId::Row(RowId::new(0))));
+
+        handle_key(key(KeyCode::Char('/')), size(), &mut app)
+            .await
+            .unwrap();
+        for character in "cpu".chars() {
+            handle_key(key(KeyCode::Char(character)), size(), &mut app)
+                .await
+                .unwrap();
+        }
+        assert_eq!(app.search_results, vec![DashboardItemId::Panel(0)]);
+        handle_key(key(KeyCode::Enter), size(), &mut app)
+            .await
+            .unwrap();
+        assert_eq!(app.mode, AppMode::Fullscreen);
+        assert_eq!(app.selected_item, Some(DashboardItemId::Panel(0)));
     }
 
     fn tagged_event(text: &str, tag: &str) -> crate::annotations::AnnotationEvent {
@@ -822,8 +1103,8 @@ mod tests {
         assert!(app.annotation_modal.is_some());
     }
 
-    #[test]
-    fn mouse_events_do_not_mutate_dashboard_state_while_modal_is_open() {
+    #[tokio::test]
+    async fn mouse_events_do_not_mutate_dashboard_state_while_modal_is_open() {
         let mut app = test_app();
         app.annotations =
             crate::annotations::AnnotationState::from_events_for_test(vec![tagged_event(
@@ -850,12 +1131,58 @@ mod tests {
                 size(),
                 &mut app,
             )
+            .await
             .unwrap();
             assert_eq!(action, InputAction::Redraw);
             assert_eq!(app.selected_panel_index(), Some(1));
             assert_eq!(app.cursor_x, Some(50.0));
             assert_eq!(app.vertical_scroll, 3);
         }
+    }
+
+    #[tokio::test]
+    async fn header_click_selects_row_and_disclosure_click_toggles_it() {
+        let mut app = row_selected_app();
+        app.selected_item = Some(DashboardItemId::Panel(0));
+        let area = Rect::new(0, 0, size().width, size().height);
+        let row_hit = (0..area.height)
+            .flat_map(|y| (0..area.width).map(move |x| (x, y)))
+            .find_map(|(x, y)| {
+                let item = ui::hit_test(&app, area, x, y)?;
+                (item.id == DashboardItemId::Row(RowId::new(0))).then_some(item)
+            })
+            .unwrap();
+        let disclosure = row_hit.disclosure_rect.unwrap();
+
+        handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: row_hit.rect.right() - 1,
+                row: row_hit.rect.y,
+                modifiers: KeyModifiers::NONE,
+            },
+            size(),
+            &mut app,
+        )
+        .await
+        .unwrap();
+        assert_eq!(app.selected_item, Some(DashboardItemId::Row(RowId::new(0))));
+        assert!(!app.layout.row(RowId::new(0)).unwrap().collapsed);
+
+        handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: disclosure.x,
+                row: disclosure.y,
+                modifiers: KeyModifiers::NONE,
+            },
+            size(),
+            &mut app,
+        )
+        .await
+        .unwrap();
+        assert_eq!(app.selected_item, Some(DashboardItemId::Row(RowId::new(0))));
+        assert!(app.layout.row(RowId::new(0)).unwrap().collapsed);
     }
 
     #[tokio::test]

@@ -250,12 +250,14 @@ async fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let res = app::run_app(
-        &mut terminal,
-        &mut state,
-        Duration::from_millis(args.tick_rate),
-    )
-    .await;
+    let res = tokio::select! {
+        res = app::run_app(
+            &mut terminal,
+            &mut state,
+            Duration::from_millis(args.tick_rate),
+        ) => res,
+        _ = tokio::signal::ctrl_c() => Ok(()),
+    };
 
     // Restore terminal
     disable_raw_mode()?;
