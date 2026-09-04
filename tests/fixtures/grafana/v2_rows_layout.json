@@ -4,8 +4,145 @@
   "metadata": {"name": "rows-layout"},
   "spec": {
     "title": "Rows layout",
-    "elements": {},
-    "layout": {"kind": "RowsLayout", "spec": {"rows": []}},
+    "elements": {
+      "panel-1": {
+        "kind": "Panel",
+        "spec": {
+          "id": 1,
+          "title": "Requests",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {"kind": "PanelQuery", "spec": {"hidden": false, "refId": "A", "query": {"kind": "DataQuery", "group": "prometheus", "version": "v0", "spec": {"expr": "requests_total"}}}}
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.0.0",
+            "spec": {"fieldConfig": {"defaults": {}, "overrides": []}, "options": {}}
+          }
+        }
+      },
+      "panel-2": {
+        "kind": "Panel",
+        "spec": {
+          "id": 2,
+          "title": "Errors",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {"kind": "PanelQuery", "spec": {"hidden": false, "refId": "A", "query": {"kind": "DataQuery", "group": "prometheus", "version": "v0", "spec": {"expr": "errors_total"}}}}
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.0.0",
+            "spec": {"fieldConfig": {"defaults": {}, "overrides": []}, "options": {}}
+          }
+        }
+      },
+      "panel-3": {
+        "kind": "Panel",
+        "spec": {
+          "id": 3,
+          "title": "Latency",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {"kind": "PanelQuery", "spec": {"hidden": false, "refId": "A", "query": {"kind": "DataQuery", "group": "prometheus", "version": "v0", "spec": {"expr": "latency_seconds"}}}}
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.0.0",
+            "spec": {"fieldConfig": {"defaults": {}, "overrides": []}, "options": {}}
+          }
+        }
+      }
+    },
+    "layout": {
+      "kind": "RowsLayout",
+      "spec": {
+        "rows": [
+          {
+            "kind": "RowsLayoutRow",
+            "spec": {
+              "title": "Expanded",
+              "collapse": false,
+              "hideHeader": false,
+              "fillScreen": false,
+              "layout": {
+                "kind": "GridLayout",
+                "spec": {
+                  "items": [
+                    {
+                      "kind": "GridLayoutItem",
+                      "spec": {"x": 0, "y": 0, "width": 12, "height": 8, "element": {"kind": "ElementReference", "name": "panel-1"}}
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "kind": "RowsLayoutRow",
+            "spec": {
+              "title": "Collapsed",
+              "collapse": true,
+              "hideHeader": false,
+              "layout": {
+                "kind": "RowsLayout",
+                "spec": {
+                  "rows": [
+                    {
+                      "kind": "RowsLayoutRow",
+                      "spec": {
+                        "title": "Nested",
+                        "collapse": false,
+                        "hideHeader": false,
+                        "layout": {
+                          "kind": "GridLayout",
+                          "spec": {
+                            "items": [
+                              {
+                                "kind": "GridLayoutItem",
+                                "spec": {"x": 0, "y": 0, "width": 12, "height": 8, "element": {"kind": "ElementReference", "name": "panel-2"}}
+                              },
+                              {
+                                "kind": "GridLayoutItem",
+                                "spec": {"x": 12, "y": 0, "width": 12, "height": 8, "element": {"kind": "ElementReference", "name": "panel-3"}}
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
     "variables": [],
     "timeSettings": {"from": "now-6h", "to": "now", "autoRefresh": ""}
   },

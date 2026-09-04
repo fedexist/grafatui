@@ -170,18 +170,42 @@ fn validate_accepts_live_grafana_v2_compatibility_example() {
 }
 
 #[test]
-fn validate_rejects_unsupported_v2_layout() {
+fn validate_accepts_v2_rows_layout() {
     let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
-        .args(["--validate", "--grafana-json"])
+        .args(["--validate", "--format", "json", "--grafana-json"])
         .arg(fixture("v2_rows_layout.json"))
         .output()
         .unwrap();
 
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summary["title"], "Rows layout");
+    assert_eq!(summary["panel_count"], 3);
+}
+
+#[test]
+fn validate_rejects_nested_v2_tabs_layout() {
+    let mut value: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(fixture("v2_rows_layout.json")).unwrap()).unwrap();
+    value["spec"]["layout"]["spec"]["rows"][0]["spec"]["layout"] =
+        serde_json::json!({"kind": "TabsLayout", "spec": {}});
+    let path = write_dashboard("v2-nested-tabs", &value.to_string());
+
+    let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+        .args(["--validate", "--grafana-json"])
+        .arg(&path)
+        .output()
+        .unwrap();
+    fs::remove_file(path).unwrap();
+
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(stderr.contains("RowsLayout"));
-    assert!(stderr.contains("spec.layout.kind"));
-    assert!(stderr.contains("GridLayout"));
+    assert!(stderr.contains("TabsLayout"));
+    assert!(stderr.contains("spec.layout.spec.rows[0].spec.layout.kind"));
 }
 
 #[test]
