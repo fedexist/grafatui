@@ -553,6 +553,57 @@ mod tests {
     }
 
     #[test]
+    fn classic_rows_group_expanded_siblings_and_collapsed_nested_panels() {
+        let dashboard =
+            parse_grafana_dashboard(include_str!("../tests/fixtures/grafana/classic_rows.json"))
+                .unwrap();
+
+        assert_eq!(dashboard.queries.len(), 2);
+        assert_eq!(dashboard.layout.visible_panel_indices(), vec![0]);
+        let visible = dashboard.layout.visible_items();
+        assert_eq!(
+            visible[0].id,
+            crate::dashboard::DashboardItemId::Row(crate::dashboard::RowId::new(0))
+        );
+        assert_eq!(
+            visible[2].id,
+            crate::dashboard::DashboardItemId::Row(crate::dashboard::RowId::new(1))
+        );
+    }
+
+    #[test]
+    fn classic_rows_make_child_grid_y_relative_to_each_row() {
+        let dashboard = parse_grafana_dashboard(
+            r#"{
+                "panels": [{
+                    "type": "row", "title": "Outer", "collapsed": true,
+                    "gridPos": {"x": 0, "y": 10, "w": 24, "h": 2},
+                    "panels": [
+                        {
+                            "type": "timeseries", "title": "Direct child",
+                            "gridPos": {"x": 0, "y": 13, "w": 24, "h": 8},
+                            "targets": [{"expr": "up"}]
+                        },
+                        {
+                            "type": "row", "title": "Nested", "collapsed": true,
+                            "gridPos": {"x": 0, "y": 20, "w": 24, "h": 3},
+                            "panels": [{
+                                "type": "stat", "title": "Nested child",
+                                "gridPos": {"x": 0, "y": 25, "w": 24, "h": 6},
+                                "targets": [{"expr": "sum(up)"}]
+                            }]
+                        }
+                    ]
+                }]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(dashboard.queries[0].grid.unwrap().y, 1);
+        assert_eq!(dashboard.queries[1].grid.unwrap().y, 2);
+    }
+
+    #[test]
     fn v2_rows_hidden_header_is_transparent_even_when_collapsed() {
         let mut json = valid_v2_resource();
         make_v2_panel_importable(&mut json);
