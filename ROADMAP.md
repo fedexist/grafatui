@@ -8,7 +8,7 @@ oriented around two priorities:
 2. **User-visible product value** - parity work should make real dashboards
    easier to read, debug, and share.
 
-> **Current version**: 0.1.11 · **Status**: Active development, pre-1.0
+> **Current version**: 0.1.12 · **Status**: Active development, pre-1.0
 
 **Legend**:
 - 🟢 Low complexity · 🟡 Medium complexity · 🔴 High complexity
@@ -35,6 +35,7 @@ These features are shipped and available today:
 | UI | **Time controls** | Zoom in/out, pan left/right, live mode toggle |
 | UI | **Panel navigation** | Arrow keys, vim-style `j`/`k`, PgUp/PgDn, fullscreen, inspect mode |
 | UI | **Panel search** | `/` to fuzzy-search panels by name |
+| UI | **Interactive dashboard rows** | Classic row headers and collapsed state plus nested V2 `RowsLayout`; Enter/Space toggles, Left collapses, and Right expands selected rows |
 | UI | **Mouse support** | Click to select, scroll, drag cursor in fullscreen inspect mode |
 | UI | **Value inspection** | Cursor-based point-in-time data exploration |
 | UI | **Series toggling** | Show/hide individual series with `1`-`9` |
@@ -177,8 +178,8 @@ This is the main backlog, ordered by Grafana parity domain.
 
 | Feature | Grafana panel type | User value | Complexity | Status |
 |---|---|---|---|---|
-| **Row headers** | `row` | Dashboard sections stay recognizable | 🟢 | 📋 |
-| **Collapsed rows** | `row.collapsed` | Large dashboards can start folded | 🟡 | 📋 |
+| **Row headers** | `row` | Dashboard sections stay recognizable | 🟢 | ✅ |
+| **Collapsed rows** | `row.collapsed` | Large dashboards can start folded | 🟡 | ✅ |
 | **Text panel** | `text` | Notes/runbook snippets survive import | 🟢 | 📋 |
 | **Histogram panel** | `histogram` | Histogram dashboards import with fewer skips | 🟡 | 💡 |
 | **Pie chart fallback** | `piechart` | Small category summaries can render as bars/table | 🟡 | 💡 |
@@ -205,7 +206,7 @@ with a clear import error rather than silently changing the dashboard.
 | Feature | Grafana field / behavior | User value | Complexity | Status |
 |---|---|---|---|---|
 | **V2 Resource JSON compatibility** | `apiVersion: dashboard.grafana.app/v2` with a `GridLayout` | Imports Grafana 13's default JSON format without requiring a Classic export | 🔴 | ✅ |
-| **Rows layout** | `RowsLayout` and nested row layouts | Preserves dashboard grouping and collapsed sections | 🔴 | 📋 |
+| **Rows layout** | `RowsLayout` and nested row layouts | Preserves dashboard grouping and collapsed sections | 🔴 | ✅ |
 | **Tabs layout** | `TabsLayout` and nested tabs | Preserves tabbed dashboard organization | 🔴 | 📋 |
 | **Auto-grid layout** | `AutoGridLayout` | Preserves automatic panel placement and sizing | 🔴 | 📋 |
 | **Repeat and dynamic layouts** | Layout and element `repeat` settings | Expands panels or groups from variable values | 🔴 | 📋 |
@@ -258,7 +259,7 @@ constraints.
 | Stacking | Common Grafana area/bar semantics | 🟡 | 📋 |
 | Axis labels and placement | Preserves context for imported charts | 🟡 | 📋 |
 | Scale distribution handling | Honor or warn on log/non-linear scales | 🟡 | 💡 |
-| Row headers and collapsed rows | Keeps large dashboard structure intact | 🟡 | 📋 |
+| Row headers and collapsed rows | Keeps large dashboard structure intact | 🟡 | ✅ |
 
 ### v0.5 - Exploration Workflow
 
