@@ -160,7 +160,7 @@ pub(super) fn adapt(value: Value) -> Result<model::Dashboard> {
     normalize_panels(
         raw.panels.unwrap_or_default(),
         "panels",
-        &mut dashboard.panels,
+        &mut dashboard.layout,
     );
     Ok(dashboard)
 }
@@ -199,7 +199,7 @@ impl RawVar {
     }
 }
 
-fn normalize_panels(panels: Vec<RawPanel>, path: &str, out: &mut Vec<model::Panel>) {
+fn normalize_panels(panels: Vec<RawPanel>, path: &str, out: &mut Vec<model::LayoutNode>) {
     for (index, panel) in panels.into_iter().enumerate() {
         let source_path = format!("{path}[{index}]");
         if let Some(children) = panel.panels {
@@ -242,7 +242,7 @@ fn normalize_panels(panels: Vec<RawPanel>, path: &str, out: &mut Vec<model::Pane
                     .then(|| format!("{source_path}.fieldConfig.defaults.mappings")),
             })
         });
-        out.push(model::Panel {
+        out.push(model::LayoutNode::Panel(model::Panel {
             kind: panel.panel_type,
             title: panel.title.unwrap_or_default(),
             source_path: source_path.clone(),
@@ -273,7 +273,7 @@ fn normalize_panels(panels: Vec<RawPanel>, path: &str, out: &mut Vec<model::Pane
                 .is_some()
                 .then(|| format!("{source_path}.options.reduceOptions")),
             transformations_path: None,
-        });
+        }));
     }
 }
 

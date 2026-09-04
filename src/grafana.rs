@@ -31,6 +31,8 @@ pub(crate) struct DashboardImport {
     pub(crate) title: String,
     /// List of panels extracted.
     pub(crate) queries: Vec<QueryPanel>,
+    /// Recursive layout of panels and rows.
+    pub(crate) layout: crate::dashboard::DashboardLayout,
     /// Variables extracted from `templating.list`.
     pub(crate) vars: HashMap<String, String>,
     /// Dynamic query variables extracted from `templating.list`.
@@ -314,6 +316,51 @@ fn is_variable_name_char(ch: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_model_panel(kind: &str, expr: Option<&str>) -> model::LayoutNode {
+        model::LayoutNode::Panel(model::Panel {
+            kind: kind.into(),
+            title: kind.into(),
+            source_path: format!("layout.{kind}"),
+            targets: expr
+                .into_iter()
+                .map(|expr| model::Target {
+                    expr: Some(expr.into()),
+                    expr_path: format!("layout.{kind}.expr"),
+                    legend_format: None,
+                    instant: None,
+                    hidden: false,
+                })
+                .collect(),
+            count_as_skipped_if_empty: false,
+            grid: None,
+            field_defaults: None,
+            reduce_options_path: None,
+            transformations_path: None,
+        })
+    }
+
+    #[test]
+    fn normalized_layout_references_only_imported_panel_indices() {
+        let dashboard = model::Dashboard {
+            title: "Rows".into(),
+            layout: vec![model::LayoutNode::Row(model::Row {
+                title: "Group".into(),
+                collapsed: false,
+                hidden_header: false,
+                source_path: "layout.row".into(),
+                children: vec![
+                    test_model_panel("piechart", None),
+                    test_model_panel("timeseries", Some("up")),
+                ],
+            })],
+            ..model::Dashboard::default()
+        };
+        let imported = import::finish(dashboard).unwrap();
+        assert_eq!(imported.queries.len(), 1);
+        assert_eq!(imported.layout.visible_panel_indices(), vec![0]);
+        assert_eq!(imported.skipped_panels, 1);
+    }
 
     fn minimal_v2_with_layout(layout: serde_json::Value) -> serde_json::Value {
         serde_json::json!({

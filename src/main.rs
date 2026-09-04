@@ -17,6 +17,7 @@
 mod annotations;
 mod app;
 mod config;
+mod dashboard;
 mod export;
 mod grafana;
 mod prom;

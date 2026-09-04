@@ -73,7 +73,7 @@ pub(super) fn adapt(value: Value) -> Result<model::Dashboard> {
             grid.position,
             &mut dashboard.diagnostics,
         )? {
-            dashboard.panels.push(panel);
+            dashboard.layout.push(model::LayoutNode::Panel(panel));
         } else {
             dashboard.skipped_panels += 1;
         }
