@@ -48,6 +48,7 @@ struct RawPanel {
     #[serde(rename = "type")]
     panel_type: String,
     title: Option<String>,
+    collapsed: Option<bool>,
     targets: Option<Vec<RawTarget>>,
     #[serde(rename = "gridPos")]
     grid_pos: Option<RawGridPos>,
@@ -157,11 +158,7 @@ pub(super) fn adapt(value: Value) -> Result<model::Dashboard> {
         .enumerate()
         .map(|(index, variable)| variable.normalize(index))
         .collect();
-    normalize_panels(
-        raw.panels.unwrap_or_default(),
-        "panels",
-        &mut dashboard.panels,
-    );
+    dashboard.layout = normalize_layout(raw.panels.unwrap_or_default(), "panels");
     Ok(dashboard)
 }
 
@@ -199,82 +196,158 @@ impl RawVar {
     }
 }
 
-fn normalize_panels(panels: Vec<RawPanel>, path: &str, out: &mut Vec<model::Panel>) {
+fn normalize_layout(panels: Vec<RawPanel>, path: &str) -> Vec<model::LayoutNode> {
+    let mut output = Vec::new();
+    let mut expanded_row = None;
+
     for (index, panel) in panels.into_iter().enumerate() {
         let source_path = format!("{path}[{index}]");
-        if let Some(children) = panel.panels {
-            normalize_panels(children, &format!("{source_path}.panels"), out);
-        }
+        if panel.panel_type == "row" {
+            if let Some((row, _)) = expanded_row.take() {
+                output.push(model::LayoutNode::Row(row));
+            }
 
-        let field_defaults = panel.field_config.and_then(|config| {
-            config.defaults.map(|defaults| model::FieldDefaults {
-                unit: defaults.unit,
-                decimals: defaults.decimals,
-                no_value: defaults.no_value,
-                min: defaults.min,
-                max: defaults.max,
-                thresholds: defaults.thresholds.map(|thresholds| model::Thresholds {
-                    mode: thresholds.mode,
-                    steps: thresholds
-                        .steps
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|step| model::ThresholdStep {
-                            value: step.value,
-                            color: step.color,
-                        })
-                        .collect(),
-                }),
-                custom: defaults.custom.map(|custom| model::GraphCustom {
-                    draw_style: custom.draw_style,
-                    show_points: custom.show_points,
-                    fill_opacity: custom.fill_opacity,
-                    axis_placement: custom.axis_placement,
-                    line_interpolation: custom.line_interpolation,
-                    stacking_mode: custom.stacking.and_then(|stacking| stacking.mode),
-                    axis_grid_show: custom.axis_grid_show,
-                    thresholds_style_mode: custom.thresholds_style.and_then(|style| style.mode),
-                }),
-                mappings_path: defaults
-                    .mappings
-                    .as_ref()
-                    .is_some_and(non_empty_json_value)
-                    .then(|| format!("{source_path}.fieldConfig.defaults.mappings")),
-            })
-        });
-        out.push(model::Panel {
-            kind: panel.panel_type,
-            title: panel.title.unwrap_or_default(),
-            source_path: source_path.clone(),
-            targets: panel
-                .targets
-                .unwrap_or_default()
-                .into_iter()
-                .enumerate()
-                .map(|(index, target)| model::Target {
-                    expr: target.expr,
-                    expr_path: format!("{source_path}.targets[{index}].expr"),
-                    legend_format: target.legend_format,
-                    instant: target.instant,
-                    hidden: target.hide == Some(true),
-                })
-                .collect(),
-            count_as_skipped_if_empty: false,
-            grid: panel.grid_pos.map(|grid| model::GridPos {
-                x: grid.x,
-                y: grid.y,
-                w: grid.w,
-                h: grid.h,
-            }),
-            field_defaults,
-            reduce_options_path: panel
-                .options
-                .and_then(|options| options.reduce_options)
-                .is_some()
-                .then(|| format!("{source_path}.options.reduceOptions")),
-            transformations_path: None,
-        });
+            let collapsed = panel.collapsed.unwrap_or(false);
+            let (row, row_base_y) = normalize_classic_row(panel, source_path, collapsed);
+            if collapsed {
+                output.push(model::LayoutNode::Row(row));
+            } else {
+                expanded_row = Some((row, row_base_y));
+            }
+        } else if let Some((row, row_base_y)) = expanded_row.as_mut() {
+            row.children.push(normalize_classic_panel(
+                panel,
+                source_path,
+                Some(*row_base_y),
+            ));
+        } else {
+            output.push(normalize_classic_panel(panel, source_path, None));
+        }
     }
+
+    if let Some((row, _)) = expanded_row {
+        output.push(model::LayoutNode::Row(row));
+    }
+
+    output
+}
+
+fn normalize_classic_row(
+    panel: RawPanel,
+    source_path: String,
+    collapsed: bool,
+) -> (model::Row, i32) {
+    let row_base_y = panel
+        .grid_pos
+        .as_ref()
+        .map_or(0, |grid| grid.y.saturating_add(grid.h));
+    let children = normalize_layout(
+        panel.panels.unwrap_or_default(),
+        &format!("{source_path}.panels"),
+    )
+    .into_iter()
+    .map(|node| normalize_child_y(node, row_base_y))
+    .collect();
+
+    (
+        model::Row {
+            title: panel.title.unwrap_or_default(),
+            collapsed,
+            hidden_header: false,
+            source_path,
+            children,
+        },
+        row_base_y,
+    )
+}
+
+fn normalize_child_y(node: model::LayoutNode, row_base_y: i32) -> model::LayoutNode {
+    match node {
+        model::LayoutNode::Panel(mut panel) => {
+            if let Some(grid) = panel.grid.as_mut() {
+                grid.y = grid.y.saturating_sub(row_base_y).max(0);
+            }
+            model::LayoutNode::Panel(panel)
+        }
+        model::LayoutNode::Row(row) => model::LayoutNode::Row(row),
+    }
+}
+
+fn normalize_classic_panel(
+    panel: RawPanel,
+    source_path: String,
+    row_base_y: Option<i32>,
+) -> model::LayoutNode {
+    let field_defaults = panel.field_config.and_then(|config| {
+        config.defaults.map(|defaults| model::FieldDefaults {
+            unit: defaults.unit,
+            decimals: defaults.decimals,
+            no_value: defaults.no_value,
+            min: defaults.min,
+            max: defaults.max,
+            thresholds: defaults.thresholds.map(|thresholds| model::Thresholds {
+                mode: thresholds.mode,
+                steps: thresholds
+                    .steps
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|step| model::ThresholdStep {
+                        value: step.value,
+                        color: step.color,
+                    })
+                    .collect(),
+            }),
+            custom: defaults.custom.map(|custom| model::GraphCustom {
+                draw_style: custom.draw_style,
+                show_points: custom.show_points,
+                fill_opacity: custom.fill_opacity,
+                axis_placement: custom.axis_placement,
+                line_interpolation: custom.line_interpolation,
+                stacking_mode: custom.stacking.and_then(|stacking| stacking.mode),
+                axis_grid_show: custom.axis_grid_show,
+                thresholds_style_mode: custom.thresholds_style.and_then(|style| style.mode),
+            }),
+            mappings_path: defaults
+                .mappings
+                .as_ref()
+                .is_some_and(non_empty_json_value)
+                .then(|| format!("{source_path}.fieldConfig.defaults.mappings")),
+        })
+    });
+    model::LayoutNode::Panel(model::Panel {
+        kind: panel.panel_type,
+        title: panel.title.unwrap_or_default(),
+        source_path: source_path.clone(),
+        targets: panel
+            .targets
+            .unwrap_or_default()
+            .into_iter()
+            .enumerate()
+            .map(|(index, target)| model::Target {
+                expr: target.expr,
+                expr_path: format!("{source_path}.targets[{index}].expr"),
+                legend_format: target.legend_format,
+                instant: target.instant,
+                hidden: target.hide == Some(true),
+            })
+            .collect(),
+        count_as_skipped_if_empty: false,
+        grid: panel.grid_pos.map(|grid| model::GridPos {
+            x: grid.x,
+            y: row_base_y
+                .map(|base| grid.y.saturating_sub(base).max(0))
+                .unwrap_or(grid.y),
+            w: grid.w,
+            h: grid.h,
+        }),
+        field_defaults,
+        reduce_options_path: panel
+            .options
+            .and_then(|options| options.reduce_options)
+            .is_some()
+            .then(|| format!("{source_path}.options.reduceOptions")),
+        transformations_path: None,
+    })
 }
 
 fn non_empty_json_value(value: &Value) -> bool {

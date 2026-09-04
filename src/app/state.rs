@@ -16,6 +16,7 @@
 
 use crate::app::data::{downsample, expand_expr, format_legend};
 use crate::app::variables::refresh_query_variables;
+use crate::dashboard::{DashboardItemId, DashboardLayout, RowId};
 use crate::export::{ExportOptions, RecordingState};
 use crate::grafana::TemplateQueryVar;
 use crate::prom;
@@ -24,7 +25,7 @@ use crate::ui::DisplayFormat;
 use anyhow::Result;
 use futures::StreamExt;
 use ratatui::style::Color;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 /// Represents the state of a single dashboard panel.
@@ -302,8 +303,10 @@ pub(crate) struct AppState {
     pub(crate) query_vars: Vec<TemplateQueryVar>,
     /// Count of panels skipped during import.
     pub(crate) skipped_panels: usize,
-    /// Index of the currently selected panel.
-    pub(crate) selected_panel: usize,
+    /// Recursive row/panel dashboard layout.
+    pub(crate) layout: DashboardLayout,
+    /// Currently selected visible row or panel.
+    pub(crate) selected_item: Option<DashboardItemId>,
     /// UI Theme.
     pub(crate) theme: Theme,
     /// Time offset from "now" for panning backward in time (0 = live mode).
@@ -312,8 +315,8 @@ pub(crate) struct AppState {
     pub(crate) mode: AppMode,
     /// Search query string.
     pub(crate) search_query: String,
-    /// Filtered panel indices based on search query.
-    pub(crate) search_results: Vec<usize>,
+    /// Filtered dashboard items based on search query.
+    pub(crate) search_results: Vec<DashboardItemId>,
     /// Cursor X position (timestamp) for inspection.
     pub(crate) cursor_x: Option<f64>,
     /// Global marker set for rendering thresholds
@@ -356,6 +359,8 @@ impl AppState {
         threshold_marker: String,
         export: ExportOptions,
     ) -> Self {
+        let layout = DashboardLayout::flat(panels.len());
+        let selected_item = layout.first_visible();
         Self {
             prometheus,
             annotations: crate::annotations::AnnotationState::from_path(None),
@@ -373,7 +378,8 @@ impl AppState {
             vars: HashMap::new(),
             query_vars: Vec::new(),
             skipped_panels,
-            selected_panel: 0,
+            layout,
+            selected_item,
             theme,
             time_offset: Duration::from_secs(0),
             mode: AppMode::Normal,
@@ -412,7 +418,9 @@ impl AppState {
 
     /// Automatically scroll to ensure the selected panel is visible.
     pub(crate) fn scroll_to_selected_panel(&mut self) {
-        if let Some(panel) = self.panels.get(self.selected_panel)
+        if let Some(panel) = self
+            .selected_panel_index()
+            .and_then(|index| self.panels.get(index))
             && let Some(grid) = panel.grid
         {
             let py = grid.y;
@@ -428,20 +436,132 @@ impl AppState {
         }
     }
 
-    /// Selects the previous panel, keeping the dashboard scrolled to it.
-    pub(crate) fn select_previous_panel(&mut self) {
-        if self.selected_panel > 0 {
-            self.selected_panel -= 1;
-            self.scroll_to_selected_panel();
+    pub(crate) fn apply_layout(&mut self, layout: DashboardLayout) {
+        self.layout = layout;
+        self.selected_item = self.layout.first_visible();
+        self.scroll_to_selected_panel();
+    }
+
+    pub(crate) fn selected_panel_index(&self) -> Option<usize> {
+        match self.selected_item {
+            Some(DashboardItemId::Panel(index)) => Some(index),
+            Some(DashboardItemId::Row(_)) | None => None,
         }
     }
 
-    /// Selects the next panel, keeping the dashboard scrolled to it.
-    pub(crate) fn select_next_panel(&mut self) {
-        if self.selected_panel < self.panels.len().saturating_sub(1) {
-            self.selected_panel += 1;
-            self.scroll_to_selected_panel();
+    pub(crate) fn selected_row_id(&self) -> Option<RowId> {
+        match self.selected_item {
+            Some(DashboardItemId::Row(id)) => Some(id),
+            Some(DashboardItemId::Panel(_)) | None => None,
         }
+    }
+
+    pub(crate) fn visible_panel_indices(&self) -> Vec<usize> {
+        self.layout.visible_panel_indices()
+    }
+
+    /// Selects the previous visible dashboard item.
+    pub(crate) fn select_previous_item(&mut self) {
+        self.move_selection(-1);
+    }
+
+    /// Selects the next visible dashboard item.
+    pub(crate) fn select_next_item(&mut self) {
+        self.move_selection(1);
+    }
+
+    fn move_selection(&mut self, direction: isize) {
+        let visible = self.layout.visible_items();
+        let Some(first) = visible.first() else {
+            self.selected_item = None;
+            return;
+        };
+        let Some(selected) = self.selected_item else {
+            self.selected_item = Some(first.id);
+            self.scroll_to_selected_panel();
+            return;
+        };
+        let Some(current) = visible.iter().position(|item| item.id == selected) else {
+            self.selected_item = Some(first.id);
+            self.scroll_to_selected_panel();
+            return;
+        };
+        let next = current
+            .saturating_add_signed(direction)
+            .min(visible.len() - 1);
+        self.selected_item = Some(visible[next].id);
+        self.scroll_to_selected_panel();
+    }
+
+    fn ensure_selection_visible(&mut self) {
+        self.selected_item = self
+            .selected_item
+            .and_then(|item| self.layout.nearest_visible_ancestor(item))
+            .or_else(|| self.layout.first_visible());
+        self.scroll_to_selected_panel();
+    }
+
+    pub(crate) async fn set_selected_row_collapsed(&mut self, collapsed: bool) -> Result<()> {
+        let Some(row_id) = self.selected_row_id() else {
+            return Ok(());
+        };
+        let Some(change) = self.layout.set_row_collapsed(row_id, collapsed) else {
+            return Ok(());
+        };
+        if !change.newly_visible_panels.is_empty() {
+            self.refresh_panel_indices(&change.newly_visible_panels, false)
+                .await;
+        }
+        self.reconcile_visible_annotation_targets();
+        self.ensure_selection_visible();
+        Ok(())
+    }
+
+    pub(crate) async fn toggle_selected_row(&mut self) -> Result<()> {
+        let Some(row_id) = self.selected_row_id() else {
+            return Ok(());
+        };
+        let Some(change) = self.layout.toggle_row(row_id) else {
+            return Ok(());
+        };
+        if !change.newly_visible_panels.is_empty() {
+            self.refresh_panel_indices(&change.newly_visible_panels, false)
+                .await;
+        }
+        self.reconcile_visible_annotation_targets();
+        self.ensure_selection_visible();
+        Ok(())
+    }
+
+    /// Compatibility wrapper for panel-only fullscreen navigation.
+    pub(crate) fn select_previous_panel(&mut self) {
+        self.move_panel_selection(-1);
+    }
+
+    /// Compatibility wrapper for panel-only fullscreen navigation.
+    pub(crate) fn select_next_panel(&mut self) {
+        self.move_panel_selection(1);
+    }
+
+    fn move_panel_selection(&mut self, direction: isize) {
+        let panels = self.visible_panel_indices();
+        let Some(&first) = panels.first() else {
+            self.selected_item = None;
+            return;
+        };
+        let Some(current) = self.selected_panel_index() else {
+            self.selected_item = Some(DashboardItemId::Panel(first));
+            self.scroll_to_selected_panel();
+            return;
+        };
+        let Some(index) = panels.iter().position(|&panel| panel == current) else {
+            self.selected_item = Some(DashboardItemId::Panel(first));
+            self.scroll_to_selected_panel();
+            return;
+        };
+        let next = index.saturating_add_signed(direction).min(panels.len() - 1);
+        self.selected_item = Some(DashboardItemId::Panel(panels[next]));
+        self.scroll_to_selected_panel();
     }
 
     /// Pan right: shift the time window forward (toward "now").
@@ -508,18 +628,12 @@ impl AppState {
     pub(crate) async fn refresh(&mut self) -> Result<()> {
         let range = self.range;
         let step = self.step;
+        let visible_panel_indices = self.visible_panel_indices();
 
         // Calculate end timestamp: "now" minus time_offset
         let end_ts = chrono::Utc::now().timestamp() - self.time_offset.as_secs() as i64;
         let annotation_context =
             crate::annotations::AnnotationRefreshContext::from_unix_window(end_ts, range);
-        let eligible_titles = self
-            .panels
-            .iter()
-            .filter(|panel| panel.panel_type == PanelType::Graph)
-            .map(|panel| panel.title.clone())
-            .collect::<Vec<_>>();
-
         let annotation_refresh = self.annotations.refresh(&annotation_context);
         let prometheus_refresh = Self::refresh_prometheus_data(
             &self.prometheus,
@@ -529,18 +643,53 @@ impl AppState {
             end_ts,
             &mut self.vars,
             &mut self.panels,
+            &visible_panel_indices,
+            true,
         );
-        let (annotations_changed, ()) = tokio::join!(annotation_refresh, prometheus_refresh);
+        let (_, ()) = tokio::join!(annotation_refresh, prometheus_refresh);
 
-        if annotations_changed {
-            self.annotations.reconcile_targets(&eligible_titles);
-        }
+        self.reconcile_visible_annotation_targets();
 
         self.view_end_ts = end_ts;
         self.last_refresh = Instant::now();
         Ok(())
     }
 
+    fn reconcile_visible_annotation_targets(&mut self) {
+        let visible_panels = self
+            .visible_panel_indices()
+            .into_iter()
+            .collect::<HashSet<_>>();
+        let titles = self
+            .panels
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| visible_panels.contains(index))
+            .filter(|(_, panel)| panel.panel_type == PanelType::Graph)
+            .map(|(_, panel)| panel.title.clone())
+            .collect::<Vec<_>>();
+        self.annotations.reconcile_targets(&titles);
+    }
+
+    async fn refresh_panel_indices(&mut self, indices: &[usize], refresh_variables: bool) {
+        let range = self.range;
+        let step = self.step;
+        let end_ts = self.view_end_ts;
+        Self::refresh_prometheus_data(
+            &self.prometheus,
+            &self.query_vars,
+            range,
+            step,
+            end_ts,
+            &mut self.vars,
+            &mut self.panels,
+            indices,
+            refresh_variables,
+        )
+        .await;
+    }
+
+    #[allow(clippy::too_many_arguments)]
     async fn refresh_prometheus_data(
         prometheus: &prom::PromClient,
         query_vars: &[TemplateQueryVar],
@@ -549,13 +698,24 @@ impl AppState {
         end_ts: i64,
         vars: &mut HashMap<String, String>,
         panels: &mut [PanelState],
+        indices: &[usize],
+        refresh_variables: bool,
     ) {
-        let _ = refresh_query_variables(prometheus, query_vars, range, step, end_ts, vars).await;
+        if refresh_variables {
+            let _ =
+                refresh_query_variables(prometheus, query_vars, range, step, end_ts, vars).await;
+        }
 
         // Create a stream of futures for fetching panel data
-        let mut futures = futures::stream::iter(panels.iter_mut())
-            .map(|p| Self::fetch_single_panel_data(prometheus, p, range, step, vars, end_ts))
-            .buffer_unordered(4); // Max 4 concurrent panel refreshes
+        let indices = indices.iter().copied().collect::<HashSet<_>>();
+        let mut futures = futures::stream::iter(
+            panels
+                .iter_mut()
+                .enumerate()
+                .filter_map(|(index, panel)| indices.contains(&index).then_some(panel)),
+        )
+        .map(|p| Self::fetch_single_panel_data(prometheus, p, range, step, vars, end_ts))
+        .buffer_unordered(4); // Max 4 concurrent panel refreshes
 
         while let Some((p, results, url, err)) = futures.next().await {
             p.series = results;
@@ -670,6 +830,9 @@ mod tests {
         AnnotationProvider, AnnotationRefreshContext, AnnotationSnapshot, ProviderFuture,
         ProviderPoll,
     };
+    use crate::dashboard::{
+        DashboardItemId, DashboardLayout, DashboardLayoutItem, DashboardRow, RowId,
+    };
     use std::sync::{Arc, Mutex};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
@@ -723,6 +886,212 @@ mod tests {
         }
     }
 
+    fn row_test_layout(parent_collapsed: bool) -> DashboardLayout {
+        DashboardLayout::new(vec![DashboardLayoutItem::Row(DashboardRow::new(
+            RowId::new(0),
+            "Parent",
+            parent_collapsed,
+            false,
+            vec![
+                DashboardLayoutItem::Panel(0),
+                DashboardLayoutItem::Row(DashboardRow::new(
+                    RowId::new(1),
+                    "Nested",
+                    true,
+                    false,
+                    vec![DashboardLayoutItem::Panel(1)],
+                )),
+            ],
+        ))])
+    }
+
+    fn row_test_app() -> AppState {
+        let mut app = create_test_app();
+        app.panels = vec![
+            test_panel("Visible", PanelType::Graph),
+            test_panel("Nested hidden", PanelType::Graph),
+        ];
+        app.apply_layout(row_test_layout(false));
+        app
+    }
+
+    fn row_test_app_with_queries(base_url: &str) -> AppState {
+        let mut app = create_test_app();
+        app.prometheus = prom::PromClient::new(base_url.to_string());
+        app.panels = vec![
+            test_panel("Visible", PanelType::Graph),
+            test_panel("Nested hidden", PanelType::Graph),
+        ];
+        for panel in &mut app.panels {
+            panel.exprs = vec!["up".to_string()];
+            panel.legends = vec![None];
+            panel.query_modes = vec![QueryMode::Range];
+        }
+        app.apply_layout(row_test_layout(true));
+        app
+    }
+
+    #[tokio::test]
+    async fn navigation_uses_visible_items_and_preserves_nested_state() {
+        let mut app = row_test_app();
+        assert_eq!(app.selected_item, Some(DashboardItemId::Row(RowId::new(0))));
+
+        app.select_next_item();
+        assert_eq!(app.selected_panel_index(), Some(0));
+        app.select_previous_item();
+        app.toggle_selected_row().await.unwrap();
+
+        assert!(app.visible_panel_indices().is_empty());
+        assert_eq!(app.selected_item, Some(DashboardItemId::Row(RowId::new(0))));
+
+        app.toggle_selected_row().await.unwrap();
+        assert!(app.layout.row(RowId::new(1)).unwrap().collapsed);
+        assert_eq!(app.visible_panel_indices(), vec![0]);
+    }
+
+    #[test]
+    fn fullscreen_navigation_skips_visible_row_items() {
+        let mut app = create_test_app();
+        app.panels = vec![
+            test_panel("First", PanelType::Graph),
+            test_panel("Second", PanelType::Graph),
+        ];
+        app.apply_layout(DashboardLayout::new(vec![DashboardLayoutItem::Row(
+            DashboardRow::new(
+                RowId::new(0),
+                "Parent",
+                false,
+                false,
+                vec![
+                    DashboardLayoutItem::Panel(0),
+                    DashboardLayoutItem::Row(DashboardRow::new(
+                        RowId::new(1),
+                        "Nested",
+                        false,
+                        false,
+                        vec![DashboardLayoutItem::Panel(1)],
+                    )),
+                ],
+            ),
+        )]));
+        app.selected_item = Some(DashboardItemId::Panel(0));
+
+        app.select_next_panel();
+
+        assert_eq!(app.selected_item, Some(DashboardItemId::Panel(1)));
+        app.select_previous_panel();
+        assert_eq!(app.selected_item, Some(DashboardItemId::Panel(0)));
+    }
+
+    #[test]
+    fn empty_dashboard_has_no_selection_and_navigation_is_safe() {
+        let mut app = create_test_app();
+
+        assert_eq!(app.selected_item, None);
+        assert_eq!(app.selected_panel_index(), None);
+        app.select_previous_item();
+        app.select_next_item();
+
+        assert_eq!(app.selected_item, None);
+    }
+
+    #[tokio::test]
+    async fn refresh_skips_collapsed_panels_and_expand_fetches_only_newly_visible() {
+        let mut app = row_test_app_with_queries("http://127.0.0.1:9");
+
+        app.refresh().await.unwrap();
+        assert!(app.panels[0].last_error.is_none());
+        assert!(app.panels[1].last_error.is_none());
+
+        app.toggle_selected_row().await.unwrap();
+        assert!(app.panels[0].last_error.is_some());
+        assert!(app.panels[1].last_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn expansion_uses_the_displayed_window_without_resetting_refresh_clock() {
+        let mut app = row_test_app_with_queries("http://127.0.0.1:9");
+        app.view_end_ts = 1_700_000_000;
+        app.last_refresh = Instant::now() - Duration::from_secs(30);
+        let last_refresh = app.last_refresh;
+
+        app.toggle_selected_row().await.unwrap();
+
+        assert_eq!(app.view_end_ts, 1_700_000_000);
+        assert_eq!(app.last_refresh, last_refresh);
+        assert!(
+            app.panels[0]
+                .last_url
+                .as_deref()
+                .unwrap()
+                .contains("end=1700000000")
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_reconciles_annotations_against_visible_graph_panels_only() {
+        let path = temp_annotation_path("visible-target-reconciliation");
+        let time = chrono::Utc::now().to_rfc3339();
+        std::fs::write(
+            &path,
+            format!("{{\"time\":\"{time}\",\"text\":\"cpu\",\"panel_titles\":[\"CPU\"]}}\n"),
+        )
+        .unwrap();
+        let mut app = create_test_app();
+        app.panels = vec![
+            test_panel("CPU", PanelType::Graph),
+            test_panel("CPU", PanelType::Graph),
+        ];
+        app.apply_layout(DashboardLayout::new(vec![
+            DashboardLayoutItem::Panel(0),
+            DashboardLayoutItem::Row(DashboardRow::new(
+                RowId::new(0),
+                "Hidden duplicate",
+                true,
+                false,
+                vec![DashboardLayoutItem::Panel(1)],
+            )),
+        ]));
+        app.annotations = crate::annotations::AnnotationState::from_path(Some(path.clone()));
+
+        app.refresh().await.unwrap();
+
+        assert_eq!(app.annotations.footer_status(), None);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn collapsing_a_row_reconciles_unchanged_annotation_targets() {
+        let mut event = crate::annotations::test_event_at(50.0, "cpu");
+        event.target = crate::annotations::AnnotationTarget::PanelTitles(
+            ["CPU".to_string()].into_iter().collect(),
+        );
+        let mut app = create_test_app();
+        app.panels = vec![
+            test_panel("CPU", PanelType::Graph),
+            test_panel("CPU", PanelType::Graph),
+        ];
+        app.apply_layout(DashboardLayout::new(vec![
+            DashboardLayoutItem::Panel(0),
+            DashboardLayoutItem::Row(DashboardRow::new(
+                RowId::new(0),
+                "Collapsible",
+                false,
+                false,
+                vec![DashboardLayoutItem::Panel(1)],
+            )),
+        ]));
+        app.annotations = crate::annotations::AnnotationState::from_events_for_test(vec![event]);
+        app.annotations
+            .reconcile_targets(&["CPU".to_string(), "CPU".to_string()]);
+        assert!(app.annotations.footer_status().is_some());
+        app.selected_item = Some(DashboardItemId::Row(RowId::new(0)));
+
+        app.set_selected_row_collapsed(true).await.unwrap();
+
+        assert_eq!(app.annotations.footer_status(), None);
+    }
+
     #[derive(Debug)]
     struct RecordingProvider {
         captured: Arc<Mutex<Option<AnnotationRefreshContext>>>,
@@ -764,7 +1133,7 @@ mod tests {
         assert!(app.refresh().await.is_ok());
 
         app.scroll_to_selected_panel();
-        assert_eq!(app.selected_panel, 0);
+        assert_eq!(app.selected_panel_index(), None);
 
         app.move_cursor(1);
     }
@@ -838,6 +1207,7 @@ mod tests {
         panel.legends = vec![None];
         panel.query_modes = vec![QueryMode::Range];
         app.panels = vec![panel];
+        app.apply_layout(DashboardLayout::flat(app.panels.len()));
         app.annotations =
             crate::annotations::AnnotationState::from_provider(Some(Box::new(HandshakeProvider {
                 provider_started,
@@ -908,6 +1278,7 @@ mod tests {
             test_panel("CPU", PanelType::Graph),
             test_panel("OnlyStat", PanelType::Stat),
         ];
+        app.apply_layout(DashboardLayout::flat(app.panels.len()));
         app.annotations = crate::annotations::AnnotationState::from_path(Some(path.clone()));
 
         app.refresh().await.unwrap();
@@ -970,16 +1341,16 @@ mod tests {
         );
 
         app.select_previous_panel();
-        assert_eq!(app.selected_panel, 0);
+        assert_eq!(app.selected_panel_index(), Some(0));
 
         app.select_next_panel();
-        assert_eq!(app.selected_panel, 1);
+        assert_eq!(app.selected_panel_index(), Some(1));
 
         app.select_next_panel();
-        assert_eq!(app.selected_panel, 1);
+        assert_eq!(app.selected_panel_index(), Some(1));
 
         app.select_previous_panel();
-        assert_eq!(app.selected_panel, 0);
+        assert_eq!(app.selected_panel_index(), Some(0));
     }
 
     #[test]

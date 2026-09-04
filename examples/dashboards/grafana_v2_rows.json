@@ -1,0 +1,261 @@
+{
+  "apiVersion": "dashboard.grafana.app/v2",
+  "kind": "Dashboard",
+  "metadata": {
+    "name": "grafana-v2-rows"
+  },
+  "spec": {
+    "title": "Grafana V2 Rows",
+    "elements": {
+      "request-rate": {
+        "kind": "Panel",
+        "spec": {
+          "id": 1,
+          "title": "Mock request rate",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [{
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "refId": "A",
+                  "query": {
+                    "kind": "DataQuery",
+                    "group": "prometheus",
+                    "version": "v0",
+                    "spec": {
+                      "expr": "rate(prometheus_http_requests_total[5m])",
+                      "legendFormat": "Request rate",
+                      "instant": false
+                    }
+                  }
+                }
+              }],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.0.0",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "reqps",
+                  "decimals": 2,
+                  "min": 0,
+                  "custom": {
+                    "drawStyle": "line",
+                    "showPoints": "auto",
+                    "fillOpacity": 10,
+                    "axisPlacement": "auto",
+                    "axisGridShow": true
+                  }
+                },
+                "overrides": []
+              },
+              "options": {}
+            }
+          }
+        }
+      },
+      "request-total": {
+        "kind": "Panel",
+        "spec": {
+          "id": 2,
+          "title": "Mock request total",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [{
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "refId": "A",
+                  "query": {
+                    "kind": "DataQuery",
+                    "group": "prometheus",
+                    "version": "v0",
+                    "spec": {
+                      "expr": "sum(prometheus_http_requests_total)",
+                      "legendFormat": "Request total",
+                      "instant": true
+                    }
+                  }
+                }
+              }],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "stat",
+            "version": "13.0.0",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "short",
+                  "decimals": 0,
+                  "min": 0
+                },
+                "overrides": []
+              },
+              "options": {}
+            }
+          }
+        }
+      },
+      "targets-up": {
+        "kind": "Panel",
+        "spec": {
+          "id": 3,
+          "title": "Mock targets up",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [{
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "refId": "A",
+                  "query": {
+                    "kind": "DataQuery",
+                    "group": "prometheus",
+                    "version": "v0",
+                    "spec": {
+                      "expr": "sum(up)",
+                      "legendFormat": "Targets up",
+                      "instant": true
+                    }
+                  }
+                }
+              }],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "stat",
+            "version": "13.0.0",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "short",
+                  "decimals": 0,
+                  "min": 0
+                },
+                "overrides": []
+              },
+              "options": {}
+            }
+          }
+        }
+      }
+    },
+    "layout": {
+      "kind": "RowsLayout",
+      "spec": {
+        "rows": [{
+          "kind": "RowsLayoutRow",
+          "spec": {
+            "title": "Expanded",
+            "collapse": false,
+            "hideHeader": false,
+            "layout": {
+              "kind": "RowsLayout",
+              "spec": {
+                "rows": [{
+                  "kind": "RowsLayoutRow",
+                  "spec": {
+                    "title": "Expanded panels",
+                    "collapse": false,
+                    "hideHeader": true,
+                    "layout": {
+                      "kind": "GridLayout",
+                      "spec": {
+                        "items": [
+                          {
+                            "kind": "GridLayoutItem",
+                            "spec": {
+                              "x": 0,
+                              "y": 0,
+                              "width": 24,
+                              "height": 8,
+                              "element": {"kind": "ElementReference", "name": "request-rate"}
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }, {
+                  "kind": "RowsLayoutRow",
+                  "spec": {
+                    "title": "Nested",
+                    "collapse": false,
+                    "hideHeader": false,
+                    "layout": {
+                      "kind": "GridLayout",
+                      "spec": {
+                        "items": [
+                          {
+                            "kind": "GridLayoutItem",
+                            "spec": {
+                              "x": 0,
+                              "y": 0,
+                              "width": 12,
+                              "height": 8,
+                              "element": {"kind": "ElementReference", "name": "request-total"}
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }]
+              }
+            }
+          }
+        }, {
+          "kind": "RowsLayoutRow",
+          "spec": {
+            "title": "Collapsed details",
+            "collapse": true,
+            "hideHeader": false,
+            "layout": {
+              "kind": "GridLayout",
+              "spec": {
+                "items": [
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "x": 0,
+                      "y": 0,
+                      "width": 12,
+                      "height": 8,
+                      "element": {"kind": "ElementReference", "name": "targets-up"}
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }]
+      }
+    },
+    "variables": [],
+    "timeSettings": {
+      "from": "now-6h",
+      "to": "now",
+      "autoRefresh": "5s"
+    }
+  },
+  "status": {}
+}

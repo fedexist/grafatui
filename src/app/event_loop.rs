@@ -50,7 +50,7 @@ where
                 }
                 Event::Mouse(mouse) => {
                     let size = terminal.size()?;
-                    input::handle_mouse(mouse, size, app)?
+                    input::handle_mouse(mouse, size, app).await?
                 }
                 _ => InputAction::Redraw,
             };
