@@ -298,7 +298,7 @@ pub(crate) fn render_svg(app: &AppState, viewport: Rect) -> String {
         let Some(panel) = app.panels.get(index) else {
             continue;
         };
-        let selected = index == app.selected_panel;
+        let selected = Some(index) == app.selected_panel_index();
         let panel_rect = scaled_rect(rect);
         render_panel(app, index, panel, panel_rect, selected, &mut out);
     }

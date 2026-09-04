@@ -61,16 +61,12 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
 
     let mut selected_rendered_cluster = None;
     if app.mode == AppMode::Fullscreen || app.mode == AppMode::FullscreenInspect {
-        if let Some(p) = app.panels.get(app.selected_panel) {
-            selected_rendered_cluster = render_panel(
-                frame,
-                inner_area,
-                app.selected_panel,
-                p,
-                app,
-                true,
-                app.cursor_x,
-            );
+        if let Some((panel_index, p)) = app
+            .selected_panel_index()
+            .and_then(|index| app.panels.get(index).map(|panel| (index, panel)))
+        {
+            selected_rendered_cluster =
+                render_panel(frame, inner_area, panel_index, p, app, true, app.cursor_x);
         }
     } else {
         let has_grid = app.panels.iter().any(|p| p.grid.is_some());
@@ -84,7 +80,7 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
         for (rect, panel_idx) in &panel_rects {
             // eprintln!("Rendering panel {} at {:?}", panel_idx, rect);
             if let Some(p) = app.panels.get(*panel_idx) {
-                let is_selected = *panel_idx == app.selected_panel;
+                let is_selected = Some(*panel_idx) == app.selected_panel_index();
                 let rendered_cluster =
                     render_panel(frame, *rect, *panel_idx, p, app, is_selected, app.cursor_x);
                 if is_selected {
@@ -169,9 +165,12 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
         let results: Vec<ListItem> = app
             .search_results
             .iter()
-            .map(|&idx| {
-                let p = &app.panels[idx];
-                ListItem::new(format!("• {}", p.title))
+            .filter_map(|item| {
+                let crate::dashboard::DashboardItemId::Panel(index) = item else {
+                    return None;
+                };
+                let panel = app.panels.get(*index)?;
+                Some(ListItem::new(format!("• {}", panel.title)))
             })
             .collect();
         let list = List::new(results)
@@ -383,7 +382,7 @@ mod tests {
         for (width, height) in [(120, 30), (80, 24)] {
             let mut app = v2_compatibility_app();
             assert_eq!(app.panels.len(), 2);
-            assert_eq!(app.selected_panel, 0);
+            assert_eq!(app.selected_panel_index(), Some(0));
             assert_eq!(app.skipped_panels, 0);
             assert_eq!(app.panels[0].panel_type, PanelType::Graph);
             assert_eq!(app.panels[1].panel_type, PanelType::Stat);
@@ -457,6 +456,7 @@ mod tests {
         );
         let mut app = test_app();
         app.panels = vec![graph_panel("CPU"), graph_panel("Memory")];
+        app.apply_layout(crate::dashboard::DashboardLayout::flat(app.panels.len()));
         app.view_end_ts = 100;
         app.range = std::time::Duration::from_secs(100);
         app.mode = AppMode::Inspect;
@@ -483,7 +483,7 @@ mod tests {
             vec!["cpu deploy"]
         );
 
-        app.selected_panel = 1;
+        app.selected_item = Some(crate::dashboard::DashboardItemId::Panel(1));
         terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
         assert!(app.rendered_annotation_cluster.is_none());
 

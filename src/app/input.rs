@@ -16,6 +16,7 @@
 
 use super::state::{AppMode, AppState, YAxisMode};
 use crate::annotations::AnnotationModal;
+use crate::dashboard::DashboardItemId;
 use crate::ui;
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -134,7 +135,7 @@ pub(super) fn handle_mouse(
         MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left) => {
             let rect = Rect::new(0, 0, terminal_size.width, terminal_size.height);
             if let Some((idx, panel_rect)) = ui::hit_test(app, rect, mouse.column, mouse.row) {
-                app.selected_panel = idx;
+                app.selected_item = Some(DashboardItemId::Panel(idx));
 
                 match app.mode {
                     AppMode::Normal | AppMode::Inspect => {}
@@ -174,8 +175,8 @@ fn handle_search_key(key: KeyEvent, app: &mut AppState) -> InputAction {
             app.search_results.clear();
         }
         KeyCode::Enter => {
-            if let Some(&idx) = app.search_results.first() {
-                app.selected_panel = idx;
+            if let Some(&DashboardItemId::Panel(index)) = app.search_results.first() {
+                app.selected_item = Some(DashboardItemId::Panel(index));
                 app.mode = AppMode::Fullscreen;
                 app.search_query.clear();
                 app.search_results.clear();
@@ -272,21 +273,21 @@ fn handle_fullscreen_inspect_key(key: KeyEvent, app: &mut AppState) -> InputActi
 
 async fn handle_normal_key(key: KeyEvent, app: &mut AppState) -> Result<InputAction> {
     let action = match key.code {
-        KeyCode::Char('f') => {
+        KeyCode::Char('f') if app.selected_panel_index().is_some() => {
             app.mode = AppMode::Fullscreen;
             InputAction::Redraw
         }
-        KeyCode::Char('v') => {
+        KeyCode::Char('v') if app.selected_panel_index().is_some() => {
             app.mode = AppMode::Inspect;
             app.center_cursor();
             InputAction::Redraw
         }
         KeyCode::Up | KeyCode::Char('k') => {
-            app.select_previous_panel();
+            app.select_previous_item();
             InputAction::Redraw
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            app.select_next_panel();
+            app.select_next_item();
             InputAction::Redraw
         }
         KeyCode::PageUp => {
@@ -367,7 +368,10 @@ async fn handle_shared_keys(key: KeyEvent, app: &mut AppState) -> Result<SharedK
             Ok(SharedKeyResult::Handled)
         }
         KeyCode::Char('y') => {
-            if let Some(panel) = app.panels.get_mut(app.selected_panel) {
+            if let Some(panel) = app
+                .selected_panel_index()
+                .and_then(|index| app.panels.get_mut(index))
+            {
                 panel.y_axis_mode = match panel.y_axis_mode {
                     YAxisMode::Auto => YAxisMode::ZeroBased,
                     YAxisMode::ZeroBased => YAxisMode::Auto,
@@ -397,12 +401,15 @@ fn update_search_results(app: &mut AppState) {
     }
 
     let query = app.search_query.to_lowercase();
+    let visible_panels = app.visible_panel_indices();
     app.search_results = app
         .panels
         .iter()
         .enumerate()
-        .filter(|(_, panel)| panel.title.to_lowercase().contains(&query))
-        .map(|(i, _)| i)
+        .filter(|(index, panel)| {
+            visible_panels.contains(index) && panel.title.to_lowercase().contains(&query)
+        })
+        .map(|(index, _)| DashboardItemId::Panel(index))
         .collect();
 }
 
@@ -410,7 +417,10 @@ fn toggle_series_visibility(app: &mut AppState, c: char) {
     let Some(digit) = c.to_digit(10) else {
         return;
     };
-    let Some(panel) = app.panels.get_mut(app.selected_panel) else {
+    let Some(panel) = app
+        .selected_panel_index()
+        .and_then(|index| app.panels.get_mut(index))
+    else {
         return;
     };
 
@@ -430,6 +440,9 @@ fn toggle_series_visibility(app: &mut AppState, c: char) {
 mod tests {
     use super::*;
     use crate::app::{GraphOptions, PanelOptions, PanelState, PanelType, SeriesView};
+    use crate::dashboard::{
+        DashboardItemId, DashboardLayout, DashboardLayoutItem, DashboardRow, RowId,
+    };
     use crate::export::ExportOptions;
     use crate::prom;
     use crate::theme::Theme;
@@ -494,6 +507,57 @@ mod tests {
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
             options: PanelOptions::Graph(GraphOptions::default()),
+        }
+    }
+
+    fn row_selected_app() -> AppState {
+        let mut app = test_app();
+        app.apply_layout(DashboardLayout::new(vec![DashboardLayoutItem::Row(
+            DashboardRow::new(
+                RowId::new(0),
+                "Row",
+                false,
+                false,
+                vec![DashboardLayoutItem::Panel(0), DashboardLayoutItem::Panel(1)],
+            ),
+        )]));
+        assert_eq!(app.selected_item, Some(DashboardItemId::Row(RowId::new(0))));
+        app
+    }
+
+    #[tokio::test]
+    async fn panel_only_normal_actions_no_op_when_a_row_is_selected() {
+        for code in [
+            KeyCode::Char('f'),
+            KeyCode::Char('v'),
+            KeyCode::Char('y'),
+            KeyCode::Char('1'),
+        ] {
+            let mut app = row_selected_app();
+            let series_visibility = app.panels[0]
+                .series
+                .iter()
+                .map(|series| series.visible)
+                .collect::<Vec<_>>();
+
+            handle_key(key(code), size(), &mut app).await.unwrap();
+
+            assert_eq!(app.mode, AppMode::Normal, "key {code:?} changed mode");
+            assert_eq!(app.cursor_x, None, "key {code:?} created a cursor");
+            assert_eq!(
+                app.panels[0].y_axis_mode,
+                YAxisMode::Auto,
+                "key {code:?} changed y axis"
+            );
+            assert_eq!(
+                app.panels[0]
+                    .series
+                    .iter()
+                    .map(|series| series.visible)
+                    .collect::<Vec<_>>(),
+                series_visibility,
+                "key {code:?} changed series visibility"
+            );
         }
     }
 
@@ -646,7 +710,7 @@ mod tests {
             panic!("tag modal should remain open");
         };
         assert_eq!(modal.selected(), 1);
-        assert_eq!(app.selected_panel, 0);
+        assert_eq!(app.selected_panel_index(), Some(0));
         assert_eq!(app.range, original_range);
     }
 
@@ -767,7 +831,7 @@ mod tests {
             )]);
         app.open_tag_filter_modal();
         app.mode = AppMode::FullscreenInspect;
-        app.selected_panel = 1;
+        app.selected_item = Some(DashboardItemId::Panel(1));
         app.cursor_x = Some(50.0);
         app.vertical_scroll = 3;
 
@@ -788,7 +852,7 @@ mod tests {
             )
             .unwrap();
             assert_eq!(action, InputAction::Redraw);
-            assert_eq!(app.selected_panel, 1);
+            assert_eq!(app.selected_panel_index(), Some(1));
             assert_eq!(app.cursor_x, Some(50.0));
             assert_eq!(app.vertical_scroll, 3);
         }
@@ -801,12 +865,12 @@ mod tests {
         handle_key(key(KeyCode::Char('j')), size(), &mut app)
             .await
             .unwrap();
-        assert_eq!(app.selected_panel, 1);
+        assert_eq!(app.selected_panel_index(), Some(1));
 
         handle_key(key(KeyCode::Char('k')), size(), &mut app)
             .await
             .unwrap();
-        assert_eq!(app.selected_panel, 0);
+        assert_eq!(app.selected_panel_index(), Some(0));
     }
 
     #[tokio::test]
@@ -893,7 +957,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(app.search_query, "m");
-        assert_eq!(app.search_results, vec![1]);
+        assert_eq!(app.search_results, vec![DashboardItemId::Panel(1)]);
 
         handle_key(key(KeyCode::Backspace), size(), &mut app)
             .await
@@ -907,7 +971,7 @@ mod tests {
         handle_key(key(KeyCode::Enter), size(), &mut app)
             .await
             .unwrap();
-        assert_eq!(app.selected_panel, 0);
+        assert_eq!(app.selected_panel_index(), Some(0));
         assert_eq!(app.mode, AppMode::Fullscreen);
 
         handle_key(key(KeyCode::Esc), size(), &mut app)
@@ -924,12 +988,12 @@ mod tests {
         handle_key(key(KeyCode::PageDown), size(), &mut app)
             .await
             .unwrap();
-        assert_eq!(app.selected_panel, 1);
+        assert_eq!(app.selected_panel_index(), Some(1));
 
         handle_key(key(KeyCode::PageUp), size(), &mut app)
             .await
             .unwrap();
-        assert_eq!(app.selected_panel, 0);
+        assert_eq!(app.selected_panel_index(), Some(0));
 
         handle_key(key(KeyCode::Char('v')), size(), &mut app)
             .await
