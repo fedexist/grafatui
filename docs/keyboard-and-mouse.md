@@ -11,7 +11,9 @@ Grafatui is designed for keyboard-first dashboard inspection.
 | `+` / `-` | Zoom out / in |
 | `[` / `]` | Pan left / right in time |
 | `0` | Reset to live mode |
-| `Up` / `Down` or `k` / `j` | Select previous or next panel |
+| `Up` / `Down` or `k` / `j` | Select previous or next visible row or panel |
+| `Enter` / `Space` | Toggle the selected row |
+| `Left` / `Right` | Collapse / expand the selected row |
 | `PgUp` / `PgDn` | Scroll vertically, or select panels in fullscreen |
 | `Home` / `End` | Jump to top or bottom |
 | `y` | Toggle Y-axis mode |
@@ -19,12 +21,12 @@ Grafatui is designed for keyboard-first dashboard inspection.
 | `a` | Toggle external annotation markers |
 | `t` | Open the global annotation tag filter |
 | `1` through `9` | Toggle series visibility |
-| `f` / `Enter` | Toggle fullscreen mode |
+| `f` | Toggle fullscreen mode for the selected panel |
 | `v` | Toggle value inspection mode |
 | `Enter` in inspect mode | Open the selected panel's annotation cluster at the cursor |
 | `e` | Export current view |
 | `Ctrl+E` | Start or stop changed-frame recording |
-| `/` | Search panels |
+| `/` | Search visible rows and panels |
 | `Left` / `Right` | Move cursor in inspect mode |
 | `?` | Toggle debug info |
 
@@ -32,11 +34,12 @@ Grafatui is designed for keyboard-first dashboard inspection.
 
 | Action | Behavior |
 |---|---|
-| Click | Select a panel, or move the cursor in fullscreen inspect mode |
+| Click | Select a row or panel; click a row disclosure marker to toggle it; move the cursor in fullscreen inspect mode |
 | Drag | Move the cursor in fullscreen inspect mode |
 | Scroll | Scroll the dashboard vertically |
 
-In normal mode, clicking selects panels. Press `v` or `f` to use cursor-focused interactions.
+In normal mode, clicking selects rows or panels. Press `v` or `f` on a selected
+panel to use cursor-focused interactions.
 
 ## Annotation Modals
 

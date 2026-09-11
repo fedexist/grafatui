@@ -3,15 +3,28 @@ use anyhow::Result;
 use super::{DashboardImport, GridPos, ImportDiagnostic, QueryPanel, TemplateQueryVar, model};
 
 pub(super) fn finish(dashboard: model::Dashboard) -> Result<DashboardImport> {
+    let model::Dashboard {
+        title,
+        refresh,
+        variables,
+        layout,
+        skipped_panels,
+        diagnostics,
+    } = dashboard;
     let mut out = DashboardImport {
-        title: dashboard.title,
-        refresh_rate_ms: dashboard.refresh.as_deref().and_then(parse_refresh_rate_ms),
-        skipped_panels: dashboard.skipped_panels,
-        diagnostics: dashboard.diagnostics,
+        title,
+        refresh_rate_ms: refresh.as_deref().and_then(parse_refresh_rate_ms),
+        skipped_panels,
+        diagnostics,
         ..DashboardImport::default()
     };
-    import_variables(&mut out, dashboard.variables);
-    import_panels(&mut out, dashboard.panels)?;
+    import_variables(&mut out, variables);
+    let mut next_row_id = 0;
+    out.layout = crate::dashboard::DashboardLayout::new(import_layout_nodes(
+        layout,
+        &mut out,
+        &mut next_row_id,
+    )?);
     Ok(out)
 }
 
@@ -79,125 +92,159 @@ fn value_is_all(value: Option<&serde_json::Value>) -> bool {
     }
 }
 
-fn import_panels(out: &mut DashboardImport, panels: Vec<model::Panel>) -> Result<()> {
-    for panel in panels {
-        let panel_type = match panel.kind.as_str() {
-            "graph" | "timeseries" => crate::app::PanelType::Graph,
-            "stat" => crate::app::PanelType::Stat,
-            "gauge" => crate::app::PanelType::Gauge,
-            "bargauge" => crate::app::PanelType::BarGauge,
-            "table" => crate::app::PanelType::Table,
-            "heatmap" => crate::app::PanelType::Heatmap,
-            _ => crate::app::PanelType::Unknown,
-        };
+fn import_panel(panel: model::Panel, out: &mut DashboardImport) -> Result<Option<usize>> {
+    let panel_type = match panel.kind.as_str() {
+        "graph" | "timeseries" => crate::app::PanelType::Graph,
+        "stat" => crate::app::PanelType::Stat,
+        "gauge" => crate::app::PanelType::Gauge,
+        "bargauge" => crate::app::PanelType::BarGauge,
+        "table" => crate::app::PanelType::Table,
+        "heatmap" => crate::app::PanelType::Heatmap,
+        _ => crate::app::PanelType::Unknown,
+    };
 
-        if panel_type == crate::app::PanelType::Unknown {
-            if !panel.kind.is_empty() && panel.kind != "row" {
-                out.skipped_panels += 1;
-                out.diagnostics.push(ImportDiagnostic::new(
-                    "skipped_panel",
-                    panel.source_path,
-                    format!(
-                        "unsupported panel type `{}` skipped for panel `{}`",
-                        panel.kind, panel.title
-                    ),
-                ));
-            }
+    if panel_type == crate::app::PanelType::Unknown {
+        if !panel.kind.is_empty() && panel.kind != "row" {
+            out.skipped_panels += 1;
+            out.diagnostics.push(ImportDiagnostic::new(
+                "skipped_panel",
+                panel.source_path,
+                format!(
+                    "unsupported panel type `{}` skipped for panel `{}`",
+                    panel.kind, panel.title
+                ),
+            ));
+        }
+        return Ok(None);
+    }
+
+    let mut exprs = Vec::new();
+    let mut expr_paths = Vec::new();
+    let mut legends = Vec::new();
+    let mut query_modes = Vec::new();
+    for target in panel.targets {
+        if target.hidden {
             continue;
         }
-
-        let mut exprs = Vec::new();
-        let mut expr_paths = Vec::new();
-        let mut legends = Vec::new();
-        let mut query_modes = Vec::new();
-        for target in panel.targets {
-            if target.hidden {
-                continue;
-            }
-            if let Some(expr) = target.expr {
-                exprs.push(expr);
-                expr_paths.push(target.expr_path);
-                legends.push(target.legend_format);
-                query_modes.push(query_mode_for_target(target.instant, panel_type));
-            }
+        if let Some(expr) = target.expr {
+            exprs.push(expr);
+            expr_paths.push(target.expr_path);
+            legends.push(target.legend_format);
+            query_modes.push(query_mode_for_target(target.instant, panel_type));
         }
+    }
 
-        let mut thresholds = None;
-        let mut min = None;
-        let mut max = None;
-        let mut autogrid = None;
-        let mut display = crate::ui::DisplayFormat::default();
-        let mut graph_options = crate::app::GraphOptions::default();
+    let mut thresholds = None;
+    let mut min = None;
+    let mut max = None;
+    let mut autogrid = None;
+    let mut display = crate::ui::DisplayFormat::default();
+    let mut graph_options = crate::app::GraphOptions::default();
 
-        if let Some(path) = panel.transformations_path {
+    if let Some(path) = panel.transformations_path {
+        out.diagnostics.push(ImportDiagnostic::new(
+            "ignored_field",
+            path,
+            "`transformations` are not supported yet; queries will run without Grafana transformations",
+        ));
+    }
+
+    if let Some(path) = panel.reduce_options_path {
+        out.diagnostics.push(ImportDiagnostic::new(
+            "ignored_field",
+            path,
+            "`options.reduceOptions` is not supported yet; Grafatui will use default value selection",
+        ));
+    }
+
+    if let Some(defaults) = panel.field_defaults {
+        if let Some(path) = defaults.mappings_path {
             out.diagnostics.push(ImportDiagnostic::new(
-                "ignored_field",
-                path,
-                "`transformations` are not supported yet; queries will run without Grafana transformations",
-            ));
-        }
-
-        if let Some(path) = panel.reduce_options_path {
-            out.diagnostics.push(ImportDiagnostic::new(
-                "ignored_field",
-                path,
-                "`options.reduceOptions` is not supported yet; Grafatui will use default value selection",
-            ));
-        }
-
-        if let Some(defaults) = panel.field_defaults {
-            if let Some(path) = defaults.mappings_path {
-                out.diagnostics.push(ImportDiagnostic::new(
                     "ignored_field",
                     path,
                     "`fieldConfig.defaults.mappings` is not supported yet; value mappings will be ignored",
                 ));
-            }
-            graph_options = graph_options_from_custom(defaults.custom.as_ref());
-            display = crate::ui::DisplayFormat {
-                unit: defaults.unit,
-                decimals: defaults.decimals,
-                no_value: defaults.no_value,
-            };
-            min = defaults.min;
-            max = defaults.max;
-            autogrid = defaults
-                .custom
-                .as_ref()
-                .and_then(|custom| custom.axis_grid_show);
-            thresholds = thresholds_from_model(defaults.thresholds, defaults.custom.as_ref());
         }
+        graph_options = graph_options_from_custom(defaults.custom.as_ref());
+        display = crate::ui::DisplayFormat {
+            unit: defaults.unit,
+            decimals: defaults.decimals,
+            no_value: defaults.no_value,
+        };
+        min = defaults.min;
+        max = defaults.max;
+        autogrid = defaults
+            .custom
+            .as_ref()
+            .and_then(|custom| custom.axis_grid_show);
+        thresholds = thresholds_from_model(defaults.thresholds, defaults.custom.as_ref());
+    }
 
-        if !exprs.is_empty() {
-            let options = match panel_type {
-                crate::app::PanelType::Graph => crate::app::PanelOptions::Graph(graph_options),
-                _ => crate::app::PanelOptions::None,
-            };
-            out.queries.push(QueryPanel {
-                title: panel.title,
-                exprs,
-                expr_paths,
-                legends,
-                query_modes,
-                grid: panel.grid.map(|grid| GridPos {
-                    x: grid.x,
-                    y: grid.y,
-                    w: grid.w,
-                    h: grid.h,
-                }),
-                panel_type,
-                thresholds,
-                min,
-                max,
-                autogrid,
-                display,
-                options,
-            });
-        } else if panel.count_as_skipped_if_empty {
+    if !exprs.is_empty() {
+        let options = match panel_type {
+            crate::app::PanelType::Graph => crate::app::PanelOptions::Graph(graph_options),
+            _ => crate::app::PanelOptions::None,
+        };
+        let index = out.queries.len();
+        out.queries.push(QueryPanel {
+            title: panel.title,
+            exprs,
+            expr_paths,
+            legends,
+            query_modes,
+            grid: panel.grid.map(|grid| GridPos {
+                x: grid.x,
+                y: grid.y,
+                w: grid.w,
+                h: grid.h,
+            }),
+            panel_type,
+            thresholds,
+            min,
+            max,
+            autogrid,
+            display,
+            options,
+        });
+        Ok(Some(index))
+    } else {
+        if panel.count_as_skipped_if_empty {
             out.skipped_panels += 1;
         }
+        Ok(None)
     }
-    Ok(())
+}
+
+fn import_layout_nodes(
+    nodes: Vec<model::LayoutNode>,
+    out: &mut DashboardImport,
+    next_row_id: &mut usize,
+) -> Result<Vec<crate::dashboard::DashboardLayoutItem>> {
+    let mut items = Vec::new();
+    for node in nodes {
+        match node {
+            model::LayoutNode::Panel(panel) => {
+                if let Some(index) = import_panel(panel, out)? {
+                    items.push(crate::dashboard::DashboardLayoutItem::Panel(index));
+                }
+            }
+            model::LayoutNode::Row(row) => {
+                let id = crate::dashboard::RowId::new(*next_row_id);
+                *next_row_id += 1;
+                let children = import_layout_nodes(row.children, out, next_row_id)?;
+                items.push(crate::dashboard::DashboardLayoutItem::Row(
+                    crate::dashboard::DashboardRow::new(
+                        id,
+                        row.title,
+                        row.collapsed,
+                        row.hidden_header,
+                        children,
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(items)
 }
 
 fn query_mode_for_target(

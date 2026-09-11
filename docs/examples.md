@@ -36,6 +36,12 @@ docker-compose down -v
   cargo run -- --grafana-json examples/dashboards/grafana_v2_compatibility.json --prometheus-url http://localhost:19090
   ```
 
+- `examples/dashboards/grafana_v2_rows.json`: exact Grafana V2 resource showing expanded, nested, and initially collapsed `RowsLayout` rows with three Prometheus panels. Run it with:
+
+  ```bash
+  cargo run -- --grafana-json examples/dashboards/grafana_v2_rows.json --prometheus-url http://localhost:19090
+  ```
+
 - `examples/demo/vllm/grafana.json`: vLLM-oriented dashboard for the mock demo services.
 
 ## More Detail

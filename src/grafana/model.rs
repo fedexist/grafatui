@@ -7,9 +7,26 @@ pub(super) struct Dashboard {
     pub(super) title: String,
     pub(super) refresh: Option<String>,
     pub(super) variables: Vec<Variable>,
-    pub(super) panels: Vec<Panel>,
+    pub(super) layout: Vec<LayoutNode>,
     pub(super) skipped_panels: usize,
     pub(super) diagnostics: Vec<ImportDiagnostic>,
+}
+
+#[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
+pub(super) enum LayoutNode {
+    Panel(Panel),
+    Row(Row),
+}
+
+#[derive(Debug)]
+pub(super) struct Row {
+    pub(super) title: String,
+    pub(super) collapsed: bool,
+    pub(super) hidden_header: bool,
+    #[allow(dead_code)]
+    pub(super) source_path: String,
+    pub(super) children: Vec<LayoutNode>,
 }
 
 #[derive(Debug)]

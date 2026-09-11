@@ -4,7 +4,7 @@ This document provides a comprehensive feature-parity table between the
 [Grafana dashboard JSON models](https://grafana.com/docs/grafana/latest/visualizations/dashboards/build-dashboards/view-dashboard-json-model/)
 and what Grafatui currently supports.
 
-> **Snapshot**: Grafatui v0.1.11. The roadmap prioritizes Grafana parity first,
+> **Snapshot**: Grafatui v0.1.12. The roadmap prioritizes Grafana parity first,
 > then user-visible product value. See the [roadmap](https://github.com/fedexist/grafatui/blob/main/ROADMAP.md) for milestone
 > slices built from this compatibility ladder.
 
@@ -18,16 +18,17 @@ and what Grafatui currently supports.
 
 ## Dashboard Schema Models
 
-Grafatui imports the non-resource Classic JSON model and a fixed-grid subset of
-the V2 Resource JSON model. In Grafana 13, use **Export as code → Advanced
-options → Model: Classic** as the fallback for advanced V2 dashboards. See the
+Grafatui imports the non-resource Classic JSON model and a `GridLayout` plus
+recursive `RowsLayout` subset of the V2 Resource JSON model. In Grafana 13, use
+**Export as code → Advanced options → Model: Classic** as the fallback for
+unsupported advanced V2 dashboards. See the
 [dashboard import guide](grafana-dashboard-import.md) for detailed steps.
 
 | Model | Status | Notes |
 |---|---|---|
 | Classic JSON | ✅ Supported | Accepted by `--grafana-json`; the remaining tables describe support for its fields |
 | V1 Resource JSON | ❌ Not Implemented | The Kubernetes-style `dashboard.grafana.app/v1` resource envelope is not accepted |
-| V2 Resource JSON | 🔶 Partial | JSON-only exact `dashboard.grafana.app/v2` resources with `GridLayout` are supported |
+| V2 Resource JSON | 🔶 Partial | JSON-only exact `dashboard.grafana.app/v2` resources with `GridLayout` and nested `RowsLayout` are supported |
 | Resource YAML | ❌ Not Implemented | `--grafana-json` accepts JSON only |
 
 ### V2 Resource JSON Subset
@@ -36,17 +37,18 @@ options → Model: Classic** as the fallback for advanced V2 dashboards. See the
 |---|---|---|
 | Exact `apiVersion: dashboard.grafana.app/v2` | ✅ Supported | Other resource versions are rejected |
 | `spec.layout.kind: GridLayout` | ✅ Supported | `GridLayoutItem` coordinates map to Grafatui's fixed 24-column grid |
+| `spec.layout.kind: RowsLayout` | ✅ Supported | Nested `GridLayout` and `RowsLayout` children preserve row titles, nesting, collapsed state, and hidden-header transparency |
 | Inline `Panel` elements | ✅ Supported | Supported panel visualization groups map through the Classic-equivalent importer |
 | Prometheus `PanelQuery` queries | ✅ Supported | Non-Prometheus datasources emit import diagnostics and are skipped |
 | Top-level `spec.variables` | 🔶 Partial | Supported variable kinds map to Grafatui variables; unsupported kinds emit diagnostics |
 | `spec.timeSettings.autoRefresh` | ✅ Supported | Used as the dashboard refresh interval |
 | `vizConfig.spec.fieldConfig` | 🔶 Partial | The supported Classic-equivalent field configuration subset applies |
-| Rows, Tabs, and Auto-grid layouts | ❌ Not Implemented | Rejected as fatal import errors |
-| Repeated grid items | ❌ Not Implemented | Rejected as fatal import errors |
-| Conditional rendering, nested variables, and library panels | ❌ Not Implemented | Deferred V2 features |
+| Tabs and Auto-grid layouts | ❌ Not Implemented | Rejected as fatal import errors |
+| Repeated grid items and row repeat | ❌ Not Implemented | Rejected as fatal import errors |
+| Conditional rendering, non-empty nested variables, and library panels | ❌ Not Implemented | Deferred V2 features |
 
 Grafana V2 Resource YAML remains unsupported. Use a Classic export for any
-advanced V2 dashboard outside this fixed-grid subset.
+advanced V2 dashboard outside this fixed-grid-and-rows subset.
 
 ---
 
@@ -85,7 +87,7 @@ advanced V2 dashboard outside this fixed-grid subset.
 | `bargauge` | ✅ Supported | Vertical bar chart |
 | `table` | ✅ Supported | Two-column table (Series, Value) |
 | `heatmap` | ✅ Supported | Character-based block heatmap |
-| `row` | 🔶 Partial | Row panels are traversed for nested panels, but row headers/collapse are not rendered |
+| `row` | ✅ Supported | Headers, nested rows, and collapsed state are rendered and interactive |
 | `text` | ❌ Not Implemented | Skipped during import |
 | `dashlist` | ❌ Not Implemented | Skipped during import |
 | `alertlist` | ❌ Not Implemented | Skipped during import |
@@ -136,8 +138,8 @@ advanced V2 dashboard outside this fixed-grid subset.
 | `repeat` | ❌ Not Implemented | Template repeat not supported |
 | `repeatDirection` | ❌ Not Implemented | |
 | `maxPerRow` | ❌ Not Implemented | |
-| `collapsed` (row) | ❌ Not Implemented | Rows are always expanded |
-| `panels` (nested in row) | ✅ Supported | Nested panels are extracted recursively |
+| `collapsed` (row) | ✅ Supported | Initial collapsed state is preserved and interactive |
+| `panels` (nested in row) | ✅ Supported | Nested panels and rows retain their hierarchy |
 
 ---
 
@@ -331,8 +333,8 @@ compatibility with Grafana annotation queries, APIs, `annotations`, or
 | Category | Supported | Partial | Not Implemented | Not Applicable |
 |---|---|---|---|---|
 | Dashboard Properties | 1 | 0 | 10 | 4 |
-| Panel Types | 7 | 1 | 14 | 5 |
-| Panel Common Fields | 8 | 0 | 6 | 2 |
+| Panel Types | 8 | 0 | 14 | 5 |
+| Panel Common Fields | 9 | 0 | 5 | 2 |
 | Targets / Queries | 3 | 0 | 8 | 1 |
 | PromQL Variables | 7 | 0 | 0 | 0 |
 | Templating | 6 | 6 | 6 | 0 |
@@ -344,7 +346,7 @@ compatibility with Grafana annotation queries, APIs, `annotations`, or
 | Data Links / Transforms | 0 | 0 | 2 | 1 |
 | Alert Rules | 0 | 0 | 3 | 0 |
 | Datasources | 3 | 0 | 5 | 0 |
-| **Total** | **47** | **13** | **85** | **15** |
+| **Total** | **49** | **12** | **84** | **15** |
 
 ---
 
@@ -382,4 +384,4 @@ Grafatui provides several TUI-native capabilities that don't map directly to Gra
 
 ---
 
-*This document was reviewed against the Grafatui source code at v0.1.11. If you notice any inaccuracies, please open an issue or PR.*
+*This document was reviewed against the Grafatui source code at v0.1.12. If you notice any inaccuracies, please open an issue or PR.*

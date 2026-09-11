@@ -17,16 +17,18 @@ grafatui --prometheus-url http://prometheus.example.com:9090
 ## Import a Grafana Dashboard
 
 Grafatui imports either a Classic JSON dashboard or an exact
-`dashboard.grafana.app/v2` JSON resource that uses a `GridLayout`:
+`dashboard.grafana.app/v2` JSON resource that uses a `GridLayout` or nested
+`RowsLayout` containers:
 
 ```bash
 grafatui --prometheus-url http://localhost:9090 --grafana-json ./dashboard.json
 ```
 
-For advanced V2 dashboards that use rows, tabs, auto-grid, repeat, conditional
-rendering, nested variables, or library panels, use the Classic export fallback:
-open **Export as code → Advanced options**, set **Model** to **Classic**, then
-download or copy the JSON. V1 Resource and Resource YAML files are unsupported.
+For V2 dashboards that use tabs, auto-grid, repeat, conditional rendering,
+nested non-empty row variables, or library panels, use the Classic export
+fallback: open **Export as code → Advanced options**, set **Model** to
+**Classic**, then download or copy the JSON. V1 Resource and Resource YAML
+files are unsupported.
 See [Grafana Dashboard Import](grafana-dashboard-import.md) for the full format
 requirements.
 
@@ -62,6 +64,8 @@ docker-compose down -v
 | `r` | Force refresh |
 | `+` / `-` | Zoom out / in |
 | `[` / `]` | Pan left / right |
-| `f` / `Enter` | Fullscreen selected panel |
+| `f` | Fullscreen selected panel |
+| `Enter` / `Space` on a row | Toggle the row |
+| `Left` / `Right` on a row | Collapse / expand the row |
 | `v` | Inspect values |
-| `/` | Search panels |
+| `/` | Search visible rows and panels |

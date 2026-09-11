@@ -1,0 +1,10 @@
+{
+  "title": "Classic rows",
+  "panels": [
+    {"type":"row","title":"Expanded","collapsed":false,"gridPos":{"x":0,"y":0,"w":24,"h":1}},
+    {"type":"timeseries","title":"Expanded child","gridPos":{"x":0,"y":1,"w":24,"h":8},"targets":[{"expr":"up"}]},
+    {"type":"row","title":"Collapsed","collapsed":true,"gridPos":{"x":0,"y":9,"w":24,"h":1},"panels":[
+      {"type":"stat","title":"Collapsed child","gridPos":{"x":0,"y":10,"w":24,"h":6},"targets":[{"expr":"sum(up)"}]}
+    ]}
+  ]
+}
