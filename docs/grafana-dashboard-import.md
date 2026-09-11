@@ -6,17 +6,17 @@ panels in the terminal.
 | Format | Status | Requirements |
 |---|---|---|
 | Classic JSON | ✅ Supported | Non-resource object with fields such as `title`, `panels`, and `templating` |
-| V2 Resource JSON | 🔶 Partial | JSON only, exact `apiVersion: dashboard.grafana.app/v2`, and `GridLayout` or nested `RowsLayout` containers |
+| V2 Resource JSON | 🔶 Partial | JSON only, exact `apiVersion: dashboard.grafana.app/v2`, and recursive grid, row, or tab containers |
 | V1 Resource JSON | ❌ Unsupported | The `dashboard.grafana.app/v1` resource envelope is not accepted |
 | Resource YAML | ❌ Unsupported | `--grafana-json` accepts JSON only |
 
 The supported V2 subset maps inline `Panel` elements, Prometheus `PanelQuery`
 queries, top-level variables, `timeSettings.autoRefresh`, supported field
-configuration, fixed-grid positions, and nested `RowsLayout` containers to the
+configuration, fixed-grid positions, and nested `RowsLayout`/`TabsLayout` containers to the
 same Grafatui behavior as Classic JSON.
 
-`RowsLayout` rows may contain a `GridLayout` or another `RowsLayout`. Tabs,
-auto-grid, repeat, conditional rendering, nested non-empty row variables,
+Rows and tabs may recursively contain `GridLayout`, `RowsLayout`, or `TabsLayout`.
+Auto-grid, repeat, conditional rendering, nested non-empty layout variables,
 library panels, and Resource YAML remain unsupported; unsupported V2 layouts
 and fields are fatal import errors. Repeated grid items are also rejected rather
 than silently changing the dashboard.
@@ -34,8 +34,8 @@ than silently changing the dashboard.
 grafatui --prometheus-url http://localhost:9090 --grafana-json ./node-exporter.json
 ```
 
-Grafana 13 defaults to the V2 Resource model. Its fixed-grid and supported rows
-JSON resources can be imported directly. For tabs, auto-grid, or other deferred
+Grafana 13 defaults to the V2 Resource model. Its supported grid, row, and tab
+JSON resources can be imported directly. For auto-grid or other deferred
 V2 features, use this Classic export path as the fallback. Grafana documents the available models and export controls in
 [Export a dashboard as code](https://grafana.com/docs/grafana/latest/visualizations/dashboards/share-dashboards-panels/#export-a-dashboard-as-code).
 
