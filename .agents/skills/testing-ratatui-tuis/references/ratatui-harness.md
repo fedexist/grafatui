@@ -91,7 +91,7 @@ capture with:
 
 ## Complete Rust capture example
 
-This self-contained Ratatui 0.30.1 example has a deliberately small
+This self-contained Ratatui 0.30.2 example has a deliberately small
 `AppState`; replace its `render` implementation with the application render
 entry point while preserving the capture code. It needs `serde` with `derive`
 and `serde_json` in addition to `ratatui`.
@@ -282,12 +282,12 @@ above; assert them separately if they matter to behavior.
 
 ### API verification
 
-Grafatui's `ratatui = 0.30.1` resolves to `ratatui-core 0.1.1`. The capture
+Grafatui's `ratatui = 0.30.2` resolves to `ratatui-core 0.1.2`. The capture
 pattern was checked against the installed source with:
 
 ```bash
 rg -n 'pub const fn buffer|pub fn symbol|pub fg:|pub bg:|pub modifier:' \
-  "$HOME/.cargo/registry/src"/index.crates.io-*/ratatui-core-0.1.1/src
+  "$HOME/.cargo/registry/src"/index.crates.io-*/ratatui-core-0.1.2/src
 ```
 
 It uses the verified `TestBackend::buffer()`, `Buffer::cell((x, y))`,

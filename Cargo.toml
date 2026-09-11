@@ -23,7 +23,7 @@ clap_mangen = "0.2.26"
 crossterm = "0.29.0"
 futures = "0.3.31"
 humantime = "2.3.0"
-ratatui = { version = "0.30.1", features = ["crossterm"] }
+ratatui = { version = "0.30.2", features = ["crossterm"] }
 reqwest = { version = "0.12.24", default-features = false, features = ["json", "gzip", "brotli", "zstd", "rustls-tls"] }
 resvg = "0.45.1"
 serde = { version = "1.0.228", features = ["derive"] }
