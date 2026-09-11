@@ -17,15 +17,15 @@ grafatui --prometheus-url http://prometheus.example.com:9090
 ## Import a Grafana Dashboard
 
 Grafatui imports either a Classic JSON dashboard or an exact
-`dashboard.grafana.app/v2` JSON resource that uses a `GridLayout` or nested
-`RowsLayout` containers:
+`dashboard.grafana.app/v2` JSON resource that uses recursive grid, row, or tab
+containers:
 
 ```bash
 grafatui --prometheus-url http://localhost:9090 --grafana-json ./dashboard.json
 ```
 
-For V2 dashboards that use tabs, auto-grid, repeat, conditional rendering,
-nested non-empty row variables, or library panels, use the Classic export
+For V2 dashboards that use auto-grid, repeat, conditional rendering,
+nested non-empty layout variables, or library panels, use the Classic export
 fallback: open **Export as code → Advanced options**, set **Model** to
 **Classic**, then download or copy the JSON. V1 Resource and Resource YAML
 files are unsupported.

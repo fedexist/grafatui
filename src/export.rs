@@ -317,6 +317,61 @@ pub(crate) fn render_svg(app: &AppState, viewport: Rect) -> String {
                 selected,
                 &mut out,
             ),
+            ui::DashboardRectKind::Tabs { group_id, depth } => {
+                if let Some(group) = app.layout.tabs(group_id) {
+                    let titles = group
+                        .tabs
+                        .iter()
+                        .map(|tab| tab.title.clone())
+                        .collect::<Vec<_>>();
+                    let geometry = ui::tab_bar_geometry(item.rect, &titles, group.active, depth);
+                    for segment in geometry.segments {
+                        let rect = scaled_rect(segment.rect);
+                        let color = color_hex(
+                            if segment.active {
+                                app.theme.title
+                            } else {
+                                app.theme.text
+                            },
+                            &text,
+                        );
+                        let weight = if segment.active {
+                            r#" font-weight="bold""#
+                        } else {
+                            ""
+                        };
+                        let decoration = if selected {
+                            r#" text-decoration="underline""#
+                        } else {
+                            ""
+                        };
+                        write!(
+                            out,
+                            r#"<text x="{:.2}" y="{:.2}" fill="{}" font-size="{:.1}" text-anchor="start"{}{}>{}</text>"#,
+                            rect.left,
+                            rect.top + FONT_SIZE,
+                            color,
+                            FONT_SIZE,
+                            weight,
+                            decoration,
+                            escape_xml(&segment.text)
+                        )
+                        .unwrap();
+                    }
+                }
+            }
+            ui::DashboardRectKind::TabEmpty { .. } => {
+                let rect = scaled_rect(item.rect);
+                write_text(
+                    &mut out,
+                    rect.left + 16.0,
+                    rect.top + FONT_SIZE,
+                    "No supported panels in this tab",
+                    &text,
+                    "start",
+                    FONT_SIZE,
+                );
+            }
         }
     }
 
@@ -1749,7 +1804,8 @@ mod tests {
         PanelOptions, PanelState, SeriesView, YAxisMode,
     };
     use crate::dashboard::{
-        DashboardItemId, DashboardLayout, DashboardLayoutItem, DashboardRow, RowId,
+        DashboardItemId, DashboardLayout, DashboardLayoutItem, DashboardRow, DashboardTab,
+        DashboardTabs, RowId, TabGroupId,
     };
 
     fn test_panel(start: f64) -> PanelState {
@@ -1803,6 +1859,58 @@ mod tests {
             "dashed-line".to_string(),
             export,
         )
+    }
+
+    #[test]
+    fn svg_tab_switch_changes_frame_and_escapes_active_title() {
+        let recording_dir = test_export_dir("tabs-recording");
+        let mut app = test_app(ExportOptions {
+            dir: recording_dir.clone(),
+            format: ExportFormat::Svg,
+            record_max_frames: 10,
+        });
+        app.view_end_ts = 1_783_080_000;
+        let id = TabGroupId::new(0);
+        app.apply_layout(DashboardLayout::new(vec![DashboardLayoutItem::Tabs(
+            DashboardTabs::new(
+                id,
+                vec![
+                    DashboardTab {
+                        title: "CPU & load".into(),
+                        children: vec![],
+                    },
+                    DashboardTab {
+                        title: "Memory <rss>".into(),
+                        children: vec![],
+                    },
+                ],
+            ),
+        )]));
+        let viewport = Rect::new(0, 0, 100, 40);
+
+        let before = render_svg(&app, viewport);
+        start_recording(&mut app, viewport).unwrap();
+        assert_eq!(app.recording.as_ref().unwrap().frame_count, 1);
+        app.layout.set_active_tab(id, 1).unwrap();
+        let after = render_svg(&app, viewport);
+        capture_recording_frame(&mut app, viewport).unwrap();
+        assert_eq!(app.recording.as_ref().unwrap().frame_count, 2);
+
+        assert_ne!(before, after);
+        assert!(before.contains("CPU &amp; load"));
+        assert!(after.contains("Memory &lt;rss&gt;"));
+        assert!(after.contains("No supported panels in this tab"));
+        app.layout.set_active_tab(id, 1).unwrap();
+        assert_eq!(render_svg(&app, viewport), after);
+        capture_recording_frame(&mut app, viewport).unwrap();
+        assert_eq!(app.recording.as_ref().unwrap().frame_count, 2);
+        if let Ok(root) = std::env::var("GRAFATUI_TABS_CAPTURE_DIR") {
+            let directory = std::path::PathBuf::from(root).join("tabs-export");
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(directory.join("tabs-export-100x40.svg"), &after).unwrap();
+            write_png(&after, &directory.join("tabs-export-100x40.png")).unwrap();
+        }
+        std::fs::remove_dir_all(recording_dir).unwrap();
     }
 
     fn test_app_with_panel_type(panel_type: PanelType) -> AppState {

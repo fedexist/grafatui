@@ -16,7 +16,7 @@
 
 use crate::app::data::{downsample, expand_expr, format_legend};
 use crate::app::variables::refresh_query_variables;
-use crate::dashboard::{DashboardItemId, DashboardLayout, RowId};
+use crate::dashboard::{DashboardItemId, DashboardLayout, RowId, TabGroupId};
 use crate::export::{ExportOptions, RecordingState};
 use crate::grafana::TemplateQueryVar;
 use crate::prom;
@@ -445,14 +445,21 @@ impl AppState {
     pub(crate) fn selected_panel_index(&self) -> Option<usize> {
         match self.selected_item {
             Some(DashboardItemId::Panel(index)) => Some(index),
-            Some(DashboardItemId::Row(_)) | None => None,
+            Some(DashboardItemId::Row(_) | DashboardItemId::Tabs(_)) | None => None,
         }
     }
 
     pub(crate) fn selected_row_id(&self) -> Option<RowId> {
         match self.selected_item {
             Some(DashboardItemId::Row(id)) => Some(id),
-            Some(DashboardItemId::Panel(_)) | None => None,
+            Some(DashboardItemId::Panel(_) | DashboardItemId::Tabs(_)) | None => None,
+        }
+    }
+
+    pub(crate) fn selected_tab_group_id(&self) -> Option<TabGroupId> {
+        match self.selected_item {
+            Some(DashboardItemId::Tabs(id)) => Some(id),
+            Some(DashboardItemId::Panel(_) | DashboardItemId::Row(_)) | None => None,
         }
     }
 
@@ -531,6 +538,45 @@ impl AppState {
         self.reconcile_visible_annotation_targets();
         self.ensure_selection_visible();
         Ok(())
+    }
+
+    pub(crate) async fn activate_tab(&mut self, id: TabGroupId, index: usize) -> Result<()> {
+        let Some(change) = self.layout.set_active_tab(id, index) else {
+            return Ok(());
+        };
+        self.selected_item = Some(DashboardItemId::Tabs(id));
+        if !change.newly_visible_panels.is_empty() {
+            self.refresh_panel_indices(&change.newly_visible_panels, false)
+                .await;
+        }
+        self.reconcile_visible_annotation_targets();
+        self.ensure_selection_visible();
+        Ok(())
+    }
+
+    pub(crate) async fn move_selected_tab(&mut self, direction: isize) -> Result<()> {
+        let Some(id) = self.selected_tab_group_id() else {
+            return Ok(());
+        };
+        let Some(group) = self.layout.tabs(id) else {
+            return Ok(());
+        };
+        let Some(active) = group.active else {
+            return Ok(());
+        };
+        let next = active
+            .saturating_add_signed(direction)
+            .min(group.tabs.len().saturating_sub(1));
+        self.activate_tab(id, next).await
+    }
+
+    pub(crate) fn enter_selected_tab(&mut self) {
+        let Some(id) = self.selected_tab_group_id() else {
+            return;
+        };
+        if let Some(item) = self.layout.first_tab_descendant(id) {
+            self.selected_item = Some(item);
+        }
     }
 
     /// Compatibility wrapper for panel-only fullscreen navigation.

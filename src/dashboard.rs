@@ -8,15 +8,46 @@ impl RowId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct TabGroupId(usize);
+
+impl TabGroupId {
+    pub(crate) const fn new(value: usize) -> Self {
+        Self(value)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum DashboardItemId {
     Row(RowId),
+    Tabs(TabGroupId),
     Panel(usize),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DashboardLayoutItem {
     Row(DashboardRow),
+    Tabs(DashboardTabs),
     Panel(usize),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DashboardTab {
+    pub(crate) title: String,
+    pub(crate) children: Vec<DashboardLayoutItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DashboardTabs {
+    pub(crate) id: TabGroupId,
+    pub(crate) tabs: Vec<DashboardTab>,
+    pub(crate) active: Option<usize>,
+}
+
+impl DashboardTabs {
+    pub(crate) fn new(id: TabGroupId, tabs: Vec<DashboardTab>) -> Self {
+        let active = (!tabs.is_empty()).then_some(0);
+        Self { id, tabs, active }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +115,10 @@ impl DashboardLayout {
         find_row(&self.items, id)
     }
 
+    pub(crate) fn tabs(&self, id: TabGroupId) -> Option<&DashboardTabs> {
+        find_tabs(&self.items, id)
+    }
+
     pub(crate) fn visible_items(&self) -> Vec<VisibleDashboardItem> {
         let mut visible = Vec::new();
         collect_visible_items(&self.items, 0, &mut visible);
@@ -95,7 +130,7 @@ impl DashboardLayout {
             .into_iter()
             .filter_map(|item| match item.id {
                 DashboardItemId::Panel(index) => Some(index),
-                DashboardItemId::Row(_) => None,
+                DashboardItemId::Row(_) | DashboardItemId::Tabs(_) => None,
             })
             .collect()
     }
@@ -121,6 +156,33 @@ impl DashboardLayout {
         })
     }
 
+    pub(crate) fn set_active_tab(&mut self, id: TabGroupId, index: usize) -> Option<LayoutChange> {
+        let tabs = self.tabs(id)?;
+        if index >= tabs.tabs.len() {
+            return None;
+        }
+        if tabs.active == Some(index) {
+            return Some(LayoutChange::default());
+        }
+        let before = self.visible_panel_indices();
+        find_tabs_mut(&mut self.items, id)?.active = Some(index);
+        let after = self.visible_panel_indices();
+        Some(LayoutChange {
+            newly_visible_panels: after
+                .into_iter()
+                .filter(|panel| !before.contains(panel))
+                .collect(),
+        })
+    }
+
+    pub(crate) fn first_tab_descendant(&self, id: TabGroupId) -> Option<DashboardItemId> {
+        let group = self.tabs(id)?;
+        let tab = group.active.and_then(|index| group.tabs.get(index))?;
+        let mut visible = Vec::new();
+        collect_visible_items(&tab.children, 0, &mut visible);
+        visible.first().map(|item| item.id)
+    }
+
     pub(crate) fn first_visible(&self) -> Option<DashboardItemId> {
         self.visible_items().first().map(|item| item.id)
     }
@@ -133,8 +195,7 @@ impl DashboardLayout {
 
         let mut ancestors = Vec::new();
         if find_ancestors(&self.items, id, &mut ancestors) {
-            for row_id in ancestors.into_iter().rev() {
-                let ancestor = DashboardItemId::Row(row_id);
+            for ancestor in ancestors.into_iter().rev() {
                 if visible.iter().any(|item| item.id == ancestor) {
                     return Some(ancestor);
                 }
@@ -154,6 +215,12 @@ fn find_row(items: &[DashboardLayoutItem], id: RowId) -> Option<&DashboardRow> {
             if let Some(found) = find_row(&row.children, id) {
                 return Some(found);
             }
+        } else if let DashboardLayoutItem::Tabs(group) = item {
+            for tab in &group.tabs {
+                if let Some(found) = find_row(&tab.children, id) {
+                    return Some(found);
+                }
+            }
         }
     }
     None
@@ -168,6 +235,60 @@ fn find_row_mut(items: &mut [DashboardLayoutItem], id: RowId) -> Option<&mut Das
             if let Some(found) = find_row_mut(&mut row.children, id) {
                 return Some(found);
             }
+        } else if let DashboardLayoutItem::Tabs(group) = item {
+            for tab in &mut group.tabs {
+                if let Some(found) = find_row_mut(&mut tab.children, id) {
+                    return Some(found);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn find_tabs(items: &[DashboardLayoutItem], id: TabGroupId) -> Option<&DashboardTabs> {
+    for item in items {
+        match item {
+            DashboardLayoutItem::Tabs(group) => {
+                if group.id == id {
+                    return Some(group);
+                }
+                for tab in &group.tabs {
+                    if let Some(found) = find_tabs(&tab.children, id) {
+                        return Some(found);
+                    }
+                }
+            }
+            DashboardLayoutItem::Row(row) => {
+                if let Some(found) = find_tabs(&row.children, id) {
+                    return Some(found);
+                }
+            }
+            DashboardLayoutItem::Panel(_) => {}
+        }
+    }
+    None
+}
+
+fn find_tabs_mut(items: &mut [DashboardLayoutItem], id: TabGroupId) -> Option<&mut DashboardTabs> {
+    for item in items {
+        match item {
+            DashboardLayoutItem::Tabs(group) => {
+                if group.id == id {
+                    return Some(group);
+                }
+                for tab in &mut group.tabs {
+                    if let Some(found) = find_tabs_mut(&mut tab.children, id) {
+                        return Some(found);
+                    }
+                }
+            }
+            DashboardLayoutItem::Row(row) => {
+                if let Some(found) = find_tabs_mut(&mut row.children, id) {
+                    return Some(found);
+                }
+            }
+            DashboardLayoutItem::Panel(_) => {}
         }
     }
     None
@@ -195,6 +316,15 @@ fn collect_visible_items(
                     collect_visible_items(&row.children, depth + 1, visible);
                 }
             }
+            DashboardLayoutItem::Tabs(group) => {
+                visible.push(VisibleDashboardItem {
+                    id: DashboardItemId::Tabs(group.id),
+                    depth,
+                });
+                if let Some(tab) = group.active.and_then(|index| group.tabs.get(index)) {
+                    collect_visible_items(&tab.children, depth + 1, visible);
+                }
+            }
         }
     }
 }
@@ -202,7 +332,7 @@ fn collect_visible_items(
 fn find_ancestors(
     items: &[DashboardLayoutItem],
     target: DashboardItemId,
-    ancestors: &mut Vec<RowId>,
+    ancestors: &mut Vec<DashboardItemId>,
 ) -> bool {
     for item in items {
         match item {
@@ -213,9 +343,21 @@ fn find_ancestors(
                 if target == DashboardItemId::Row(row.id) {
                     return true;
                 }
-                ancestors.push(row.id);
+                ancestors.push(DashboardItemId::Row(row.id));
                 if find_ancestors(&row.children, target, ancestors) {
                     return true;
+                }
+                ancestors.pop();
+            }
+            DashboardLayoutItem::Tabs(group) => {
+                if target == DashboardItemId::Tabs(group.id) {
+                    return true;
+                }
+                ancestors.push(DashboardItemId::Tabs(group.id));
+                for tab in &group.tabs {
+                    if find_ancestors(&tab.children, target, ancestors) {
+                        return true;
+                    }
                 }
                 ancestors.pop();
             }
@@ -228,6 +370,101 @@ fn find_ancestors(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tabs_switch_returns_only_revealed_panels() {
+        let id = TabGroupId::new(0);
+        let mut layout = DashboardLayout::new(vec![DashboardLayoutItem::Tabs(DashboardTabs::new(
+            id,
+            vec![
+                DashboardTab {
+                    title: "A".into(),
+                    children: vec![DashboardLayoutItem::Panel(0)],
+                },
+                DashboardTab {
+                    title: "B".into(),
+                    children: vec![DashboardLayoutItem::Panel(1)],
+                },
+            ],
+        ))]);
+        assert_eq!(layout.visible_panel_indices(), vec![0]);
+        assert_eq!(
+            layout.set_active_tab(id, 1).unwrap().newly_visible_panels,
+            vec![1]
+        );
+        assert_eq!(layout.visible_panel_indices(), vec![1]);
+        assert!(
+            layout
+                .set_active_tab(id, 1)
+                .unwrap()
+                .newly_visible_panels
+                .is_empty()
+        );
+        assert_eq!(layout.set_active_tab(id, 2), None);
+        assert_eq!(
+            layout.nearest_visible_ancestor(DashboardItemId::Panel(0)),
+            Some(DashboardItemId::Tabs(id))
+        );
+    }
+
+    #[test]
+    fn nested_tab_and_row_state_survive_outer_switches() {
+        let outer_id = TabGroupId::new(0);
+        let inner_id = TabGroupId::new(1);
+        let mut layout = DashboardLayout::new(vec![DashboardLayoutItem::Tabs(DashboardTabs::new(
+            outer_id,
+            vec![
+                DashboardTab {
+                    title: "Nested".into(),
+                    children: vec![DashboardLayoutItem::Tabs(DashboardTabs::new(
+                        inner_id,
+                        vec![
+                            DashboardTab {
+                                title: "First".into(),
+                                children: vec![DashboardLayoutItem::Row(DashboardRow::new(
+                                    RowId::new(0),
+                                    "Collapsed",
+                                    true,
+                                    false,
+                                    vec![DashboardLayoutItem::Panel(0)],
+                                ))],
+                            },
+                            DashboardTab {
+                                title: "Second".into(),
+                                children: vec![DashboardLayoutItem::Panel(1)],
+                            },
+                        ],
+                    ))],
+                },
+                DashboardTab {
+                    title: "Other".into(),
+                    children: vec![DashboardLayoutItem::Panel(2)],
+                },
+            ],
+        ))]);
+
+        layout.set_active_tab(inner_id, 1).unwrap();
+        layout.set_active_tab(outer_id, 1).unwrap();
+        layout.set_active_tab(outer_id, 0).unwrap();
+
+        assert_eq!(layout.tabs(inner_id).unwrap().active, Some(1));
+        assert!(layout.row(RowId::new(0)).unwrap().collapsed);
+        assert_eq!(layout.visible_panel_indices(), vec![1]);
+    }
+
+    #[test]
+    fn empty_tab_groups_remain_visible_and_safe_to_enter() {
+        let id = TabGroupId::new(0);
+        let layout = DashboardLayout::new(vec![DashboardLayoutItem::Tabs(DashboardTabs::new(
+            id,
+            vec![],
+        ))]);
+
+        assert_eq!(layout.first_visible(), Some(DashboardItemId::Tabs(id)));
+        assert_eq!(layout.tabs(id).unwrap().active, None);
+        assert_eq!(layout.first_tab_descendant(id), None);
+        assert!(layout.visible_panel_indices().is_empty());
+    }
 
     #[test]
     fn collapsed_parent_hides_descendants_and_preserves_nested_state() {

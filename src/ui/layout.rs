@@ -16,7 +16,7 @@
 
 use crate::{
     app::{AppMode, AppState, PanelState},
-    dashboard::{DashboardItemId, DashboardLayoutItem, RowId},
+    dashboard::{DashboardItemId, DashboardLayoutItem, RowId, TabGroupId},
 };
 use ratatui::prelude::*;
 
@@ -34,6 +34,13 @@ pub(crate) enum DashboardRectKind {
         row_id: RowId,
         depth: usize,
         collapsed: bool,
+    },
+    Tabs {
+        group_id: TabGroupId,
+        depth: usize,
+    },
+    TabEmpty {
+        group_id: TabGroupId,
     },
     Panel {
         index: usize,
@@ -249,94 +256,24 @@ pub(crate) fn visible_dashboard_rects(area: Rect, app: &AppState) -> Vec<Dashboa
             .unwrap_or_default();
     }
 
-    let visible = app.layout.visible_items();
-    if !visible
+    let structurally_flat = app
+        .layout
+        .items
         .iter()
-        .any(|item| matches!(item.id, DashboardItemId::Row(_)))
-    {
-        let structurally_flat = app
-            .layout
-            .items
-            .iter()
-            .all(|item| matches!(item, DashboardLayoutItem::Panel(_)));
-        if structurally_flat {
-            let panel_rects = if app.panels.iter().any(|p| p.grid.is_some()) {
-                calculate_grid_layout(inner_area, app)
-            } else {
-                calculate_two_column_layout(inner_area, app)
-            };
-            return panel_rects
-                .into_iter()
-                .map(|(rect, index)| panel_rect(index, rect))
-                .collect();
-        }
-
-        let cell_h = std::cmp::max(3, inner_area.height / 24);
-        let mut projected = Vec::new();
-        let mut cursor_y = inner_area.y;
-        for group in transparent_panel_groups(&app.layout.items) {
-            cursor_y =
-                project_panel_group(inner_area, cursor_y, cell_h, app, &group, &mut projected);
-        }
-        let scroll_offset = u16::try_from(app.vertical_scroll)
-            .unwrap_or(u16::MAX)
-            .saturating_mul(cell_h);
-        return projected
+        .all(|item| matches!(item, DashboardLayoutItem::Panel(_)));
+    if structurally_flat {
+        let panel_rects = if app.panels.iter().any(|p| p.grid.is_some()) {
+            calculate_grid_layout(inner_area, app)
+        } else {
+            calculate_two_column_layout(inner_area, app)
+        };
+        return panel_rects
             .into_iter()
-            .filter_map(|item| clip_scrolled_rect(item, inner_area, scroll_offset))
+            .map(|(rect, index)| panel_rect(index, rect))
             .collect();
     }
 
-    let cell_h = std::cmp::max(3, inner_area.height / 24);
-    let mut projected = Vec::new();
-    let mut cursor_y = inner_area.y;
-    let mut position = 0;
-    while position < visible.len() {
-        match visible[position].id {
-            DashboardItemId::Row(row_id) => {
-                let Some(row) = app.layout.row(row_id) else {
-                    position += 1;
-                    continue;
-                };
-                let rect = Rect::new(inner_area.x, cursor_y, inner_area.width, 1);
-                projected.push(DashboardRect {
-                    id: DashboardItemId::Row(row_id),
-                    rect,
-                    disclosure_rect: Some(Rect::new(rect.x, rect.y, rect.width.min(1), 1)),
-                    kind: DashboardRectKind::Row {
-                        row_id,
-                        depth: visible[position].depth,
-                        collapsed: row.collapsed,
-                    },
-                });
-                cursor_y = cursor_y.saturating_add(1);
-                position += 1;
-            }
-            DashboardItemId::Panel(_) => {
-                let start = position;
-                while position < visible.len()
-                    && matches!(visible[position].id, DashboardItemId::Panel(_))
-                {
-                    position += 1;
-                }
-                let indices = visible[start..position]
-                    .iter()
-                    .filter_map(|item| match item.id {
-                        DashboardItemId::Panel(index) => Some(index),
-                        DashboardItemId::Row(_) => None,
-                    })
-                    .collect::<Vec<_>>();
-                cursor_y = project_panel_group(
-                    inner_area,
-                    cursor_y,
-                    cell_h,
-                    app,
-                    &indices,
-                    &mut projected,
-                );
-            }
-        }
-    }
+    let (projected, cell_h) = projected_dashboard_rects(inner_area, app);
 
     let scroll_offset = u16::try_from(app.vertical_scroll)
         .unwrap_or(u16::MAX)
@@ -347,26 +284,153 @@ pub(crate) fn visible_dashboard_rects(area: Rect, app: &AppState) -> Vec<Dashboa
         .collect()
 }
 
-fn transparent_panel_groups(items: &[DashboardLayoutItem]) -> Vec<Vec<usize>> {
-    let mut groups = Vec::new();
+fn projected_dashboard_rects(area: Rect, app: &AppState) -> (Vec<DashboardRect>, u16) {
+    let cell_h = std::cmp::max(3, area.height / 24);
+    let mut projected = Vec::new();
+    project_layout_items(
+        &app.layout.items,
+        0,
+        area,
+        area.y,
+        cell_h,
+        app,
+        &mut projected,
+    );
+    (projected, cell_h)
+}
+
+pub(crate) fn scroll_selected_into_view(area: Rect, app: &mut AppState) {
+    let Some(selected) = app.selected_item else {
+        return;
+    };
+    if app
+        .layout
+        .items
+        .iter()
+        .all(|item| matches!(item, DashboardLayoutItem::Panel(_)))
+    {
+        app.scroll_to_selected_panel();
+        return;
+    }
+    let inner = dashboard_inner_area(area);
+    if inner.is_empty() {
+        return;
+    }
+    let (items, cell_h) = projected_dashboard_rects(inner, app);
+    let Some(item) = items.into_iter().find(|item| {
+        item.id == selected && !matches!(item.kind, DashboardRectKind::TabEmpty { .. })
+    }) else {
+        return;
+    };
+    let cell_h = u32::from(cell_h.max(1));
+    let top_delta = u32::from(item.rect.y.saturating_sub(inner.y));
+    let bottom_delta = u32::from(item.rect.bottom().saturating_sub(inner.bottom()));
+    let lower = bottom_delta.div_ceil(cell_h) as usize;
+    let upper = (top_delta / cell_h) as usize;
+    app.vertical_scroll = if item.rect.height > inner.height {
+        upper
+    } else {
+        app.vertical_scroll.clamp(lower, upper.max(lower))
+    };
+}
+
+fn project_layout_items(
+    items: &[DashboardLayoutItem],
+    depth: usize,
+    area: Rect,
+    mut cursor_y: u16,
+    cell_h: u16,
+    app: &AppState,
+    output: &mut Vec<DashboardRect>,
+) -> u16 {
     let mut panels = Vec::new();
     for item in items {
+        if let DashboardLayoutItem::Panel(index) = item {
+            panels.push(*index);
+            continue;
+        }
+        if !panels.is_empty() {
+            cursor_y = project_panel_group(
+                area,
+                cursor_y,
+                cell_h,
+                app,
+                &std::mem::take(&mut panels),
+                output,
+            );
+        }
         match item {
-            DashboardLayoutItem::Panel(index) => panels.push(*index),
+            DashboardLayoutItem::Panel(_) => unreachable!(),
+            DashboardLayoutItem::Row(row) if row.hidden_header => {
+                cursor_y =
+                    project_layout_items(&row.children, depth, area, cursor_y, cell_h, app, output);
+            }
             DashboardLayoutItem::Row(row) => {
-                if !panels.is_empty() {
-                    groups.push(std::mem::take(&mut panels));
+                let rect = Rect::new(area.x, cursor_y, area.width, 1);
+                output.push(DashboardRect {
+                    id: DashboardItemId::Row(row.id),
+                    rect,
+                    disclosure_rect: Some(Rect::new(rect.x, rect.y, rect.width.min(1), 1)),
+                    kind: DashboardRectKind::Row {
+                        row_id: row.id,
+                        depth,
+                        collapsed: row.collapsed,
+                    },
+                });
+                cursor_y = cursor_y.saturating_add(1);
+                if !row.collapsed {
+                    cursor_y = project_layout_items(
+                        &row.children,
+                        depth + 1,
+                        area,
+                        cursor_y,
+                        cell_h,
+                        app,
+                        output,
+                    );
                 }
-                if row.hidden_header || !row.collapsed {
-                    groups.extend(transparent_panel_groups(&row.children));
+            }
+            DashboardLayoutItem::Tabs(group) => {
+                let rect = Rect::new(area.x, cursor_y, area.width, 1);
+                output.push(DashboardRect {
+                    id: DashboardItemId::Tabs(group.id),
+                    rect,
+                    disclosure_rect: None,
+                    kind: DashboardRectKind::Tabs {
+                        group_id: group.id,
+                        depth,
+                    },
+                });
+                cursor_y = cursor_y.saturating_add(1);
+                if let Some(tab) = group.active.and_then(|index| group.tabs.get(index)) {
+                    if tab.children.is_empty() {
+                        let rect = Rect::new(area.x, cursor_y, area.width, 1);
+                        output.push(DashboardRect {
+                            id: DashboardItemId::Tabs(group.id),
+                            rect,
+                            disclosure_rect: None,
+                            kind: DashboardRectKind::TabEmpty { group_id: group.id },
+                        });
+                        cursor_y = cursor_y.saturating_add(1);
+                    } else {
+                        cursor_y = project_layout_items(
+                            &tab.children,
+                            depth + 1,
+                            area,
+                            cursor_y,
+                            cell_h,
+                            app,
+                            output,
+                        );
+                    }
                 }
             }
         }
     }
     if !panels.is_empty() {
-        groups.push(panels);
+        cursor_y = project_panel_group(area, cursor_y, cell_h, app, &panels, output);
     }
-    groups
+    cursor_y
 }
 
 fn project_panel_group(
@@ -502,7 +566,9 @@ pub(crate) fn visible_panel_rects(area: Rect, app: &AppState) -> Vec<(Rect, usiz
         .into_iter()
         .filter_map(|item| match item.kind {
             DashboardRectKind::Panel { index } => Some((item.rect, index)),
-            DashboardRectKind::Row { .. } => None,
+            DashboardRectKind::Row { .. }
+            | DashboardRectKind::Tabs { .. }
+            | DashboardRectKind::TabEmpty { .. } => None,
         })
         .collect()
 }
@@ -526,9 +592,10 @@ pub(crate) fn hit_test(app: &AppState, area: Rect, x: u16, y: u16) -> Option<Das
         return None;
     }
 
-    visible_dashboard_rects(area, app)
-        .into_iter()
-        .find(|item| item.rect.contains(ratatui::layout::Position { x, y }))
+    visible_dashboard_rects(area, app).into_iter().find(|item| {
+        !matches!(item.kind, DashboardRectKind::TabEmpty { .. })
+            && item.rect.contains(ratatui::layout::Position { x, y })
+    })
 }
 
 #[cfg(test)]
@@ -536,7 +603,10 @@ mod tests {
     use super::*;
     use crate::{
         app::{GridUnit, PanelOptions, PanelType, YAxisMode},
-        dashboard::{DashboardItemId, DashboardLayout, DashboardLayoutItem, DashboardRow, RowId},
+        dashboard::{
+            DashboardItemId, DashboardLayout, DashboardLayoutItem, DashboardRow, DashboardTab,
+            DashboardTabs, RowId, TabGroupId,
+        },
         export::ExportOptions,
         prom::PromClient,
         theme::Theme,
@@ -731,6 +801,72 @@ mod tests {
     }
 
     #[test]
+    fn tabs_project_only_active_content_below_the_bar() {
+        let grid = GridUnit {
+            x: 0,
+            y: 0,
+            w: 24,
+            h: 2,
+        };
+        let id = TabGroupId::new(0);
+        let app = app_with(
+            vec![panel("CPU", Some(grid)), panel("Memory", Some(grid))],
+            DashboardLayout::new(vec![DashboardLayoutItem::Tabs(DashboardTabs::new(
+                id,
+                vec![
+                    DashboardTab {
+                        title: "CPU".into(),
+                        children: vec![DashboardLayoutItem::Panel(0)],
+                    },
+                    DashboardTab {
+                        title: "Memory".into(),
+                        children: vec![DashboardLayoutItem::Panel(1)],
+                    },
+                ],
+            ))]),
+        );
+
+        let rects = visible_dashboard_rects(Rect::new(0, 0, 120, 50), &app);
+
+        assert!(matches!(
+            rects[0].kind,
+            DashboardRectKind::Tabs {
+                group_id,
+                depth: 0
+            } if group_id == id
+        ));
+        assert_eq!(rects[1].id, DashboardItemId::Panel(0));
+        assert!(rects[0].rect.bottom() <= rects[1].rect.y);
+        assert!(
+            rects
+                .iter()
+                .all(|item| item.id != DashboardItemId::Panel(1))
+        );
+    }
+
+    #[test]
+    fn empty_active_tab_gets_decorative_non_hit_testable_line() {
+        let id = TabGroupId::new(0);
+        let app = app_with(
+            vec![],
+            DashboardLayout::new(vec![DashboardLayoutItem::Tabs(DashboardTabs::new(
+                id,
+                vec![DashboardTab {
+                    title: "Empty".into(),
+                    children: vec![],
+                }],
+            ))]),
+        );
+        let area = Rect::new(0, 0, 80, 20);
+        let rects = visible_dashboard_rects(area, &app);
+        assert_eq!(rects.len(), 2);
+        assert!(
+            matches!(rects[1].kind, DashboardRectKind::TabEmpty { group_id } if group_id == id)
+        );
+        assert!(hit_test(&app, area, rects[1].rect.x, rects[1].rect.y).is_none());
+    }
+
+    #[test]
     fn row_free_projection_preserves_legacy_panel_vector_growth() {
         let mut app = app_with(vec![panel("CPU", None)], DashboardLayout::flat(1));
         app.panels.push(panel("Memory", None));
@@ -740,7 +876,9 @@ mod tests {
             .into_iter()
             .filter_map(|item| match item.kind {
                 DashboardRectKind::Panel { index } => Some(index),
-                DashboardRectKind::Row { .. } => None,
+                DashboardRectKind::Row { .. }
+                | DashboardRectKind::Tabs { .. }
+                | DashboardRectKind::TabEmpty { .. } => None,
             })
             .collect::<Vec<_>>();
 
