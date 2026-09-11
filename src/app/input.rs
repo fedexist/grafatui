@@ -135,6 +135,35 @@ pub(super) async fn handle_mouse(
         MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left) => {
             let rect = Rect::new(0, 0, terminal_size.width, terminal_size.height);
             if let Some(item) = ui::hit_test(app, rect, mouse.column, mouse.row) {
+                let tab_target = if app.mode == AppMode::Normal
+                    && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+                {
+                    match item.kind {
+                        ui::DashboardRectKind::Tabs { group_id, depth } => app
+                            .layout
+                            .tabs(group_id)
+                            .and_then(|group| {
+                                let titles = group
+                                    .tabs
+                                    .iter()
+                                    .map(|tab| tab.title.clone())
+                                    .collect::<Vec<_>>();
+                                let geometry =
+                                    ui::tab_bar_geometry(item.rect, &titles, group.active, depth);
+                                ui::tab_at(
+                                    &geometry,
+                                    ratatui::layout::Position {
+                                        x: mouse.column,
+                                        y: mouse.row,
+                                    },
+                                )
+                            })
+                            .map(|index| (group_id, index)),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
                 let clicked_disclosure =
                     matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
                         && item.disclosure_rect.is_some_and(|disclosure| {
@@ -146,6 +175,9 @@ pub(super) async fn handle_mouse(
                 app.selected_item = Some(item.id);
                 if clicked_disclosure {
                     app.toggle_selected_row().await?;
+                }
+                if let Some((group_id, index)) = tab_target {
+                    app.activate_tab(group_id, index).await?;
                 }
 
                 match app.mode {
@@ -189,12 +221,12 @@ fn handle_search_key(key: KeyEvent, terminal_size: Size, app: &mut AppState) -> 
             if let Some(&item) = app.search_results.first() {
                 app.selected_item = Some(item);
                 app.mode = match item {
-                    DashboardItemId::Row(_) => AppMode::Normal,
+                    DashboardItemId::Row(_) | DashboardItemId::Tabs(_) => AppMode::Normal,
                     DashboardItemId::Panel(_) => AppMode::Fullscreen,
                 };
                 app.search_query.clear();
                 app.search_results.clear();
-                if matches!(item, DashboardItemId::Row(_)) {
+                if matches!(item, DashboardItemId::Row(_) | DashboardItemId::Tabs(_)) {
                     ensure_selected_item_visible(terminal_size, app);
                 }
             }
@@ -314,15 +346,30 @@ async fn handle_normal_key(
             InputAction::Redraw
         }
         KeyCode::Enter | KeyCode::Char(' ') if key.modifiers.is_empty() => {
-            app.toggle_selected_row().await?;
+            if app.selected_tab_group_id().is_some() {
+                app.enter_selected_tab();
+            } else {
+                app.toggle_selected_row().await?;
+            }
+            ensure_selected_item_visible(terminal_size, app);
             InputAction::Redraw
         }
         KeyCode::Left if key.modifiers.is_empty() => {
-            app.set_selected_row_collapsed(true).await?;
+            if app.selected_tab_group_id().is_some() {
+                app.move_selected_tab(-1).await?;
+            } else {
+                app.set_selected_row_collapsed(true).await?;
+            }
+            ensure_selected_item_visible(terminal_size, app);
             InputAction::Redraw
         }
         KeyCode::Right if key.modifiers.is_empty() => {
-            app.set_selected_row_collapsed(false).await?;
+            if app.selected_tab_group_id().is_some() {
+                app.move_selected_tab(1).await?;
+            } else {
+                app.set_selected_row_collapsed(false).await?;
+            }
+            ensure_selected_item_visible(terminal_size, app);
             InputAction::Redraw
         }
         KeyCode::PageUp => {
@@ -361,42 +408,8 @@ async fn handle_normal_key(
 }
 
 fn ensure_selected_item_visible(terminal_size: Size, app: &mut AppState) {
-    let Some(selected) = app.selected_item else {
-        return;
-    };
     let area = Rect::new(0, 0, terminal_size.width, terminal_size.height);
-    let is_visible = |app: &AppState| {
-        ui::visible_dashboard_rects(area, app)
-            .iter()
-            .any(|item| item.id == selected)
-    };
-    if is_visible(app) {
-        return;
-    }
-
-    let current = app.vertical_scroll;
-    let grid_extent = app
-        .panels
-        .iter()
-        .filter_map(|panel| panel.grid)
-        .filter_map(|grid| (grid.y >= 0 && grid.h > 0).then_some(grid.y.saturating_add(grid.h)))
-        .max()
-        .unwrap_or(0) as usize;
-    let search_limit = grid_extent
-        .saturating_add(app.layout.visible_items().len().saturating_mul(4))
-        .saturating_add(1);
-    for distance in 1..=search_limit {
-        for candidate in [
-            current.saturating_sub(distance),
-            current.saturating_add(distance),
-        ] {
-            app.vertical_scroll = candidate;
-            if is_visible(app) {
-                return;
-            }
-        }
-    }
-    app.vertical_scroll = current;
+    ui::scroll_selected_into_view(area, app);
 }
 
 async fn handle_shared_keys(key: KeyEvent, app: &mut AppState) -> Result<SharedKeyResult> {
@@ -484,6 +497,19 @@ fn update_search_results(app: &mut AppState) {
                 .layout
                 .row(row_id)
                 .is_some_and(|row| row.title.to_lowercase().contains(&query)),
+            DashboardItemId::Tabs(group_id) => app.layout.tabs(group_id).is_some_and(|group| {
+                group
+                    .active
+                    .and_then(|index| group.tabs.get(index).map(|tab| (index, tab)))
+                    .map_or_else(
+                        || "no tabs".contains(&query),
+                        |(index, tab)| {
+                            ui::tab_title(&tab.title, index)
+                                .to_lowercase()
+                                .contains(&query)
+                        },
+                    )
+            }),
             DashboardItemId::Panel(index) => app
                 .panels
                 .get(index)
@@ -521,7 +547,8 @@ mod tests {
     use super::*;
     use crate::app::{GraphOptions, PanelOptions, PanelState, PanelType, SeriesView};
     use crate::dashboard::{
-        DashboardItemId, DashboardLayout, DashboardLayoutItem, DashboardRow, RowId,
+        DashboardItemId, DashboardLayout, DashboardLayoutItem, DashboardRow, DashboardTab,
+        DashboardTabs, RowId, TabGroupId,
     };
     use crate::export::ExportOptions;
     use crate::prom;
@@ -682,6 +709,102 @@ mod tests {
             .unwrap();
         assert_eq!(app.time_offset, Duration::ZERO);
         assert!(!app.layout.row(RowId::new(0)).unwrap().collapsed);
+    }
+
+    #[tokio::test]
+    async fn tabs_keyboard_switch_keeps_bar_focus_and_enter_opens_content() {
+        let mut app = test_app();
+        let id = TabGroupId::new(0);
+        app.apply_layout(DashboardLayout::new(vec![DashboardLayoutItem::Tabs(
+            DashboardTabs::new(
+                id,
+                vec![
+                    DashboardTab {
+                        title: "CPU".into(),
+                        children: vec![DashboardLayoutItem::Panel(0)],
+                    },
+                    DashboardTab {
+                        title: "Memory".into(),
+                        children: vec![DashboardLayoutItem::Panel(1)],
+                    },
+                ],
+            ),
+        )]));
+
+        handle_key(key(KeyCode::Right), size(), &mut app)
+            .await
+            .unwrap();
+        assert_eq!(app.layout.tabs(id).unwrap().active, Some(1));
+        assert_eq!(app.selected_item, Some(DashboardItemId::Tabs(id)));
+        assert_eq!(app.visible_panel_indices(), vec![1]);
+
+        handle_key(key(KeyCode::Enter), size(), &mut app)
+            .await
+            .unwrap();
+        assert_eq!(app.selected_item, Some(DashboardItemId::Panel(1)));
+    }
+
+    #[tokio::test]
+    async fn tab_label_click_activates_but_drag_only_focuses() {
+        let mut app = test_app();
+        let id = TabGroupId::new(0);
+        app.apply_layout(DashboardLayout::new(vec![DashboardLayoutItem::Tabs(
+            DashboardTabs::new(
+                id,
+                vec![
+                    DashboardTab {
+                        title: "CPU".into(),
+                        children: vec![DashboardLayoutItem::Panel(0)],
+                    },
+                    DashboardTab {
+                        title: "Memory".into(),
+                        children: vec![DashboardLayoutItem::Panel(1)],
+                    },
+                ],
+            ),
+        )]));
+        let area = Rect::new(0, 0, size().width, size().height);
+        let bar = ui::visible_dashboard_rects(area, &app)
+            .into_iter()
+            .find(|item| item.id == DashboardItemId::Tabs(id))
+            .unwrap();
+        let geometry = ui::tab_bar_geometry(bar.rect, &["CPU".into(), "Memory".into()], Some(0), 0);
+        let memory = geometry
+            .segments
+            .iter()
+            .find(|segment| segment.activate == Some(1))
+            .unwrap()
+            .rect;
+
+        handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: memory.x,
+                row: memory.y,
+                modifiers: KeyModifiers::NONE,
+            },
+            size(),
+            &mut app,
+        )
+        .await
+        .unwrap();
+        assert_eq!(app.layout.tabs(id).unwrap().active, Some(1));
+
+        let cpu_x = bar.rect.x;
+        handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Drag(MouseButton::Left),
+                column: cpu_x,
+                row: bar.rect.y,
+                modifiers: KeyModifiers::NONE,
+            },
+            size(),
+            &mut app,
+        )
+        .await
+        .unwrap();
+        assert_eq!(app.layout.tabs(id).unwrap().active, Some(1));
+        assert_eq!(app.selected_item, Some(DashboardItemId::Tabs(id)));
     }
 
     #[tokio::test]

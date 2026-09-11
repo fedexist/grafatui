@@ -17,6 +17,20 @@ pub(super) struct Dashboard {
 pub(super) enum LayoutNode {
     Panel(Panel),
     Row(Row),
+    Tabs(Tabs),
+}
+
+#[derive(Debug)]
+pub(super) struct Tabs {
+    pub(super) tabs: Vec<Tab>,
+}
+
+#[derive(Debug)]
+pub(super) struct Tab {
+    pub(super) title: String,
+    #[allow(dead_code)]
+    pub(super) source_path: String,
+    pub(super) children: Vec<LayoutNode>,
 }
 
 #[derive(Debug)]

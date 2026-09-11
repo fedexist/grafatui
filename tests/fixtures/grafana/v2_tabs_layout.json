@@ -1,0 +1,68 @@
+{
+  "apiVersion": "dashboard.grafana.app/v2",
+  "kind": "Dashboard",
+  "metadata": {"name": "tabs-layout"},
+  "spec": {
+    "title": "Tabs layout",
+    "elements": {
+      "cpu": {
+        "kind": "Panel",
+        "spec": {
+          "id": 1,
+          "title": "CPU",
+          "links": [],
+          "data": {"kind": "QueryGroup", "spec": {"queries": [{"kind": "PanelQuery", "spec": {"hidden": false, "refId": "A", "query": {"kind": "DataQuery", "group": "prometheus", "version": "v0", "spec": {"expr": "rate(process_cpu_seconds_total[5m])"}}}}], "transformations": [], "queryOptions": {}}},
+          "vizConfig": {"kind": "VizConfig", "group": "timeseries", "version": "13.0.0", "spec": {"fieldConfig": {"defaults": {}, "overrides": []}, "options": {}}}
+        }
+      },
+      "memory": {
+        "kind": "Panel",
+        "spec": {
+          "id": 2,
+          "title": "Memory",
+          "links": [],
+          "data": {"kind": "QueryGroup", "spec": {"queries": [{"kind": "PanelQuery", "spec": {"hidden": false, "refId": "A", "query": {"kind": "DataQuery", "group": "prometheus", "version": "v0", "spec": {"expr": "process_resident_memory_bytes"}}}}], "transformations": [], "queryOptions": {}}},
+          "vizConfig": {"kind": "VizConfig", "group": "stat", "version": "13.0.0", "spec": {"fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []}, "options": {}}}
+        }
+      }
+    },
+    "layout": {
+      "kind": "TabsLayout",
+      "spec": {"tabs": [
+        {
+          "kind": "TabsLayoutTab",
+          "spec": {
+            "title": "Overview",
+            "layout": {
+              "kind": "RowsLayout",
+              "spec": {"rows": [{
+                "kind": "RowsLayoutRow",
+                "spec": {
+                  "title": "System",
+                  "layout": {"kind": "GridLayout", "spec": {"items": [{"kind": "GridLayoutItem", "spec": {"x": 0, "y": 0, "width": 24, "height": 6, "element": {"kind": "ElementReference", "name": "cpu"}}}]}}
+                }
+              }]}
+            }
+          }
+        },
+        {
+          "kind": "TabsLayoutTab",
+          "spec": {
+            "title": "Details",
+            "layout": {
+              "kind": "TabsLayout",
+              "spec": {"tabs": [
+                {"kind": "TabsLayoutTab", "spec": {"title": "Memory", "layout": {"kind": "GridLayout", "spec": {"items": [{"kind": "GridLayoutItem", "spec": {"x": 0, "y": 0, "width": 24, "height": 6, "element": {"kind": "ElementReference", "name": "memory"}}}]}}}},
+                {"kind": "TabsLayoutTab", "spec": {"title": "Empty", "layout": {"kind": "GridLayout", "spec": {"items": []}}}}
+              ]}
+            }
+          }
+        },
+        {"kind": "TabsLayoutTab", "spec": {"title": "Empty", "layout": {"kind": "GridLayout", "spec": {"items": []}}}}
+      ]}
+    },
+    "variables": [],
+    "timeSettings": {"from": "now-1h", "to": "now", "autoRefresh": "30s"}
+  },
+  "status": {}
+}

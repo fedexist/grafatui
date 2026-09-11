@@ -270,6 +270,7 @@ fn normalize_child_y(node: model::LayoutNode, row_base_y: i32) -> model::LayoutN
             model::LayoutNode::Panel(panel)
         }
         model::LayoutNode::Row(row) => model::LayoutNode::Row(row),
+        model::LayoutNode::Tabs(tabs) => model::LayoutNode::Tabs(tabs),
     }
 }
 

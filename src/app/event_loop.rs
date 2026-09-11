@@ -52,6 +52,10 @@ where
                     let size = terminal.size()?;
                     input::handle_mouse(mouse, size, app).await?
                 }
+                Event::Resize(width, height) => {
+                    ui::scroll_selected_into_view(Rect::new(0, 0, width, height), app);
+                    InputAction::Redraw
+                }
                 _ => InputAction::Redraw,
             };
 
