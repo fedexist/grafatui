@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.1.13] - 2026-09-20
+
+### ⛰️  Features
+
+- Import Grafana v2 rows layouts ([c979f5a](https://github.com/fedexist/grafatui/commit/c979f5ab7022cfde4ed4a85a56215267bcc538f4))
+- Preserve Classic dashboard rows ([a78da80](https://github.com/fedexist/grafatui/commit/a78da807282cb67ccab8a83511c771835e4f256c))
+- Make dashboard state row aware ([e9eaabb](https://github.com/fedexist/grafatui/commit/e9eaabb102699d85f536fb5bb6d85ed2677f7a3e))
+- Add interactive dashboard rows ([91231d5](https://github.com/fedexist/grafatui/commit/91231d5ac48d9cea13ed9e5245601c1fa0da9d66))
+- Export visible dashboard rows ([fdc1a3f](https://github.com/fedexist/grafatui/commit/fdc1a3f633a84f0cf418c9154da88192f88d851c))
+- Add Grafana v2 tabs layout support ([833b677](https://github.com/fedexist/grafatui/commit/833b677614cc18f9c7fc827ddce9cbdaa22430cb))
+
+### 📚 Documentation
+
+- Demonstrate interactive Grafana rows ([73cfe5d](https://github.com/fedexist/grafatui/commit/73cfe5d1bbc803db5ab4a1c1ed9b8be1f5a7b814))
+
+### 🚜 Refactor
+
+- Carry dashboard layout through Grafana imports ([cf15bca](https://github.com/fedexist/grafatui/commit/cf15bcafdc82e6dc552bec5e62aaa1bf4abae324))
+
+### ⚙️ Miscellaneous Tasks
+
+- Update ratatui to 0.30.2 ([b8369ce](https://github.com/fedexist/grafatui/commit/b8369cecc0f417947b3093aaa8689a249c674989))
+
+
 ## [0.1.12] - 2026-08-25
 
 ### ⛰️  Features
