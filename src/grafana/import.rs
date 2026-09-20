@@ -19,12 +19,9 @@ pub(super) fn finish(dashboard: model::Dashboard) -> Result<DashboardImport> {
         ..DashboardImport::default()
     };
     import_variables(&mut out, variables);
-    let mut next_row_id = 0;
-    out.layout = crate::dashboard::DashboardLayout::new(import_layout_nodes(
-        layout,
-        &mut out,
-        &mut next_row_id,
-    )?);
+    let mut ids = LayoutIds::default();
+    out.layout =
+        crate::dashboard::DashboardLayout::new(import_layout_nodes(layout, &mut out, &mut ids)?);
     Ok(out)
 }
 
@@ -218,7 +215,7 @@ fn import_panel(panel: model::Panel, out: &mut DashboardImport) -> Result<Option
 fn import_layout_nodes(
     nodes: Vec<model::LayoutNode>,
     out: &mut DashboardImport,
-    next_row_id: &mut usize,
+    ids: &mut LayoutIds,
 ) -> Result<Vec<crate::dashboard::DashboardLayoutItem>> {
     let mut items = Vec::new();
     for node in nodes {
@@ -229,9 +226,9 @@ fn import_layout_nodes(
                 }
             }
             model::LayoutNode::Row(row) => {
-                let id = crate::dashboard::RowId::new(*next_row_id);
-                *next_row_id += 1;
-                let children = import_layout_nodes(row.children, out, next_row_id)?;
+                let id = crate::dashboard::RowId::new(ids.next_row);
+                ids.next_row += 1;
+                let children = import_layout_nodes(row.children, out, ids)?;
                 items.push(crate::dashboard::DashboardLayoutItem::Row(
                     crate::dashboard::DashboardRow::new(
                         id,
@@ -242,9 +239,29 @@ fn import_layout_nodes(
                     ),
                 ));
             }
+            model::LayoutNode::Tabs(group) => {
+                let id = crate::dashboard::TabGroupId::new(ids.next_tabs);
+                ids.next_tabs += 1;
+                let mut tabs = Vec::with_capacity(group.tabs.len());
+                for tab in group.tabs {
+                    tabs.push(crate::dashboard::DashboardTab {
+                        title: tab.title,
+                        children: import_layout_nodes(tab.children, out, ids)?,
+                    });
+                }
+                items.push(crate::dashboard::DashboardLayoutItem::Tabs(
+                    crate::dashboard::DashboardTabs::new(id, tabs),
+                ));
+            }
         }
     }
     Ok(items)
+}
+
+#[derive(Default)]
+struct LayoutIds {
+    next_row: usize,
+    next_tabs: usize,
 }
 
 fn query_mode_for_target(

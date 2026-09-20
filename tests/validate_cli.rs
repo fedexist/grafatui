@@ -206,11 +206,55 @@ fn validate_accepts_v2_rows_layout() {
 }
 
 #[test]
-fn validate_rejects_nested_v2_tabs_layout() {
+fn validate_accepts_v2_tabs_layout() {
+    let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+        .args(["--validate", "--format", "json", "--grafana-json"])
+        .arg(fixture("v2_tabs_layout.json"))
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summary["title"], "Tabs layout");
+    assert_eq!(summary["panel_count"], 2);
+}
+
+#[test]
+fn validate_accepts_live_grafana_v2_tabs_example() {
+    let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+        .args(["--validate", "--format", "json", "--grafana-json"])
+        .arg(example_dashboard("grafana_v2_tabs.json"))
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summary["title"], "Grafana V2 Tabs");
+    assert_eq!(summary["panel_count"], 2);
+}
+
+#[test]
+fn validate_accepts_nested_v2_tabs_layout() {
     let mut value: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(fixture("v2_rows_layout.json")).unwrap()).unwrap();
-    value["spec"]["layout"]["spec"]["rows"][0]["spec"]["layout"] =
-        serde_json::json!({"kind": "TabsLayout", "spec": {}});
+    value["spec"]["layout"]["spec"]["rows"][0]["spec"]["layout"] = serde_json::json!({
+        "kind": "TabsLayout",
+        "spec": {"tabs": [{
+            "kind": "TabsLayoutTab",
+            "spec": {
+                "title": "Empty",
+                "layout": {"kind": "GridLayout", "spec": {"items": []}}
+            }
+        }]}
+    });
     let path = write_dashboard("v2-nested-tabs", &value.to_string());
 
     let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
@@ -220,10 +264,11 @@ fn validate_rejects_nested_v2_tabs_layout() {
         .unwrap();
     fs::remove_file(path).unwrap();
 
-    assert!(!output.status.success());
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(stderr.contains("TabsLayout"));
-    assert!(stderr.contains("spec.layout.spec.rows[0].spec.layout.kind"));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

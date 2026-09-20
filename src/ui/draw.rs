@@ -101,6 +101,30 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
                         );
                     }
                 }
+                DashboardRectKind::Tabs { group_id, depth } => {
+                    if let Some(group) = app.layout.tabs(group_id) {
+                        let titles = group
+                            .tabs
+                            .iter()
+                            .map(|tab| tab.title.clone())
+                            .collect::<Vec<_>>();
+                        let geometry =
+                            super::tab_bar_geometry(item.rect, &titles, group.active, depth);
+                        super::render_tab_bar(
+                            frame,
+                            &geometry,
+                            &app.theme,
+                            app.selected_item == Some(item.id),
+                        );
+                    }
+                }
+                DashboardRectKind::TabEmpty { .. } => frame.render_widget(
+                    Line::styled(
+                        "  No supported panels in this tab",
+                        Style::default().fg(app.theme.text),
+                    ),
+                    item.rect,
+                ),
             }
         }
     }
@@ -123,8 +147,13 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
         AppMode::FullscreenInspect => "FULLSCREEN INSPECT",
     };
 
+    let navigation_hint = if app.selected_tab_group_id().is_some() {
+        "←/→ switch tab, Enter enter, ↑/↓ navigate"
+    } else {
+        "↑/↓ navigate"
+    };
     let summary = format!(
-        "Mode: {}{} | Prom: {} | range={} step={:?} refresh={} | grid={} | panels={} (skipped {}) errors={} | keys: ↑/↓ scroll, r refresh, e export, Ctrl+E record, +/- range, q quit, ? debug:{}",
+        "Mode: {}{} | Prom: {} | range={} step={:?} refresh={} | grid={} | panels={} (skipped {}) errors={} | keys: {navigation_hint}, r refresh, e export, Ctrl+E record, +/- range, q quit, ? debug:{}",
         mode_display,
         if app.recording.is_some() { " REC" } else { "" },
         app.prometheus.base,
@@ -180,6 +209,19 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
                 crate::dashboard::DashboardItemId::Panel(index) => {
                     let panel = app.panels.get(*index)?;
                     Some(ListItem::new(format!("• {}", panel.title)))
+                }
+                crate::dashboard::DashboardItemId::Tabs(group_id) => {
+                    let group = app.layout.tabs(*group_id)?;
+                    let title = group
+                        .active
+                        .and_then(|index| {
+                            group
+                                .tabs
+                                .get(index)
+                                .map(|tab| super::tab_title(&tab.title, index))
+                        })
+                        .unwrap_or_else(|| "No tabs".to_string());
+                    Some(ListItem::new(format!("▰ {title}")))
                 }
             })
             .collect();
@@ -366,6 +408,301 @@ mod tests {
         )]));
         app.selected_item = Some(DashboardItemId::Row(RowId::new(0)));
         app
+    }
+
+    #[test]
+    fn tabs_render_active_marker_focus_and_only_active_panel() {
+        use crate::dashboard::{
+            DashboardItemId, DashboardLayout, DashboardLayoutItem, DashboardTab, DashboardTabs,
+            TabGroupId,
+        };
+
+        let id = TabGroupId::new(0);
+        let mut app = test_app();
+        app.view_end_ts = 1_783_080_000;
+        app.panels = vec![graph_panel("CPU panel"), graph_panel("Memory panel")];
+        app.apply_layout(DashboardLayout::new(vec![DashboardLayoutItem::Tabs(
+            DashboardTabs::new(
+                id,
+                vec![
+                    DashboardTab {
+                        title: "CPU".into(),
+                        children: vec![DashboardLayoutItem::Panel(0)],
+                    },
+                    DashboardTab {
+                        title: "Memory".into(),
+                        children: vec![DashboardLayoutItem::Panel(1)],
+                    },
+                ],
+            ),
+        )]));
+        app.selected_item = Some(DashboardItemId::Tabs(id));
+        let mut terminal = Terminal::new(TestBackend::new(100, 40)).unwrap();
+
+        terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+        let text = terminal_text(&terminal);
+
+        assert!(text.contains("* CPU Memory"));
+        assert!(text.contains("CPU panel"));
+        assert!(!text.contains("Memory panel"));
+        let bar = visible_dashboard_rects(Rect::new(0, 0, 100, 40), &app)
+            .into_iter()
+            .find(|item| item.id == DashboardItemId::Tabs(id))
+            .unwrap();
+        let active_cell = terminal
+            .backend()
+            .buffer()
+            .cell((bar.rect.x, bar.rect.y))
+            .unwrap();
+        assert!(active_cell.modifier.contains(Modifier::BOLD));
+        assert!(active_cell.modifier.contains(Modifier::UNDERLINED));
+
+        if let Ok(directory) = std::env::var("GRAFATUI_TABS_CAPTURE_DIR") {
+            let directory = std::path::PathBuf::from(directory).join("tabs-switch");
+            std::fs::create_dir_all(&directory).unwrap();
+            capture_buffer(&terminal, &directory.join("initial-100x40.json"));
+
+            app.layout.set_active_tab(id, 1).unwrap();
+            app.selected_item = Some(DashboardItemId::Tabs(id));
+            terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+            let switched = terminal_text(&terminal);
+            assert!(switched.contains("CPU * Memory"));
+            assert!(switched.contains("Memory panel"));
+            assert!(!switched.contains("CPU panel"));
+            capture_buffer(&terminal, &directory.join("switched-100x40.json"));
+
+            app.enter_selected_tab();
+            terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+            assert_eq!(app.selected_item, Some(DashboardItemId::Panel(1)));
+            capture_buffer(&terminal, &directory.join("entered-100x40.json"));
+        }
+    }
+
+    #[test]
+    fn tabs_render_empty_overflow_nested_and_scrolled_contracts() {
+        use crate::dashboard::{
+            DashboardItemId, DashboardLayout, DashboardLayoutItem, DashboardRow, DashboardTab,
+            DashboardTabs, RowId, TabGroupId,
+        };
+
+        let mut empty = test_app();
+        empty.view_end_ts = 1_783_080_000;
+        empty.apply_layout(DashboardLayout::new(vec![
+            DashboardLayoutItem::Tabs(DashboardTabs::new(TabGroupId::new(0), vec![])),
+            DashboardLayoutItem::Tabs(DashboardTabs::new(
+                TabGroupId::new(1),
+                vec![DashboardTab {
+                    title: "Empty".into(),
+                    children: vec![],
+                }],
+            )),
+        ]));
+        let empty_text = draw_contract_capture(&mut empty, 40, 12, "tabs-empty");
+        assert!(empty_text.contains("No tabs"));
+        assert!(empty_text.contains("No supported panels in this tab"));
+
+        let overflow_id = TabGroupId::new(2);
+        let mut overflow = test_app();
+        overflow.view_end_ts = 1_783_080_000;
+        overflow.apply_layout(DashboardLayout::new(vec![DashboardLayoutItem::Tabs(
+            DashboardTabs::new(
+                overflow_id,
+                ["Overview", "服务", "e\u{301}rrors", "Latency", "Final"]
+                    .into_iter()
+                    .map(|title| DashboardTab {
+                        title: title.into(),
+                        children: vec![],
+                    })
+                    .collect(),
+            ),
+        )]));
+        overflow.layout.set_active_tab(overflow_id, 4).unwrap();
+        overflow.selected_item = Some(DashboardItemId::Tabs(overflow_id));
+        let overflow_text = draw_contract_capture(&mut overflow, 24, 12, "tabs-overflow");
+        assert!(overflow_text.contains("<"));
+        assert!(overflow_text.contains("* Final"));
+
+        let outer_id = TabGroupId::new(3);
+        let inner_id = TabGroupId::new(4);
+        let mut nested = test_app();
+        nested.view_end_ts = 1_783_080_000;
+        nested.panels = vec![graph_panel("Inactive")];
+        nested.apply_layout(DashboardLayout::new(vec![DashboardLayoutItem::Tabs(
+            DashboardTabs::new(
+                outer_id,
+                vec![
+                    DashboardTab {
+                        title: "Nested".into(),
+                        children: vec![DashboardLayoutItem::Tabs(DashboardTabs::new(
+                            inner_id,
+                            vec![
+                                DashboardTab {
+                                    title: "First".into(),
+                                    children: vec![],
+                                },
+                                DashboardTab {
+                                    title: "Second".into(),
+                                    children: vec![DashboardLayoutItem::Row(DashboardRow::new(
+                                        RowId::new(0),
+                                        "Collapsed",
+                                        true,
+                                        false,
+                                        vec![],
+                                    ))],
+                                },
+                            ],
+                        ))],
+                    },
+                    DashboardTab {
+                        title: "Other".into(),
+                        children: vec![DashboardLayoutItem::Panel(0)],
+                    },
+                ],
+            ),
+        )]));
+        nested.layout.set_active_tab(inner_id, 1).unwrap();
+        nested.selected_item = Some(DashboardItemId::Tabs(outer_id));
+        let nested_text = draw_contract_capture(&mut nested, 100, 40, "tabs-nested");
+        assert!(nested_text.contains("* Nested Other"));
+        assert!(nested_text.contains("First * Second"));
+        assert!(nested_text.contains('▶'));
+        assert!(nested_text.contains("Collapsed"));
+        assert!(!nested_text.contains("Inactive"));
+
+        let scroll_id = TabGroupId::new(5);
+        let mut scrolled = test_app();
+        scrolled.view_end_ts = 1_783_080_000;
+        scrolled.panels = vec![graph_panel("Above one"), graph_panel("Above two")];
+        scrolled.apply_layout(DashboardLayout::new(vec![
+            DashboardLayoutItem::Panel(0),
+            DashboardLayoutItem::Panel(1),
+            DashboardLayoutItem::Tabs(DashboardTabs::new(
+                scroll_id,
+                vec![DashboardTab {
+                    title: "Below".into(),
+                    children: vec![],
+                }],
+            )),
+        ]));
+        scrolled.selected_item = Some(DashboardItemId::Tabs(scroll_id));
+        super::super::scroll_selected_into_view(Rect::new(0, 0, 100, 12), &mut scrolled);
+        assert!(scrolled.vertical_scroll > 0);
+        let scroll_text = draw_contract_capture(&mut scrolled, 100, 12, "tabs-scroll");
+        assert!(scroll_text.contains("* Below"));
+    }
+
+    fn draw_contract_capture(app: &mut AppState, width: u16, height: u16, name: &str) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| draw_ui(frame, app)).unwrap();
+        if let Ok(root) = std::env::var("GRAFATUI_TABS_CAPTURE_DIR") {
+            let directory = std::path::PathBuf::from(root).join(name);
+            std::fs::create_dir_all(&directory).unwrap();
+            capture_buffer(
+                &terminal,
+                &directory.join(format!("{name}-{width}x{height}.json")),
+            );
+        }
+        terminal_text(&terminal)
+    }
+
+    fn capture_buffer(terminal: &Terminal<TestBackend>, path: &std::path::Path) {
+        let buffer = terminal.backend().buffer();
+        let cells = (0..buffer.area.height)
+            .flat_map(|y| {
+                (0..buffer.area.width).map(move |x| {
+                    let cell = buffer.cell((x, y)).unwrap();
+                    let modifiers = [
+                        (Modifier::BOLD, "bold"),
+                        (Modifier::DIM, "dim"),
+                        (Modifier::ITALIC, "italic"),
+                        (Modifier::UNDERLINED, "underlined"),
+                        (Modifier::REVERSED, "reversed"),
+                        (Modifier::CROSSED_OUT, "crossed_out"),
+                    ]
+                    .into_iter()
+                    .filter_map(|(flag, name)| cell.modifier.contains(flag).then_some(name))
+                    .collect::<Vec<_>>();
+                    serde_json::json!({
+                        "x": x,
+                        "y": y,
+                        "symbol": cell.symbol(),
+                        "fg": test_color_hex(cell.fg, "#d0d0d0"),
+                        "bg": test_color_hex(cell.bg, "#101010"),
+                        "modifiers": modifiers,
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+        let capture = serde_json::json!({
+            "version": 1,
+            "width": buffer.area.width,
+            "height": buffer.area.height,
+            "cell_width": 8,
+            "cell_height": 16,
+            "default_fg": "#d0d0d0",
+            "default_bg": "#101010",
+            "cells": cells,
+            "cursor": serde_json::Value::Null,
+        });
+        std::fs::write(path, serde_json::to_vec_pretty(&capture).unwrap()).unwrap();
+    }
+
+    fn test_color_hex(color: Color, reset: &str) -> String {
+        let (red, green, blue) = match color {
+            Color::Reset => return reset.to_owned(),
+            Color::Black => (0, 0, 0),
+            Color::Red => (128, 0, 0),
+            Color::Green => (0, 128, 0),
+            Color::Yellow => (128, 128, 0),
+            Color::Blue => (0, 0, 128),
+            Color::Magenta => (128, 0, 128),
+            Color::Cyan => (0, 128, 128),
+            Color::Gray => (192, 192, 192),
+            Color::DarkGray => (128, 128, 128),
+            Color::LightRed => (255, 0, 0),
+            Color::LightGreen => (0, 255, 0),
+            Color::LightYellow => (255, 255, 0),
+            Color::LightBlue => (0, 0, 255),
+            Color::LightMagenta => (255, 0, 255),
+            Color::LightCyan => (0, 255, 255),
+            Color::White => (255, 255, 255),
+            Color::Rgb(red, green, blue) => (red, green, blue),
+            Color::Indexed(index) if index < 16 => {
+                const ANSI: [(u8, u8, u8); 16] = [
+                    (0, 0, 0),
+                    (128, 0, 0),
+                    (0, 128, 0),
+                    (128, 128, 0),
+                    (0, 0, 128),
+                    (128, 0, 128),
+                    (0, 128, 128),
+                    (192, 192, 192),
+                    (128, 128, 128),
+                    (255, 0, 0),
+                    (0, 255, 0),
+                    (255, 255, 0),
+                    (0, 0, 255),
+                    (255, 0, 255),
+                    (0, 255, 255),
+                    (255, 255, 255),
+                ];
+                ANSI[usize::from(index)]
+            }
+            Color::Indexed(index @ 16..=231) => {
+                const LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
+                let cube = index - 16;
+                (
+                    LEVELS[usize::from(cube / 36)],
+                    LEVELS[usize::from((cube / 6) % 6)],
+                    LEVELS[usize::from(cube % 6)],
+                )
+            }
+            Color::Indexed(index) => {
+                let gray = 8 + (index - 232) * 10;
+                (gray, gray, gray)
+            }
+        };
+        format!("#{red:02x}{green:02x}{blue:02x}")
     }
 
     fn v2_compatibility_app() -> AppState {

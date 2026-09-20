@@ -531,13 +531,86 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_v2_layouts() {
-        for kind in ["TabsLayout", "AutoGridLayout"] {
-            let json = minimal_v2_with_layout(serde_json::json!({"kind": kind, "spec": {}}));
-            let error = parse_grafana_dashboard(&json.to_string())
+        let json =
+            minimal_v2_with_layout(serde_json::json!({"kind": "AutoGridLayout", "spec": {}}));
+        let error = parse_grafana_dashboard(&json.to_string())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("AutoGridLayout"));
+        assert!(error.contains("spec.layout.kind"));
+    }
+
+    #[test]
+    fn v2_tabs_preserves_empty_tab_and_first_selection() {
+        let value = minimal_v2_with_layout(serde_json::json!({
+            "kind": "TabsLayout",
+            "spec": {"tabs": [{
+                "kind": "TabsLayoutTab",
+                "spec": {
+                    "title": "Empty",
+                    "layout": {"kind": "GridLayout", "spec": {"items": []}}
+                }
+            }]}
+        }));
+
+        let imported = parse_grafana_dashboard(&value.to_string()).unwrap();
+        let group = imported
+            .layout
+            .tabs(crate::dashboard::TabGroupId::new(0))
+            .unwrap();
+        assert_eq!(group.active, Some(0));
+        assert_eq!(group.tabs[0].title, "Empty");
+        assert!(group.tabs[0].children.is_empty());
+    }
+
+    #[test]
+    fn v2_tabs_fixture_imports_inactive_and_nested_panels() {
+        let mut dashboard = parse_grafana_dashboard(include_str!(
+            "../tests/fixtures/grafana/v2_tabs_layout.json"
+        ))
+        .unwrap();
+
+        assert_eq!(dashboard.queries.len(), 2);
+        assert_eq!(dashboard.layout.visible_panel_indices(), vec![0]);
+        dashboard
+            .layout
+            .set_active_tab(crate::dashboard::TabGroupId::new(0), 1)
+            .unwrap();
+        assert_eq!(dashboard.layout.visible_panel_indices(), vec![1]);
+        assert!(
+            dashboard
+                .layout
+                .tabs(crate::dashboard::TabGroupId::new(1))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn v2_tabs_reject_deferred_semantics_at_native_paths() {
+        for (field, value) in [
+            ("repeat", serde_json::json!({"value": "job"})),
+            (
+                "conditionalRendering",
+                serde_json::json!({"kind": "ConditionalRenderingGroup"}),
+            ),
+            ("variables", serde_json::json!([{"kind": "TextVariable"}])),
+        ] {
+            let mut spec = serde_json::json!({
+                "title": "Tab",
+                "layout": {"kind": "GridLayout", "spec": {"items": []}}
+            });
+            spec[field] = value;
+            let dashboard = minimal_v2_with_layout(serde_json::json!({
+                "kind": "TabsLayout",
+                "spec": {"tabs": [{"kind": "TabsLayoutTab", "spec": spec}]}
+            }));
+            let error = parse_grafana_dashboard(&dashboard.to_string())
                 .unwrap_err()
                 .to_string();
-            assert!(error.contains(kind));
-            assert!(error.contains("spec.layout.kind"));
+            assert!(
+                error.contains(&format!("spec.layout.spec.tabs[0].spec.{field}")),
+                "unexpected error for {field}: {error}"
+            );
         }
     }
 
@@ -787,18 +860,18 @@ mod tests {
 
     #[test]
     fn v2_rows_reject_nested_unsupported_layouts_at_native_paths() {
-        for kind in ["TabsLayout", "AutoGridLayout"] {
-            let json =
-                v2_row_resource_with_field("layout", serde_json::json!({"kind": kind, "spec": {}}));
-            let error = parse_grafana_dashboard(&json.to_string())
-                .unwrap_err()
-                .to_string();
-            assert!(error.contains(kind));
-            assert!(
-                error.contains("spec.layout.spec.rows[0].spec.layout.kind"),
-                "unexpected error for {kind}: {error}"
-            );
-        }
+        let json = v2_row_resource_with_field(
+            "layout",
+            serde_json::json!({"kind": "AutoGridLayout", "spec": {}}),
+        );
+        let error = parse_grafana_dashboard(&json.to_string())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("AutoGridLayout"));
+        assert!(
+            error.contains("spec.layout.spec.rows[0].spec.layout.kind"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

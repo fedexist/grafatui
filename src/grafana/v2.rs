@@ -68,8 +68,69 @@ fn parse_layout(
     match require_string_from(layout, "kind", &format!("{path}.kind"))? {
         "GridLayout" => parse_grid_layout(layout, elements, path, diagnostics),
         "RowsLayout" => parse_rows_layout(layout, elements, path, diagnostics),
+        "TabsLayout" => parse_tabs_layout(layout, elements, path, diagnostics),
         kind => anyhow::bail!("unsupported Grafana V2 layout `{kind}` at {path}.kind"),
     }
+}
+
+fn parse_tabs_layout(
+    layout: &JsonObject,
+    elements: &JsonObject,
+    path: &str,
+    diagnostics: &mut Vec<super::ImportDiagnostic>,
+) -> Result<Vec<model::LayoutNode>> {
+    let spec_path = format!("{path}.spec");
+    let spec = require_object_from(layout, "spec", &spec_path)?;
+    let tabs_path = format!("{spec_path}.tabs");
+    let tabs = require_array_from(spec, "tabs", &tabs_path)?;
+    let mut normalized = Vec::new();
+    for (index, tab) in tabs.iter().enumerate() {
+        let tab_path = format!("{tabs_path}[{index}]");
+        let tab = tab
+            .as_object()
+            .ok_or_else(|| anyhow!("invalid Grafana V2 tab at {tab_path}: expected an object"))?;
+        require_expected_kind(tab, &tab_path, "TabsLayoutTab")?;
+        let tab_spec_path = format!("{tab_path}.spec");
+        let tab_spec = require_object_from(tab, "spec", &tab_spec_path)?;
+        let title = match tab_spec.get("title") {
+            None => String::new(),
+            Some(Value::String(title)) => title.clone(),
+            Some(_) => anyhow::bail!(
+                "invalid Grafana V2 resource at {tab_spec_path}.title: expected a string"
+            ),
+        };
+        for (field, description) in [
+            ("repeat", "repeated tab"),
+            ("conditionalRendering", "conditional tab rendering"),
+        ] {
+            ensure!(
+                !tab_spec.contains_key(field),
+                "unsupported Grafana V2 {description} at {tab_spec_path}.{field}"
+            );
+        }
+        let variables_path = format!("{tab_spec_path}.variables");
+        match tab_spec.get("variables") {
+            None => {}
+            Some(Value::Array(variables)) => ensure!(
+                variables.is_empty(),
+                "unsupported Grafana V2 tab variables at {variables_path}"
+            ),
+            Some(_) => {
+                anyhow::bail!("invalid Grafana V2 resource at {variables_path}: expected an array")
+            }
+        }
+        let child_path = format!("{tab_spec_path}.layout");
+        let child_layout = require_object_from(tab_spec, "layout", &child_path)?;
+        let children = parse_layout(child_layout, elements, &child_path, diagnostics)?;
+        normalized.push(model::Tab {
+            title,
+            source_path: tab_path,
+            children,
+        });
+    }
+    Ok(vec![model::LayoutNode::Tabs(model::Tabs {
+        tabs: normalized,
+    })])
 }
 
 fn parse_grid_layout(
