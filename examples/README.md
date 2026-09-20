@@ -94,6 +94,15 @@ row. Run it against the bundled demo stack:
 cargo run -- --grafana-json examples/dashboards/grafana_v2_rows.json --prometheus-url http://localhost:19090
 ```
 
+### `grafana_v2_tabs.json`
+An exact Grafana V2 `TabsLayout` resource with panels, a nested row, and an
+empty tab. Focus the tab bar and use Left/Right to switch tabs; Enter/Space
+moves into the active content.
+
+```bash
+cargo run -- --grafana-json examples/dashboards/grafana_v2_tabs.json --prometheus-url http://localhost:19090
+```
+
 ### Usage
 
 ```bash

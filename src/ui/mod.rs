@@ -19,12 +19,15 @@ mod draw;
 mod format;
 mod layout;
 mod panels;
+mod tabs;
 
 pub(crate) use annotations::{annotation_cluster_page_size, render_annotation_modal};
 pub(crate) use draw::draw_ui;
 pub(crate) use format::{DisplayFormat, format_time, get_hash_color, value_to_heatmap_color};
 #[allow(unused_imports)]
 pub(crate) use layout::{
-    DashboardRect, DashboardRectKind, hit_test, visible_dashboard_rects, visible_panel_rects,
+    DashboardRect, DashboardRectKind, hit_test, scroll_selected_into_view, visible_dashboard_rects,
+    visible_panel_rects,
 };
 pub(crate) use panels::calculate_y_bounds;
+pub(crate) use tabs::{render_tab_bar, tab_at, tab_bar_geometry, tab_title};

@@ -42,6 +42,12 @@ docker-compose down -v
   cargo run -- --grafana-json examples/dashboards/grafana_v2_rows.json --prometheus-url http://localhost:19090
   ```
 
+- `examples/dashboards/grafana_v2_tabs.json`: exact Grafana V2 resource with tab, row, and empty-content behavior. Focus a tab bar and use Left/Right to switch or Enter/Space to enter its content. Run it with:
+
+  ```bash
+  cargo run -- --grafana-json examples/dashboards/grafana_v2_tabs.json --prometheus-url http://localhost:19090
+  ```
+
 - `examples/demo/vllm/grafana.json`: vLLM-oriented dashboard for the mock demo services.
 
 ## More Detail
