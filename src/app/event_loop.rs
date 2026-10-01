@@ -41,7 +41,13 @@ where
             needs_draw = false;
         }
 
-        let timeout = app.refresh_every.saturating_sub(app.last_refresh.elapsed());
+        // `event::poll` blocks this task, so it is kept short and the loop
+        // yields below; otherwise shutdown signals, which `main` selects on
+        // alongside this loop, would wait for the next refresh.
+        let timeout = app
+            .refresh_every
+            .saturating_sub(app.last_refresh.elapsed())
+            .min(MAX_INPUT_WAIT);
 
         if event::poll(timeout)? {
             let before_refresh = app.last_refresh;
@@ -95,6 +101,7 @@ where
             needs_draw = true;
             capture_recording_after_change(terminal, app)?;
         }
+        tokio::task::yield_now().await;
     }
 }
 
@@ -110,6 +117,9 @@ fn reconcile_after_refresh(viewport: Rect, app: &mut AppState, before: std::time
     }
     super::panel_scroll::reconcile_panel_body_scroll(viewport, app);
 }
+
+/// Longest the event loop blocks waiting for input before yielding.
+const MAX_INPUT_WAIT: Duration = Duration::from_millis(250);
 
 fn terminal_viewport<B: ratatui::backend::Backend>(terminal: &Terminal<B>) -> Result<Rect>
 where

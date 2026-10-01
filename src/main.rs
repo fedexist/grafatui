@@ -258,7 +258,13 @@ async fn main() -> Result<()> {
     state.query_vars = query_vars;
     state.variable_state = variable_state;
     state.configure_dynamic(auto_grid_behaviors);
-    state.refresh_initial().await?;
+    // Signals are handled from here on, so stopping during the first refresh,
+    // which may be waiting on an annotation provider, still cleans up.
+    let mut shutdown = ShutdownSignals::register();
+    tokio::select! {
+        res = state.refresh_initial() => res?,
+        () = shutdown.recv() => return Ok(()),
+    }
 
     install_terminal_panic_hook();
     let guard = TerminalGuard::enter()?;
@@ -270,7 +276,7 @@ async fn main() -> Result<()> {
             &mut state,
             Duration::from_millis(args.tick_rate),
         ) => res,
-        _ = tokio::signal::ctrl_c() => Ok(()),
+        () = shutdown.recv() => Ok(()),
     };
     // Save a recording however the session ended; this is a no-op when the
     // event loop already saved it on quit.
@@ -278,6 +284,60 @@ async fn main() -> Result<()> {
 
     drop(guard);
     res.and(finalized)
+}
+
+/// Signals asking Grafatui to stop: SIGINT, and on Unix SIGTERM or SIGHUP (the
+/// terminal closing).
+///
+/// Handlers are installed when this is created, replacing the default action
+/// of killing the process outright. Stopping through `recv` instead drops the
+/// running refresh, so annotation provider processes are killed and the
+/// terminal is restored.
+struct ShutdownSignals {
+    #[cfg(unix)]
+    signals: Vec<tokio::signal::unix::Signal>,
+}
+
+impl ShutdownSignals {
+    fn register() -> Self {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            Self {
+                signals: [
+                    SignalKind::interrupt(),
+                    SignalKind::terminate(),
+                    SignalKind::hangup(),
+                ]
+                .into_iter()
+                .filter_map(|kind| signal(kind).ok())
+                .collect(),
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            Self {}
+        }
+    }
+
+    /// Resolves when any of the signals arrives. Cancel-safe.
+    async fn recv(&mut self) {
+        #[cfg(unix)]
+        {
+            let received = self
+                .signals
+                .iter_mut()
+                .map(|signal| Box::pin(signal.recv()));
+            if received.len() == 0 {
+                return std::future::pending().await;
+            }
+            futures::future::select_all(received).await;
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = tokio::signal::ctrl_c().await;
+        }
+    }
 }
 
 /// Raw mode, the alternate screen, and mouse capture, undone when dropped,
