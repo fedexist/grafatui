@@ -37,6 +37,9 @@ regress = { version = "0.10.4", features = ["utf16"] }
 time = "0.3.47"
 serde-saphyr = "1"
 
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", default-features = false, features = ["signal"] }
+
 [package.metadata.deb]
 maintainer = "Federico D'Ambrosio <fedexist@gmail.com>"
 copyright = "2025, Federico D'Ambrosio <fedexist@gmail.com>"
