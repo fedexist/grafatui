@@ -1004,6 +1004,7 @@ dependencies = [
  "directories",
  "futures",
  "humantime",
+ "nix",
  "ratatui",
  "regex",
  "regress",
