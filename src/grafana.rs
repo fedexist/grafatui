@@ -108,15 +108,72 @@ pub(crate) struct GridPos {
     pub(crate) h: i32,
 }
 
+/// Serialization of a dashboard file, chosen from its extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DocumentFormat {
+    Json,
+    Yaml,
+    /// Unknown extension: try JSON first, then YAML.
+    Detect,
+}
+
+impl DocumentFormat {
+    fn from_path(path: &std::path::Path) -> Self {
+        match path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("json") => Self::Json,
+            Some("yaml" | "yml") => Self::Yaml,
+            _ => Self::Detect,
+        }
+    }
+}
+
 pub(crate) fn load_grafana_dashboard(path: &std::path::Path) -> Result<DashboardImport> {
     let data = std::fs::read_to_string(path)
         .with_context(|| format!("reading grafana dashboard: {}", path.display()))?;
-    parse_grafana_dashboard(&data)
+    import_document(&data, DocumentFormat::from_path(path))
 }
 
+#[cfg(test)]
 fn parse_grafana_dashboard(data: &str) -> Result<DashboardImport> {
-    let value = serde_json::from_str(data).context("parsing Grafana dashboard JSON")?;
-    import::finish(detect_and_adapt(value)?)
+    import_document(data, DocumentFormat::Detect)
+}
+
+fn import_document(data: &str, format: DocumentFormat) -> Result<DashboardImport> {
+    import::finish(detect_and_adapt(parse_document(data, format)?)?)
+}
+
+/// Parses a dashboard document into JSON values.
+///
+/// Grafana exports Classic dashboards as JSON and V2 resources as JSON or YAML.
+/// Both formats feed the same importer, so YAML is converted to `serde_json::Value`.
+fn parse_document(data: &str, format: DocumentFormat) -> Result<Value> {
+    match format {
+        DocumentFormat::Json => {
+            serde_json::from_str(data).context("parsing Grafana dashboard JSON")
+        }
+        DocumentFormat::Yaml => parse_yaml(data),
+        DocumentFormat::Detect => serde_json::from_str(data).or_else(|json_error| {
+            parse_yaml(data).map_err(|yaml_error| {
+                anyhow::anyhow!(
+                    "parsing Grafana dashboard: not valid JSON ({json_error}) or YAML ({yaml_error:#})"
+                )
+            })
+        }),
+    }
+}
+
+fn parse_yaml(data: &str) -> Result<Value> {
+    let value: Value = serde_saphyr::from_str(data).context("parsing Grafana dashboard YAML")?;
+    anyhow::ensure!(
+        value.is_object(),
+        "parsing Grafana dashboard YAML: expected a mapping at the document root"
+    );
+    Ok(value)
 }
 
 fn detect_and_adapt(value: Value) -> Result<model::Dashboard> {
@@ -1955,14 +2012,67 @@ mod tests {
         );
     }
 
+    /// `v2_grafana13_export.yaml` is `v2_grafana13_export.json` re-serialized as
+    /// YAML, the other format Grafana's "Export as code" offers for V2 resources.
     #[test]
-    fn rejects_yaml_input() {
-        let error = parse_grafana_dashboard(
-            "apiVersion: dashboard.grafana.app/v2\\nkind: Dashboard\\nspec: {}\\n",
-        )
-        .unwrap_err()
-        .to_string();
-        assert!(error.contains("parsing Grafana dashboard JSON"));
+    fn v2_yaml_resource_imports_like_its_json_equivalent() {
+        let json = parse_grafana_dashboard(include_str!(
+            "../tests/fixtures/grafana/v2_grafana13_export.json"
+        ))
+        .unwrap();
+        let yaml = parse_grafana_dashboard(include_str!(
+            "../tests/fixtures/grafana/v2_grafana13_export.yaml"
+        ))
+        .unwrap();
+
+        assert_eq!(yaml.title, json.title);
+        assert_eq!(yaml.layout, json.layout);
+        assert_eq!(yaml.vars, json.vars);
+        assert_eq!(yaml.query_vars, json.query_vars);
+        assert_eq!(yaml.refresh_rate_ms, json.refresh_rate_ms);
+        assert_eq!(yaml.diagnostics, json.diagnostics);
+        let exprs = |import: &DashboardImport| -> Vec<Vec<String>> {
+            import.queries.iter().map(|query| query.exprs.clone()).collect()
+        };
+        assert_eq!(exprs(&yaml), exprs(&json));
+    }
+
+    #[test]
+    fn document_format_follows_file_extension() {
+        for (path, format) in [
+            ("dash.json", DocumentFormat::Json),
+            ("dash.JSON", DocumentFormat::Json),
+            ("dash.yaml", DocumentFormat::Yaml),
+            ("dash.yml", DocumentFormat::Yaml),
+            ("dash", DocumentFormat::Detect),
+            ("dash.txt", DocumentFormat::Detect),
+        ] {
+            assert_eq!(
+                DocumentFormat::from_path(std::path::Path::new(path)),
+                format,
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn json_files_report_json_errors_without_yaml_fallback() {
+        let error = parse_document("apiVersion: dashboard.grafana.app/v2\n", DocumentFormat::Json)
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("parsing Grafana dashboard JSON"));
+    }
+
+    #[test]
+    fn undetectable_documents_report_both_parse_errors() {
+        let error = parse_grafana_dashboard("{ not: [valid").unwrap_err().to_string();
+        assert!(error.contains("not valid JSON"), "{error}");
+        assert!(error.contains("or YAML"), "{error}");
+    }
+
+    #[test]
+    fn yaml_documents_must_be_mappings() {
+        let error = parse_document("- a\n- b\n", DocumentFormat::Yaml).unwrap_err();
+        assert!(error.to_string().contains("expected a mapping"), "{error}");
     }
 
     #[test]

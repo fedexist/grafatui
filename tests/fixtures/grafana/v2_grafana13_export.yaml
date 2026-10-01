@@ -1,0 +1,193 @@
+apiVersion: dashboard.grafana.app/v2
+kind: Dashboard
+metadata:
+  annotations:
+    grafana.app/createdBy: anonymous:0
+  creationTimestamp: "2026-10-01T20:22:09Z"
+  generation: 1
+  labels:
+    grafana.app/deprecatedInternalID: "2574140023058432"
+  name: grafatui-native
+  namespace: default
+  resourceVersion: "1790886129271982"
+  uid: 63291995-b5ce-4946-975d-1851ad76ed4b
+spec:
+  annotations: null
+  cursorSync: ""
+  elements:
+    panel-1:
+      kind: Panel
+      spec:
+        data:
+          kind: QueryGroup
+          spec:
+            queries:
+            - kind: PanelQuery
+              spec:
+                hidden: false
+                query:
+                  datasource:
+                    name: prom
+                  group: prometheus
+                  kind: DataQuery
+                  spec:
+                    expr: scrape_duration_seconds{job="$job"}
+                    legendFormat: '{{instance}}'
+                  version: v0
+                refId: A
+            queryOptions: {}
+            transformations: null
+        id: 1
+        links: null
+        title: Scrape duration
+        vizConfig:
+          group: timeseries
+          kind: VizConfig
+          spec:
+            fieldConfig:
+              defaults:
+                unit: s
+              overrides: null
+            options: null
+          version: ""
+    panel-2:
+      kind: Panel
+      spec:
+        data:
+          kind: QueryGroup
+          spec:
+            queries:
+            - kind: PanelQuery
+              spec:
+                hidden: false
+                query:
+                  group: prometheus
+                  kind: DataQuery
+                  spec:
+                    expr: sum(up{job="$job"})
+                    instant: true
+                  version: v0
+                refId: A
+            queryOptions: {}
+            transformations: null
+        id: 2
+        links: null
+        title: Targets up
+        vizConfig:
+          group: stat
+          kind: VizConfig
+          spec:
+            fieldConfig:
+              defaults:
+                thresholds:
+                  mode: absolute
+                  steps:
+                  - color: red
+                    value: null
+                  - color: green
+                    value: 1
+              overrides: null
+            options: null
+          version: ""
+    panel-3:
+      kind: Panel
+      spec:
+        data:
+          kind: ""
+          spec:
+            queries: null
+            queryOptions: {}
+            transformations: null
+        id: 3
+        links: null
+        title: Notes
+        vizConfig:
+          group: text
+          kind: VizConfig
+          spec:
+            fieldConfig:
+              defaults: {}
+              overrides: null
+            options:
+              content: hello
+          version: ""
+  layout:
+    kind: GridLayout
+    spec:
+      items:
+      - kind: GridLayoutItem
+        spec:
+          element:
+            kind: ElementReference
+            name: panel-1
+          height: 8
+          width: 16
+          x: 0
+          "y": 0
+      - kind: GridLayoutItem
+        spec:
+          element:
+            kind: ElementReference
+            name: panel-2
+          height: 8
+          width: 8
+          x: 16
+          "y": 0
+      - kind: GridLayoutItem
+        spec:
+          element:
+            kind: ElementReference
+            name: panel-3
+          height: 4
+          width: 24
+          x: 0
+          "y": 8
+  links: null
+  preload: false
+  tags: null
+  timeSettings:
+    autoRefresh: 30s
+    autoRefreshIntervals: null
+    fiscalYearStartMonth: 0
+    from: now-1h
+    hideTimepicker: false
+    to: now
+  title: Grafatui native V2
+  variables:
+  - kind: QueryVariable
+    spec:
+      allowCustomValue: false
+      current:
+        text: prometheus
+        value: prometheus
+      definition: label_values(up, job)
+      hide: ""
+      includeAll: false
+      multi: false
+      name: job
+      options: null
+      query:
+        datasource:
+          name: prom
+        group: prometheus
+        kind: DataQuery
+        spec:
+          query: label_values(up, job)
+        version: v0
+      refresh: onDashboardLoad
+      regex: ""
+      skipUrlSync: false
+      sort: ""
+  - kind: CustomVariable
+    spec:
+      allowCustomValue: false
+      current:
+        text: "0.9"
+        value: "0.9"
+      hide: ""
+      includeAll: false
+      multi: false
+      name: quantile
+      options: null
+      query: 0.5,0.9,0.99
+      skipUrlSync: false
