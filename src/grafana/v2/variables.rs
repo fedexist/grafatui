@@ -1,4 +1,4 @@
-use super::{JsonObject, require_array_from, require_object_from, require_string_from};
+use super::{JsonObject, optional_array_from, require_object_from, require_string_from};
 use crate::dashboard::variables::{Variable, VariableOption};
 use anyhow::{Result, anyhow, ensure};
 use serde_json::Value;
@@ -58,7 +58,7 @@ pub(super) fn retain(
     let all = values.iter().any(|v| v == "$__all");
     let mut options = Vec::new();
     if spec.contains_key("options") {
-        for (i, option) in require_array_from(spec, "options", &format!("{path}.options"))?
+        for (i, option) in optional_array_from(spec, "options", &format!("{path}.options"))?
             .iter()
             .enumerate()
         {

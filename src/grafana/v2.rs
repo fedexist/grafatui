@@ -10,6 +10,17 @@ mod variables;
 
 pub(super) const V2_API_VERSION: &str = "dashboard.grafana.app/v2";
 
+/// Datasource plugin types whose queries are PromQL against a Prometheus-compatible API.
+const PROMETHEUS_COMPATIBLE_GROUPS: &[&str] = &[
+    "prometheus",
+    "grafana-amazonprometheus-datasource",
+    "grafana-azureprometheus-datasource",
+];
+
+fn is_prometheus_group(group: &str) -> bool {
+    PROMETHEUS_COMPATIBLE_GROUPS.contains(&group)
+}
+
 type JsonObject = serde_json::Map<String, Value>;
 
 struct ResolvedGridItem {
@@ -97,13 +108,7 @@ fn parse_tabs_layout(
         require_expected_kind(tab, &tab_path, "TabsLayoutTab")?;
         let tab_spec_path = format!("{tab_path}.spec");
         let tab_spec = require_object_from(tab, "spec", &tab_spec_path)?;
-        let title = match tab_spec.get("title") {
-            None => String::new(),
-            Some(Value::String(title)) => title.clone(),
-            Some(_) => anyhow::bail!(
-                "invalid Grafana V2 resource at {tab_spec_path}.title: expected a string"
-            ),
-        };
+        let title = optional_string_from(tab_spec, "title", &tab_spec_path)?.unwrap_or_default();
         for (field, description) in [
             ("repeat", "repeated tab"),
             ("conditionalRendering", "conditional tab rendering"),
@@ -114,7 +119,6 @@ fn parse_tabs_layout(
             );
         }
         let variables = normalize_variables(tab_spec, &tab_spec_path, diagnostics)?;
-
         let child_path = format!("{tab_spec_path}.layout");
         let child_layout = require_object_from(tab_spec, "layout", &child_path)?;
         let children = parse_layout(child_layout, elements, &child_path, diagnostics)?;
@@ -178,13 +182,7 @@ fn parse_rows_layout(
         require_expected_kind(row, &row_path, "RowsLayoutRow")?;
         let row_spec_path = format!("{row_path}.spec");
         let row_spec = require_object_from(row, "spec", &row_spec_path)?;
-        let title = match row_spec.get("title") {
-            None => String::new(),
-            Some(Value::String(title)) => title.clone(),
-            Some(_) => anyhow::bail!(
-                "invalid Grafana V2 resource at {row_spec_path}.title: expected a string"
-            ),
-        };
+        let title = optional_string_from(row_spec, "title", &row_spec_path)?.unwrap_or_default();
         let collapsed = optional_bool_from(row_spec, "collapse", &row_spec_path)?;
         let hidden_header = optional_bool_from(row_spec, "hideHeader", &row_spec_path)?;
 
@@ -200,9 +198,9 @@ fn parse_rows_layout(
 
         let variables = normalize_variables(row_spec, &row_spec_path, diagnostics)?;
 
-        if optional_bool_from(row_spec, "fillScreen", &row_spec_path)? {
-            anyhow::bail!("unsupported Grafana V2 full-screen row at {row_spec_path}.fillScreen");
-        }
+        // `fillScreen` stretches a row to the browser viewport; terminal rows already
+        // size to their content, so the flag is validated and otherwise ignored.
+        optional_bool_from(row_spec, "fillScreen", &row_spec_path)?;
 
         let child_path = format!("{row_spec_path}.layout");
         let child_layout = require_object_from(row_spec, "layout", &child_path)?;
@@ -224,15 +222,8 @@ fn normalize_variables(
     parent_path: &str,
     diagnostics: &mut Vec<super::ImportDiagnostic>,
 ) -> Result<Vec<model::Variable>> {
-    let variables = match dashboard_spec.get("variables") {
-        None => return Ok(Vec::new()),
-        Some(Value::Array(variables)) => variables,
-        Some(_) => {
-            anyhow::bail!(
-                "invalid Grafana V2 variables at {parent_path}.variables: expected an array"
-            )
-        }
-    };
+    let variables_path = format!("{parent_path}.variables");
+    let variables = optional_array_from(dashboard_spec, "variables", &variables_path)?;
 
     let mut normalized = Vec::new();
     for (index, variable) in variables.iter().enumerate() {
@@ -299,8 +290,8 @@ fn normalize_query_variable(
     let query = require_object_from(spec, "query", &query_path)?;
     require_expected_kind(query, &query_path, "DataQuery")?;
     let datasource = require_string_from(query, "group", &format!("{query_path}.group"))?;
-    let is_prometheus = datasource == "prometheus";
-    if datasource != "prometheus" {
+    let is_prometheus = is_prometheus_group(datasource);
+    if !is_prometheus {
         diagnostics.push(super::ImportDiagnostic::new(
             "unsupported_datasource",
             &query_path,
@@ -414,18 +405,44 @@ fn require_array_from<'a>(object: &'a JsonObject, key: &str, path: &str) -> Resu
         .ok_or_else(|| anyhow!("invalid Grafana V2 resource at {path}: expected an array"))
 }
 
+/// Returns the array at `key`, treating an absent or `null` value as empty.
+///
+/// Grafana's resource API serializes unset slices as `null`, and its frontend
+/// exporter drops empty fields, so neither can be distinguished from `[]`.
+fn optional_array_from<'a>(object: &'a JsonObject, key: &str, path: &str) -> Result<&'a [Value]> {
+    match object.get(key) {
+        None | Some(Value::Null) => Ok(&[]),
+        Some(Value::Array(values)) => Ok(values),
+        Some(_) => anyhow::bail!("invalid Grafana V2 resource at {path}: expected an array"),
+    }
+}
+
+/// Returns the object at `key`, treating an absent or `null` value as `None`.
+fn optional_object_from<'a>(
+    object: &'a JsonObject,
+    key: &str,
+    path: &str,
+) -> Result<Option<&'a JsonObject>> {
+    match object.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Object(value)) => Ok(Some(value)),
+        Some(_) => anyhow::bail!("invalid Grafana V2 resource at {path}: expected an object"),
+    }
+}
+
+fn optional_string_from(object: &JsonObject, key: &str, path: &str) -> Result<Option<String>> {
+    match object.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) => Ok(Some(value.clone())),
+        Some(_) => anyhow::bail!("invalid Grafana V2 resource at {path}.{key}: expected a string"),
+    }
+}
+
 fn require_string_from<'a>(object: &'a JsonObject, key: &str, path: &str) -> Result<&'a str> {
     object
         .get(key)
         .and_then(Value::as_str)
         .ok_or_else(|| anyhow!("invalid Grafana V2 resource at {path}: expected a string"))
-}
-
-fn require_bool_from(object: &JsonObject, key: &str, path: &str) -> Result<bool> {
-    object
-        .get(key)
-        .and_then(Value::as_bool)
-        .ok_or_else(|| anyhow!("invalid Grafana V2 resource at {path}: expected a boolean"))
 }
 
 fn optional_bool_from(object: &JsonObject, key: &str, path: &str) -> Result<bool> {
@@ -494,10 +511,17 @@ fn parse_panel(
     let kind_path = format!("{path}.kind");
     let kind = require_string_from(element, "kind", &kind_path)?;
     if kind != "Panel" {
+        let message = if kind == "LibraryPanel" {
+            "Grafana V2 library panel skipped: exports reference library panels by uid only; \
+             re-export with \"Share dashboard with another instance\" enabled to inline them"
+                .to_string()
+        } else {
+            format!("unsupported Grafana V2 element kind `{kind}` skipped")
+        };
         diagnostics.push(super::ImportDiagnostic::new(
             "unsupported_element",
             path,
-            format!("unsupported Grafana V2 element kind `{kind}` skipped"),
+            message,
         ));
         return Ok(None);
     }
@@ -516,7 +540,7 @@ fn parse_panel(
         if !query.spec.hidden {
             has_visible_target = true;
         }
-        if query.spec.query.group != "prometheus" {
+        if !is_prometheus_group(&query.spec.query.group) {
             diagnostics.push(super::ImportDiagnostic::new(
                 "unsupported_datasource",
                 &query_path,
@@ -607,28 +631,77 @@ fn parse_panel(
     }))
 }
 
+/// Validates the shape of an inline V2 panel before typed deserialization.
+///
+/// Only `vizConfig.group` and each query's `group` are required: without them the
+/// renderer and datasource are unknown. Every other container may be absent or
+/// `null` in real exports and is defaulted, but a present value of the wrong type
+/// is still rejected at its native path.
 fn validate_panel_structure(element: &JsonObject, path: &str) -> Result<()> {
     let panel_path = format!("{path}.spec");
     let panel = require_object_from(element, "spec", &panel_path)?;
     let id_path = format!("{panel_path}.id");
     ensure!(
-        panel.get("id").is_some_and(Value::is_number),
+        panel
+            .get("id")
+            .is_none_or(|id| id.is_null() || id.is_number()),
         "invalid Grafana V2 resource at {id_path}: expected a number"
     );
-    require_string_from(panel, "title", &format!("{panel_path}.title"))?;
-    require_array_from(panel, "links", &format!("{panel_path}.links"))?;
+    optional_string_from(panel, "title", &panel_path)?;
+    optional_array_from(panel, "links", &format!("{panel_path}.links"))?;
 
     let data_path = format!("{panel_path}.data");
-    let data = require_object_from(panel, "data", &data_path)?;
-    require_expected_kind(data, &data_path, "QueryGroup")?;
-    let data_spec_path = format!("{data_path}.spec");
-    let data_spec = require_object_from(data, "spec", &data_spec_path)?;
+    if let Some(data) = optional_object_from(panel, "data", &data_path)? {
+        // Grafana serializes the query group of a query-less panel (e.g. `text`)
+        // as its Go zero value, with an empty `kind`.
+        if data.get("kind").and_then(Value::as_str) != Some("") {
+            require_expected_kind(data, &data_path, "QueryGroup")?;
+        }
+        let data_spec_path = format!("{data_path}.spec");
+        if let Some(data_spec) = optional_object_from(data, "spec", &data_spec_path)? {
+            validate_query_group_spec(data_spec, &data_spec_path)?;
+        }
+    }
+
+    let viz_path = format!("{panel_path}.vizConfig");
+    let viz = require_object_from(panel, "vizConfig", &viz_path)?;
+    require_expected_kind(viz, &viz_path, "VizConfig")?;
+    require_string_from(viz, "group", &format!("{viz_path}.group"))?;
+    optional_string_from(viz, "version", &viz_path)?;
+    let viz_spec_path = format!("{viz_path}.spec");
+    if let Some(viz_spec) = optional_object_from(viz, "spec", &viz_spec_path)? {
+        let field_config_path = format!("{viz_spec_path}.fieldConfig");
+        if let Some(field_config) =
+            optional_object_from(viz_spec, "fieldConfig", &field_config_path)?
+        {
+            optional_object_from(
+                field_config,
+                "defaults",
+                &format!("{field_config_path}.defaults"),
+            )?;
+            optional_array_from(
+                field_config,
+                "overrides",
+                &format!("{field_config_path}.overrides"),
+            )?;
+        }
+        optional_object_from(viz_spec, "options", &format!("{viz_spec_path}.options"))?;
+    }
+    Ok(())
+}
+
+fn validate_query_group_spec(data_spec: &JsonObject, data_spec_path: &str) -> Result<()> {
     let queries_path = format!("{data_spec_path}.queries");
-    let queries = require_array_from(data_spec, "queries", &queries_path)?;
-    require_array_from(
+    let queries = optional_array_from(data_spec, "queries", &queries_path)?;
+    optional_array_from(
         data_spec,
         "transformations",
         &format!("{data_spec_path}.transformations"),
+    )?;
+    optional_object_from(
+        data_spec,
+        "queryOptions",
+        &format!("{data_spec_path}.queryOptions"),
     )?;
     for (index, query) in queries.iter().enumerate() {
         let query_path = format!("{queries_path}[{index}]");
@@ -638,28 +711,14 @@ fn validate_panel_structure(element: &JsonObject, path: &str) -> Result<()> {
         require_expected_kind(query, &query_path, "PanelQuery")?;
         let query_spec_path = format!("{query_path}.spec");
         let query_spec = require_object_from(query, "spec", &query_spec_path)?;
-        require_bool_from(query_spec, "hidden", &format!("{query_spec_path}.hidden"))?;
+        optional_bool_from(query_spec, "hidden", &query_spec_path)?;
+        optional_string_from(query_spec, "refId", &query_spec_path)?;
         let data_query_path = format!("{query_spec_path}.query");
         let data_query = require_object_from(query_spec, "query", &data_query_path)?;
         require_expected_kind(data_query, &data_query_path, "DataQuery")?;
         require_string_from(data_query, "group", &format!("{data_query_path}.group"))?;
-        require_object_from(data_query, "spec", &format!("{data_query_path}.spec"))?;
+        optional_object_from(data_query, "spec", &format!("{data_query_path}.spec"))?;
     }
-
-    let viz_path = format!("{panel_path}.vizConfig");
-    let viz = require_object_from(panel, "vizConfig", &viz_path)?;
-    require_expected_kind(viz, &viz_path, "VizConfig")?;
-    require_string_from(viz, "group", &format!("{viz_path}.group"))?;
-    let viz_spec_path = format!("{viz_path}.spec");
-    let viz_spec = require_object_from(viz, "spec", &viz_spec_path)?;
-    let field_config_path = format!("{viz_spec_path}.fieldConfig");
-    let field_config = require_object_from(viz_spec, "fieldConfig", &field_config_path)?;
-    require_object_from(
-        field_config,
-        "defaults",
-        &format!("{field_config_path}.defaults"),
-    )?;
-    require_object_from(viz_spec, "options", &format!("{viz_spec_path}.options"))?;
     Ok(())
 }
 
@@ -683,6 +742,17 @@ fn non_empty_json_value(value: &Value) -> bool {
     }
 }
 
+/// Deserializes an absent or `null` field as its type's default.
+///
+/// Pair with `#[serde(default)]` so missing fields also take the default.
+fn null_as_default<'de, D, T>(deserializer: D) -> std::result::Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+}
+
 #[derive(Deserialize)]
 struct RawPanelElement {
     spec: RawPanelSpec,
@@ -690,23 +760,26 @@ struct RawPanelElement {
 
 #[derive(Deserialize)]
 struct RawPanelSpec {
+    #[serde(default, deserialize_with = "null_as_default")]
     title: String,
+    #[serde(default, deserialize_with = "null_as_default")]
     data: RawQueryGroup,
     #[serde(rename = "vizConfig")]
     viz_config: RawVizConfig,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 struct RawQueryGroup {
+    #[serde(default, deserialize_with = "null_as_default")]
     spec: RawQueryGroupSpec,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 struct RawQueryGroupSpec {
+    #[serde(default, deserialize_with = "null_as_default")]
     queries: Vec<RawPanelQuery>,
+    #[serde(default, deserialize_with = "null_as_default")]
     transformations: Vec<Value>,
-    #[serde(rename = "queryOptions")]
-    _query_options: Value,
 }
 
 #[derive(Deserialize)]
@@ -716,19 +789,19 @@ struct RawPanelQuery {
 
 #[derive(Deserialize)]
 struct RawPanelQuerySpec {
+    #[serde(default, deserialize_with = "null_as_default")]
     hidden: bool,
-    #[serde(rename = "refId")]
-    _ref_id: String,
     query: RawDataQuery,
 }
 
 #[derive(Deserialize)]
 struct RawDataQuery {
     group: String,
+    #[serde(default, deserialize_with = "null_as_default")]
     spec: RawPrometheusQuery,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 struct RawPrometheusQuery {
     expr: Option<String>,
     #[serde(rename = "legendFormat")]
@@ -739,24 +812,25 @@ struct RawPrometheusQuery {
 #[derive(Deserialize)]
 struct RawVizConfig {
     group: String,
-    #[serde(rename = "version")]
-    _version: String,
+    #[serde(default, deserialize_with = "null_as_default")]
     spec: RawVizConfigSpec,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 struct RawVizConfigSpec {
-    #[serde(rename = "fieldConfig")]
+    #[serde(rename = "fieldConfig", default, deserialize_with = "null_as_default")]
     field_config: RawFieldConfig,
+    #[serde(default, deserialize_with = "null_as_default")]
     options: RawPanelOptions,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 struct RawFieldConfig {
+    #[serde(default, deserialize_with = "null_as_default")]
     defaults: RawFieldDefaults,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 struct RawFieldDefaults {
     unit: Option<String>,
     decimals: Option<usize>,
@@ -801,7 +875,7 @@ struct RawThresholdsStyle {
 #[derive(Deserialize)]
 struct RawThresholds {
     mode: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     steps: Vec<RawThresholdStep>,
 }
 
@@ -811,7 +885,7 @@ struct RawThresholdStep {
     color: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 struct RawPanelOptions {
     #[serde(rename = "reduceOptions")]
     reduce_options: Option<Value>,
