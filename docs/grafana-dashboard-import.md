@@ -22,6 +22,19 @@ for supported sizing options and the runnable example.
 
 AutoGrid items also support repeats and variable/data/time-range conditions,
 with dashboard and containing row/tab variable scopes. See [the dynamic example](../examples/dashboards/grafana_v2_autogrid_dynamic.json).
+
+Grafana's resource API writes empty lists and objects as `null` (for example
+`links`, `transformations`, `options`, and `variables`), and its exporter may
+omit them entirely. Grafatui treats both the same as an empty value, so
+dashboards exported from Grafana 13 import unchanged. Exports made with
+**Share dashboard with another instance** enabled also work: their queries carry
+no datasource and run against the Prometheus server given by `--prometheus-url`.
+
+Library panels are exported as a reference to the library panel's uid, without
+the panel itself, so Grafatui skips them with an import diagnostic. Enable
+**Share dashboard with another instance** when exporting to inline library
+panels into the dashboard.
+
 Repeated rows/tabs, row/tab conditions, library panels, and Resource YAML remain unsupported; unsupported V2 layouts
 and fields are fatal import errors. Repeated grid items are also rejected rather
 than silently changing the dashboard.
