@@ -28,10 +28,10 @@ unsupported advanced V2 dashboards. See the
 |---|---|---|
 | Classic JSON | ✅ Supported | Accepted by `--grafana-json`; the remaining tables describe support for its fields |
 | V1 Resource JSON | ❌ Not Implemented | The Kubernetes-style `dashboard.grafana.app/v1` resource envelope is not accepted |
-| V2 Resource JSON | 🔶 Partial | JSON-only exact `dashboard.grafana.app/v2` resources with recursive grid, row, tab, and AutoGrid layouts are supported |
-| Resource YAML | ❌ Not Implemented | `--grafana-json` accepts JSON only |
+| V2 Resource JSON | 🔶 Partial | Exact `dashboard.grafana.app/v2` resources with recursive grid, row, tab, and AutoGrid layouts are supported |
+| V2 Resource YAML | 🔶 Partial | The same V2 subset, read from `.yaml`/`.yml` files |
 
-### V2 Resource JSON Subset
+### V2 Resource Subset
 
 | V2 field or behavior | Status | Notes |
 |---|---|---|
@@ -163,8 +163,8 @@ compatibility work.
 Unsupported settings fail during import, including inside inactive tabs and
 collapsed rows.
 
-Grafana V2 Resource YAML remains unsupported. Use a Classic export for any
-advanced V2 dashboard outside this layout subset.
+V2 resources are accepted as JSON or YAML. Use a Classic export for any advanced
+V2 dashboard outside this grid, rows, tabs, and AutoGrid subset.
 
 ---
 

@@ -7,7 +7,7 @@ Grafatui can be configured with CLI options, a TOML configuration file, or both.
 | Option | Description | Default |
 |---|---|---|
 | `--prometheus-url <URL>` | Prometheus server URL | `http://localhost:9090` |
-| `--grafana-json <FILE>` | Grafana dashboard JSON file | none |
+| `--grafana-json <FILE>` | Grafana dashboard file: Classic JSON, or V2 resource JSON or YAML (alias `--grafana-dashboard`) | none |
 | `--annotations-file <FILE>` | Read-only external JSONL point-event file | none |
 | `--annotations-command <PROGRAM>` | Read-only executable annotation provider | none |
 | `--annotations-command-arg <ARG>` | Argument for `--annotations-command`; repeat to preserve order | none |

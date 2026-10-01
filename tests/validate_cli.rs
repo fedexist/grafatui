@@ -221,6 +221,24 @@ fn validate_accepts_grafana13_server_serialized_exports() {
 }
 
 #[test]
+fn validate_accepts_grafana13_yaml_export() {
+    let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+        .args(["--validate", "--format", "json", "--grafana-dashboard"])
+        .arg(fixture("v2_grafana13_export.yaml"))
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summary["title"], "Grafatui native V2");
+    assert_eq!(summary["panel_count"], 2);
+}
+
+#[test]
 fn validate_accepts_live_grafana_v2_compatibility_example() {
     let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
         .args(["--validate", "--format", "json", "--grafana-json"])
