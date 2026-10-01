@@ -28,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 const CELL_WIDTH: f64 = crate::display_units::LOGICAL_CELL_WIDTH_PX as f64;
@@ -257,8 +258,7 @@ pub(crate) fn stop_recording(app: &mut AppState, reason: RecordingCompletionReas
     };
     let manifest_path = recording.dir.join("manifest.json");
     let json = serde_json::to_string_pretty(&manifest)?;
-    fs::write(&manifest_path, json)
-        .with_context(|| format!("failed to write {}", manifest_path.display()))?;
+    write_atomic(&manifest_path, json.as_bytes())?;
     let capped = if completed_reason == RecordingCompletionReason::Capped {
         ", capped"
     } else {
@@ -1623,7 +1623,7 @@ fn write_outputs(svg: &str, dir: &Path, stem: &str, format: ExportFormat) -> Res
 
     if matches!(format, ExportFormat::Svg | ExportFormat::Both) {
         let path = dir.join(format!("{stem}.svg"));
-        fs::write(&path, svg).with_context(|| format!("failed to write {}", path.display()))?;
+        write_atomic(&path, svg.as_bytes())?;
         paths.push(path);
     }
 
@@ -1636,9 +1636,37 @@ fn write_outputs(svg: &str, dir: &Path, stem: &str, format: ExportFormat) -> Res
     Ok(paths)
 }
 
+/// Writes `bytes` to `path` through a temporary file in the same directory, so
+/// a failed or interrupted write never leaves a truncated file at `path`.
+fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let temporary = path.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
+    let result = fs::write(&temporary, bytes).and_then(|()| fs::rename(&temporary, path));
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result.with_context(|| format!("failed to write {}", path.display()))
+}
+
+/// System fonts for PNG rendering, loaded once; scanning them is slow and
+/// recordings render a PNG for every changed frame.
+fn system_fonts() -> Arc<resvg::usvg::fontdb::Database> {
+    static FONTS: OnceLock<Arc<resvg::usvg::fontdb::Database>> = OnceLock::new();
+    Arc::clone(FONTS.get_or_init(|| {
+        let mut fonts = resvg::usvg::fontdb::Database::new();
+        fonts.load_system_fonts();
+        Arc::new(fonts)
+    }))
+}
+
 fn write_png(svg: &str, path: &Path) -> Result<()> {
-    let mut options = resvg::usvg::Options::default();
-    options.fontdb_mut().load_system_fonts();
+    let options = resvg::usvg::Options {
+        fontdb: system_fonts(),
+        ..resvg::usvg::Options::default()
+    };
     let tree = resvg::usvg::Tree::from_data(svg.as_bytes(), &options)
         .map_err(|err| anyhow!("failed to parse generated SVG: {err}"))?;
     let size = tree.size().to_int_size();
@@ -1649,10 +1677,10 @@ fn write_png(svg: &str, path: &Path) -> Result<()> {
         resvg::tiny_skia::Transform::default(),
         &mut pixmap.as_mut(),
     );
-    pixmap
-        .save_png(path)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
+    let png = pixmap
+        .encode_png()
+        .with_context(|| format!("failed to encode {}", path.display()))?;
+    write_atomic(path, &png)
 }
 
 fn draw_line(out: &mut String, start: (f64, f64), end: (f64, f64), style: LineStyle<'_>) {
@@ -2048,6 +2076,39 @@ mod tests {
         }
         toggle_recording(&mut app, narrow).unwrap();
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn atomic_writes_replace_files_and_leave_nothing_behind_on_failure() {
+        let dir = std::env::temp_dir().join(format!(
+            "grafatui-atomic-{}-{}",
+            std::process::id(),
+            timestamp_id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("frame.svg");
+
+        write_atomic(&path, b"first").unwrap();
+        write_atomic(&path, b"second").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"second");
+
+        // Renaming onto a directory fails; the temporary file must not linger.
+        let occupied = dir.join("occupied");
+        fs::create_dir_all(occupied.join("inner")).unwrap();
+        assert!(write_atomic(&occupied, b"data").is_err());
+
+        let mut names: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["frame.svg", "occupied"]);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn system_fonts_are_loaded_once() {
+        assert!(Arc::ptr_eq(&system_fonts(), &system_fonts()));
     }
 
     #[test]
