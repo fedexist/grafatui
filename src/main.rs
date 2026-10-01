@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#![forbid(unsafe_code)]
+
 mod annotations;
 mod app;
 mod config;
