@@ -30,7 +30,7 @@ const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 const ERROR_EXCERPT_CHARS: usize = 512;
 
 type QueryWaiter = tokio::sync::oneshot::Sender<Result<Vec<Series>, String>>;
-type InflightQueries = Arc<Mutex<HashMap<String, Vec<QueryWaiter>>>>;
+type InflightQueries = Arc<Mutex<HashMap<CacheKey, Vec<QueryWaiter>>>>;
 
 /// A range query's identity: expression, start, end, and step.
 type CacheKey = (String, i64, i64, Duration);
@@ -79,7 +79,7 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// senders are dropped and they fail with "inflight request cancelled".
 struct InflightGuard {
     inflight: InflightQueries,
-    key: String,
+    key: CacheKey,
 }
 
 impl InflightGuard {
@@ -271,7 +271,7 @@ impl PromClient {
             return Ok(series);
         }
 
-        let inflight_key = format!("{}|{}|{}|{}", expr, start, end, step.as_secs());
+        let inflight_key = cache_key.clone();
         let claim = {
             let mut inflight = lock(&self.inflight);
             if let Some(waiters) = inflight.get_mut(&inflight_key) {
@@ -845,6 +845,14 @@ mod tests {
         let client = PromClient::new("http://localhost:9090".to_string());
         let url = client.build_query_range_url("up", 0, 60, Duration::from_millis(1500));
         assert!(url.ends_with("&step=1500ms"), "{url}");
+    }
+
+    #[test]
+    fn range_query_identity_keeps_the_full_step_duration() {
+        let one_second: CacheKey = ("up".into(), 0, 60, Duration::from_secs(1));
+        let fifteen_hundred_ms: CacheKey = ("up".into(), 0, 60, Duration::from_millis(1500));
+
+        assert_ne!(one_second, fifteen_hundred_ms);
     }
 
     #[test]
