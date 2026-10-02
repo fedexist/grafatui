@@ -41,6 +41,7 @@ unsupported advanced V2 dashboards. See the
 | `spec.layout.kind: GridLayout` | ✅ Supported | `GridLayoutItem` coordinates map to Grafatui's fixed 24-column grid |
 | `spec.layout.kind: RowsLayout` | ✅ Supported | Nested grid, row, tab, and AutoGrid children preserve row titles, nesting, collapsed state, and hidden-header transparency |
 | `spec.layout.kind: TabsLayout` | ✅ Supported | Nested grid, row, tab, and AutoGrid children preserve titles and show one active tab per group |
+| `data.spec.queryOptions` `interval`, `maxDataPoints` | ✅ Supported | As for Classic panel `interval` and `maxDataPoints`; a query's `interval` sets its min step |
 | Inline `Panel` elements | ✅ Supported | Supported panel visualization groups map through the Classic-equivalent importer |
 | Prometheus `PanelQuery` queries | ✅ Supported | `prometheus`, `grafana-amazonprometheus-datasource`, and `grafana-azureprometheus-datasource` query groups are imported; other datasources emit import diagnostics and are skipped |
 | `RowsLayoutRow.spec.fillScreen` | ⛔ Not Applicable | Accepted and ignored; terminal rows size to their content |
@@ -249,6 +250,9 @@ V2 dashboard outside this grid, rows, tabs, and AutoGrid subset.
 | `gridPos.h` | ✅ Supported | |
 | `id` | ❌ Not Implemented | Not used |
 | `description` | ❌ Not Implemented | Not displayed |
+| `timeFrom` / `timeShift` / `hideTimeOverride` | ❌ Not Implemented | Ignored without a diagnostic; panels use the dashboard range |
+| `interval` | ✅ Supported | Panel min interval, including `>` prefixes and variables; invalid values emit a diagnostic. See [query resolution](configuration.md#query-resolution) |
+| `maxDataPoints` | ✅ Supported | Sets how many steps a range query divides the time range into; defaults to 1000 |
 | `transparent` | ⛔ Not Applicable | TUI panels always have borders |
 | `links` | ⛔ Not Applicable | No browser navigation |
 | `repeat` | ❌ Not Implemented | Template repeat not supported |
@@ -268,7 +272,7 @@ V2 dashboard outside this grid, rows, tabs, and AutoGrid subset.
 | `targets[].legendFormat` | ✅ Supported | `{{label}}` syntax for legend formatting |
 | `targets[].refId` | ❌ Not Implemented | Not used |
 | `targets[].datasource` | ❌ Not Implemented | Only Prometheus datasource is supported |
-| `targets[].interval` | ❌ Not Implemented | Uses global `--step` instead |
+| `targets[].interval` | ✅ Supported | Per-query min step; overrides the panel `interval` |
 | `targets[].intervalFactor` | ❌ Not Implemented | |
 | `targets[].instant` | ✅ Supported | Uses Prometheus instant `query` when true; Gauge, BarGauge, and Table default to instant |
 | `targets[].format` | ❌ Not Implemented | Always treated as time_series |
@@ -280,9 +284,9 @@ V2 dashboard outside this grid, rows, tabs, and AutoGrid subset.
 
 | Variable | Status | Notes |
 |---|---|---|
-| `$__rate_interval` | ✅ Supported | Computed as `max(step × 4, 60s)` |
+| `$__rate_interval` | ✅ Supported | `max($__interval + scrape interval, 4 × scrape interval)`, as in Grafana; the scrape interval is the query's min interval or `--scrape-interval` (default 15s) |
 | `$__rate_interval_ms` | ✅ Supported | Millisecond form of `$__rate_interval` |
-| `$__interval` | ✅ Supported | Computed from the current range and panel resolution, bounded by `--step` |
+| `$__interval` | ✅ Supported | The query's step: the range divided by `maxDataPoints` (default 1000), rounded as Grafana does, no finer than the min interval or `--step`, and within Prometheus's 11,000-point limit |
 | `$__interval_ms` | ✅ Supported | Millisecond form of `$__interval` |
 | `$__range` | ✅ Supported | Current dashboard time range |
 | `$__range_s` | ✅ Supported | Current dashboard time range in seconds |
@@ -450,8 +454,8 @@ compatibility with Grafana annotation queries, APIs, `annotations`, or
 |---|---|---|---|---|
 | Dashboard Properties | 1 | 0 | 10 | 4 |
 | Panel Types | 8 | 0 | 14 | 5 |
-| Panel Common Fields | 9 | 0 | 5 | 2 |
-| Targets / Queries | 3 | 0 | 8 | 1 |
+| Panel Common Fields | 11 | 0 | 5 | 2 |
+| Targets / Queries | 4 | 0 | 7 | 1 |
 | PromQL Variables | 7 | 0 | 0 | 0 |
 | Templating | 6 | 6 | 6 | 0 |
 | Variable Substitution | 3 | 0 | 5 | 0 |
@@ -462,7 +466,7 @@ compatibility with Grafana annotation queries, APIs, `annotations`, or
 | Data Links / Transforms | 0 | 0 | 2 | 1 |
 | Alert Rules | 0 | 0 | 3 | 0 |
 | Datasources | 3 | 0 | 5 | 0 |
-| **Total** | **49** | **12** | **84** | **15** |
+| **Total** | **52** | **12** | **83** | **15** |
 
 ---
 

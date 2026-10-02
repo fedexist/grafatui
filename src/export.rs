@@ -398,7 +398,7 @@ fn render_header(app: &AppState, out: &mut String, width: f64, text: &str, borde
         "{} - range={} step={} panels={}",
         app.title,
         humantime::format_duration(app.range),
-        humantime::format_duration(app.step),
+        humantime::format_duration(app.default_intervals().step),
         displayed_panel_count(app)
     );
     write_text(out, width / 2.0, 31.0, &title, text, "middle", FONT_SIZE);
@@ -1430,7 +1430,7 @@ fn cursor_values(panel: &PanelState, app: &AppState) -> std::collections::HashMa
             da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
         });
         if let Some((ts, value)) = closest
-            && (ts - cursor_x).abs() <= app.step.as_secs_f64() * 2.0
+            && (ts - cursor_x).abs() <= app.default_intervals().step.as_secs_f64() * 2.0
         {
             values.insert(series.name.clone(), *value);
         }
@@ -1903,6 +1903,7 @@ mod tests {
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
             options: PanelOptions::Graph(GraphOptions::default()),
+            resolution: Default::default(),
         }
     }
 

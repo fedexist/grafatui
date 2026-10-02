@@ -42,7 +42,7 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
         "{} — range={} step={}  panels={}  {}(r to refresh, +/- range, [] pan, 0 live, q quit)",
         app.title,
         format_duration(app.range),
-        format_duration(app.step),
+        format_duration(app.default_intervals().step),
         normal_panel_count(app),
         if app.is_live() { "" } else { "⏸ PAUSED " }
     );
@@ -153,7 +153,7 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
         if app.recording.is_some() { " REC" } else { "" },
         app.prometheus.base,
         format_duration(app.range),
-        app.step,
+        app.default_intervals().step,
         format_duration(app.refresh_every),
         if app.autogrid_enabled { "on" } else { "off" },
         panel_count_display,
@@ -373,6 +373,7 @@ mod tests {
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
             options: crate::app::PanelOptions::None,
+            resolution: Default::default(),
         }
     }
 
@@ -758,6 +759,7 @@ mod tests {
                     autogrid: panel.autogrid,
                     display: panel.display,
                     options: panel.options,
+                    resolution: panel.resolution,
                 }
             })
             .collect();

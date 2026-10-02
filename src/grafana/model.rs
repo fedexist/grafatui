@@ -84,6 +84,34 @@ pub(super) struct Panel {
     pub(super) reduce_options_path: Option<String>,
     #[allow(dead_code)]
     pub(super) transformations_path: Option<String>,
+    /// Panel min interval (Classic `interval`, V2 `queryOptions.interval`).
+    pub(super) min_interval: Option<MinInterval>,
+    pub(super) max_data_points: Option<u32>,
+}
+
+/// A Grafana min interval as written, such as `30s`, `>1m`, or `$interval`.
+#[derive(Debug)]
+pub(super) struct MinInterval {
+    pub(super) text: String,
+    pub(super) path: String,
+}
+
+impl MinInterval {
+    /// Keeps a non-empty interval; Grafana saves an unset one as `""`.
+    pub(super) fn new(text: Option<String>, path: String) -> Option<Self> {
+        let text = text?.trim().to_string();
+        (!text.is_empty()).then_some(Self { text, path })
+    }
+}
+
+/// Reads `maxDataPoints`, which Grafana saves as a number or a numeric string.
+pub(super) fn max_data_points(value: Option<&Value>) -> Option<u32> {
+    let points = match value? {
+        Value::Number(number) => number.as_f64()?,
+        Value::String(text) => text.trim().parse().ok()?,
+        _ => return None,
+    };
+    (points >= 1.0).then(|| points.min(u32::MAX as f64) as u32)
 }
 
 #[derive(Debug)]
@@ -93,6 +121,8 @@ pub(super) struct Target {
     pub(super) legend_format: Option<String>,
     pub(super) instant: Option<bool>,
     pub(super) hidden: bool,
+    /// Per-query min step (`targets[].interval`).
+    pub(super) min_interval: Option<MinInterval>,
 }
 
 #[derive(Debug, Clone, Copy)]

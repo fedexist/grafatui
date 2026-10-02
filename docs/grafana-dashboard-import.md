@@ -157,6 +157,10 @@ Grafatui expands the following Grafana-style variables:
 - `$__rate_interval`
 - `$__rate_interval_ms`
 
+`$__interval` is the query's step, which scales with the time range and honors
+panel `maxDataPoints` and `interval` and target `interval`. See
+[query resolution](configuration.md#query-resolution).
+
 ## Compatibility Details
 
 See the [Grafana compatibility matrix](grafana-compatibility.md) for field-by-field support details.

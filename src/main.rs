@@ -118,6 +118,14 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|| "5s".to_string());
     let step = app::parse_duration(&step_str).context("--step")?;
 
+    let scrape_interval = match args.scrape_interval.or(config.scrape_interval) {
+        Some(text) => app::parse_duration(&text).context("--scrape-interval")?,
+        None => app::DEFAULT_SCRAPE_INTERVAL,
+    };
+    if scrape_interval.is_zero() {
+        bail!("--scrape-interval must be greater than zero");
+    }
+
     let export_dir = args
         .export_dir
         .or(config.export_dir)
@@ -189,6 +197,7 @@ async fn main() -> Result<()> {
                 autogrid: q.autogrid,
                 display: q.display,
                 options: q.options,
+                resolution: q.resolution,
             })
             .collect();
         (
@@ -245,6 +254,7 @@ async fn main() -> Result<()> {
     );
     apply_imported_layout(&mut state, imported_layout);
     state.annotations = annotations::AnnotationState::from_source(annotation_source);
+    state.scrape_interval = scrape_interval;
     state.autogrid_enabled = autogrid_enabled;
     state.autogrid_color = autogrid_color;
     state.vars = vars; // <— pass variables into the app
