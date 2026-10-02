@@ -234,8 +234,12 @@ impl PromClient {
         end: i64,
         step: Duration,
     ) -> String {
-        let step_s = step.as_secs().max(1);
-        let step_param = format!("{}s", step_s);
+        // Whole seconds keep URLs readable; Prometheus also accepts `ms` steps.
+        let step_param = if step.subsec_millis() == 0 {
+            format!("{}s", step.as_secs().max(1))
+        } else {
+            format!("{}ms", step.as_millis())
+        };
         format!(
             "{}/api/v1/query_range?query={}&start={}&end={}&step={}",
             self.base.trim_end_matches('/'),
@@ -834,6 +838,13 @@ mod tests {
             url,
             "http://localhost:9090/api/v1/query_range?query=up%7Bjob%3D%22node%22%7D&start=1600000000&end=1600003600&step=60s"
         );
+    }
+
+    #[test]
+    fn query_range_url_keeps_sub_second_steps() {
+        let client = PromClient::new("http://localhost:9090".to_string());
+        let url = client.build_query_range_url("up", 0, 60, Duration::from_millis(1500));
+        assert!(url.ends_with("&step=1500ms"), "{url}");
     }
 
     #[test]

@@ -149,7 +149,7 @@ This is the main backlog, ordered by Grafana parity domain.
 |---|---|---|---|---|
 | **Hidden targets** | `targets[].hide` | Helper queries do not clutter imported panels | 🟢 | 🔜 |
 | **Instant query defaults** | Panel-specific fallback behavior when `targets[].instant` is omitted | Keeps summary panels fast while preserving range queries for charts | 🟢 | ✅ |
-| **Target interval** | `targets[].interval` / `intervalFactor` | Panel-specific resolution is respected | 🟡 | 📋 |
+| **Target interval** | `targets[].interval` / `intervalFactor` | Panel-specific resolution is respected; `interval` is supported, `intervalFactor` is not | 🟡 | ✅ |
 | **Target ref IDs** | `targets[].refId` | Better diagnostics and future transformation support | 🟢 | 📋 |
 | **Format handling** | `targets[].format` | Tables and heatmaps can choose more appropriate handling | 🟡 | 📋 |
 | **Exemplar awareness** | `targets[].exemplar` | Document ignored behavior or expose limited metadata later | 🔴 | 💡 |
@@ -256,7 +256,7 @@ expectations.
 | Display names | Imported labels become clearer without changing queries | 🟢 | 📋 |
 | Legend display modes and placement | Dense dashboards need predictable legend behavior | 🟡 | 📋 |
 | Legend calculations | Adds useful table-like summaries without a new panel type | 🟡 | 📋 |
-| Target interval support | Respects panel-specific query resolution | 🟡 | 📋 |
+| Target interval support | Respects panel-specific query resolution | 🟡 | ✅ |
 
 ### v0.4 - Graph & Timeseries Fidelity
 

@@ -97,6 +97,7 @@ pub(crate) struct QueryPanel {
     pub(crate) autogrid: Option<bool>,
     pub(crate) display: crate::ui::DisplayFormat,
     pub(crate) options: crate::app::PanelOptions,
+    pub(crate) resolution: crate::app::QueryResolution,
 }
 
 /// Grid position extracted from Grafana.
@@ -432,6 +433,7 @@ mod tests {
                     legend_format: None,
                     instant: None,
                     hidden: false,
+                    min_interval: None,
                 })
                 .collect(),
             count_as_skipped_if_empty: false,
@@ -439,6 +441,8 @@ mod tests {
             field_defaults: None,
             reduce_options_path: None,
             transformations_path: None,
+            min_interval: None,
+            max_data_points: None,
         })
     }
 
@@ -2279,6 +2283,125 @@ mod tests {
         assert_eq!(dashboard.queries[1].display.unit, None);
         assert_eq!(dashboard.queries[1].display.decimals, None);
         assert_eq!(dashboard.queries[1].display.no_value, None);
+    }
+
+    #[test]
+    fn classic_query_options_set_panel_resolution() {
+        let dashboard = parse_grafana_dashboard(
+            r#"{
+                "title": "Resolution",
+                "panels": [
+                    {
+                        "type": "timeseries",
+                        "title": "Tuned",
+                        "interval": ">1m",
+                        "maxDataPoints": 300,
+                        "targets": [
+                            { "expr": "up", "interval": "30s" },
+                            { "expr": "hidden", "hide": true, "interval": "5m" },
+                            { "expr": "node_load1", "interval": "" },
+                            { "expr": "rate(x[5m])", "interval": "$min_step" }
+                        ]
+                    },
+                    {
+                        "type": "timeseries",
+                        "title": "Defaults",
+                        "maxDataPoints": "120",
+                        "targets": [{ "expr": "up" }]
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let tuned = &dashboard.queries[0].resolution;
+        assert_eq!(tuned.min_interval.as_deref(), Some(">1m"));
+        assert_eq!(tuned.max_data_points, Some(300));
+        // Hidden targets are dropped, so intervals stay parallel to exprs.
+        assert_eq!(
+            tuned.target_min_intervals,
+            [Some("30s".to_string()), None, Some("$min_step".to_string())]
+        );
+        let defaults = &dashboard.queries[1].resolution;
+        assert_eq!(defaults.min_interval, None);
+        assert_eq!(defaults.max_data_points, Some(120));
+        assert!(
+            !dashboard
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.path.ends_with("interval"))
+        );
+    }
+
+    #[test]
+    fn invalid_min_intervals_are_dropped_with_a_diagnostic() {
+        let dashboard = parse_grafana_dashboard(
+            r#"{
+                "title": "Resolution",
+                "panels": [{
+                    "type": "timeseries",
+                    "title": "Typo",
+                    "interval": "fast",
+                    "targets": [{ "expr": "up", "interval": "10q" }]
+                }]
+            }"#,
+        )
+        .unwrap();
+
+        let resolution = &dashboard.queries[0].resolution;
+        assert_eq!(resolution.min_interval, None);
+        assert_eq!(resolution.target_min_intervals, [None]);
+        let interval_diagnostics = dashboard
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.path.ends_with("interval"))
+            .collect::<Vec<_>>();
+        assert_eq!(interval_diagnostics.len(), 2);
+        assert!(
+            interval_diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code == "ignored_field")
+        );
+        assert!(interval_diagnostics.iter().any(|diagnostic| {
+            diagnostic.path.ends_with("].interval") && diagnostic.message.contains("`fast`")
+        }));
+        assert!(interval_diagnostics.iter().any(|diagnostic| {
+            diagnostic.path.ends_with("targets[0].interval") && diagnostic.message.contains("`10q`")
+        }));
+    }
+
+    #[test]
+    fn v2_query_options_set_panel_resolution() {
+        let mut json = valid_v2_resource();
+        make_v2_panel_importable(&mut json);
+        let data = &mut json["spec"]["elements"]["panel-1"]["spec"]["data"]["spec"];
+        data["queryOptions"] = serde_json::json!({"interval": "2m", "maxDataPoints": 500});
+        data["queries"][0]["spec"]["query"]["spec"]["interval"] = serde_json::json!("1m");
+
+        let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+
+        let resolution = &dashboard.queries[0].resolution;
+        assert_eq!(resolution.min_interval.as_deref(), Some("2m"));
+        assert_eq!(resolution.max_data_points, Some(500));
+        assert_eq!(resolution.target_min_intervals, [Some("1m".to_string())]);
+    }
+
+    #[test]
+    fn v2_null_query_options_are_empty() {
+        let mut json = valid_v2_resource();
+        make_v2_panel_importable(&mut json);
+        json["spec"]["elements"]["panel-1"]["spec"]["data"]["spec"]["queryOptions"] =
+            serde_json::Value::Null;
+
+        let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+
+        assert_eq!(
+            dashboard.queries[0].resolution,
+            crate::app::QueryResolution {
+                target_min_intervals: vec![None],
+                ..Default::default()
+            }
+        );
     }
 
     #[test]

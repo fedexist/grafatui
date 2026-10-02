@@ -532,6 +532,7 @@ fn parse_panel(
 
     let panel_path = format!("{path}.spec");
     let data_path = format!("{panel_path}.data.spec.queries");
+    let query_options = raw.spec.data.spec.query_options;
     let mut targets = Vec::new();
     let mut has_visible_target = false;
     let mut has_supported_visible_target = false;
@@ -575,6 +576,10 @@ fn parse_panel(
             legend_format: query.spec.query.spec.legend_format,
             instant: query.spec.query.spec.instant,
             hidden: query.spec.hidden,
+            min_interval: model::MinInterval::new(
+                query.spec.query.spec.interval,
+                format!("{query_path}.spec.interval"),
+            ),
         });
     }
     let viz_spec = raw.spec.viz_config.spec;
@@ -628,6 +633,11 @@ fn parse_panel(
             .then(|| format!("{panel_path}.vizConfig.spec.options.reduceOptions")),
         transformations_path: (!raw.spec.data.spec.transformations.is_empty())
             .then(|| format!("{panel_path}.data.spec.transformations")),
+        min_interval: model::MinInterval::new(
+            query_options.interval,
+            format!("{panel_path}.data.spec.queryOptions.interval"),
+        ),
+        max_data_points: model::max_data_points(query_options.max_data_points.as_ref()),
     }))
 }
 
@@ -780,6 +790,15 @@ struct RawQueryGroupSpec {
     queries: Vec<RawPanelQuery>,
     #[serde(default, deserialize_with = "null_as_default")]
     transformations: Vec<Value>,
+    #[serde(default, rename = "queryOptions", deserialize_with = "null_as_default")]
+    query_options: RawQueryOptions,
+}
+
+#[derive(Default, Deserialize)]
+struct RawQueryOptions {
+    interval: Option<String>,
+    #[serde(rename = "maxDataPoints")]
+    max_data_points: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -807,6 +826,7 @@ struct RawPrometheusQuery {
     #[serde(rename = "legendFormat")]
     legend_format: Option<String>,
     instant: Option<bool>,
+    interval: Option<String>,
 }
 
 #[derive(Deserialize)]

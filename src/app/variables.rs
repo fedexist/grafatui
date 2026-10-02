@@ -14,20 +14,64 @@
  * limitations under the License.
  */
 
-use super::data::expand_expr;
+use super::data::{QueryIntervals, expand_expr};
 use crate::grafana::TemplateQueryVar;
 use crate::prom;
 use anyhow::{Result, anyhow};
 use regex::Regex;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
+
+/// Replaces `$name` and `${name}` references whose name `lookup` resolves.
+pub(crate) fn substitute_variables<'a>(
+    text: &str,
+    mut lookup: impl FnMut(&str) -> Option<Cow<'a, str>>,
+) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(position) = rest.find('$') {
+        out.push_str(&rest[..position]);
+        let after = &rest[position + 1..];
+        let (name, consumed) = if let Some(braced) = after.strip_prefix('{') {
+            match braced.find('}') {
+                Some(end) => (&braced[..end], end + 2),
+                None => ("", 0),
+            }
+        } else {
+            let end = after
+                .find(|ch: char| !is_variable_name_char(ch))
+                .unwrap_or(after.len());
+            (&after[..end], end)
+        };
+        let value = (!name.is_empty() && name.chars().all(is_variable_name_char))
+            .then(|| lookup(name))
+            .flatten();
+        match value {
+            Some(value) => {
+                out.push_str(&value);
+                rest = &after[consumed..];
+            }
+            None => {
+                out.push('$');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn is_variable_name_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '_'
+}
 
 pub(crate) async fn refresh_scoped_variables(
     prometheus: &prom::PromClient,
     state: &mut crate::dashboard::variables::VariableState,
     active_scopes: &HashSet<usize>,
     range: Duration,
-    step: Duration,
+    intervals: QueryIntervals,
     end_ts: i64,
     vars: &HashMap<String, String>,
 ) {
@@ -44,9 +88,10 @@ pub(crate) async fn refresh_scoped_variables(
                 continue;
             };
             let values = state.scope_values(scope, vars);
-            let result =
-                resolve_query_variable_values(prometheus, &query, range, step, end_ts, &values)
-                    .await;
+            let result = resolve_query_variable_values(
+                prometheus, &query, range, intervals, end_ts, &values,
+            )
+            .await;
             let variable = &mut state.scopes[scope].variables[index];
             match result {
                 Ok(values) => variable.update_options(
@@ -76,13 +121,14 @@ pub(crate) async fn refresh_query_variables(
     prometheus: &prom::PromClient,
     query_vars: &[TemplateQueryVar],
     range: Duration,
-    step: Duration,
+    intervals: QueryIntervals,
     end_ts: i64,
     vars: &mut HashMap<String, String>,
 ) -> Result<()> {
     for query_var in query_vars {
         let Some(value) = first_value(
-            resolve_query_variable_values(prometheus, query_var, range, step, end_ts, vars).await?,
+            resolve_query_variable_values(prometheus, query_var, range, intervals, end_ts, vars)
+                .await?,
         ) else {
             continue;
         };
@@ -97,11 +143,11 @@ async fn resolve_query_variable_values(
     prometheus: &prom::PromClient,
     query_var: &TemplateQueryVar,
     range: Duration,
-    step: Duration,
+    intervals: QueryIntervals,
     end_ts: i64,
     vars: &HashMap<String, String>,
 ) -> Result<Vec<String>> {
-    let expanded_query = expand_expr(&query_var.query, range, step, vars);
+    let expanded_query = expand_expr(&query_var.query, range, intervals, vars);
     let query = parse_prometheus_variable_query(&expanded_query)?;
     let start_ts = end_ts - range.as_secs() as i64;
     let values = match query {
@@ -263,7 +309,12 @@ mod tests {
                 &mut state,
                 &HashSet::from([0]),
                 Duration::from_secs(300),
-                Duration::from_secs(15),
+                QueryIntervals::new(
+                    Duration::from_secs(300),
+                    Duration::from_secs(15),
+                    Duration::from_secs(15),
+                    None,
+                ),
                 1000,
                 &HashMap::new(),
             ),

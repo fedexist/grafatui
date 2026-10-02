@@ -212,7 +212,7 @@ pub(super) fn render_graph_panel(
 
                 if let Some((ts, val)) = closest {
                     // Only consider if within reasonable distance (e.g. 2 steps)
-                    if (ts - cx).abs() <= app.step.as_secs_f64() * 2.0 {
+                    if (ts - cx).abs() <= app.default_intervals().step.as_secs_f64() * 2.0 {
                         Some((s.name.clone(), *val))
                     } else {
                         None
@@ -842,6 +842,7 @@ mod tests {
                 line_interpolation: None,
                 stacking: GraphStackingMode::Off,
             }),
+            resolution: Default::default(),
         }
     }
 

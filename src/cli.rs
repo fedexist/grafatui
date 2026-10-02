@@ -33,9 +33,13 @@ pub(crate) struct Args {
     #[arg(long, value_name = "DURATION")]
     pub(crate) range: Option<String>,
 
-    /// Query step resolution (e.g., 5s, 30s, 1m) (default: 5s)
+    /// Finest query step; longer ranges use a coarser step (e.g., 5s, 30s, 1m) (default: 5s)
     #[arg(long, value_name = "DURATION")]
     pub(crate) step: Option<String>,
+
+    /// Prometheus scrape interval, used for $__rate_interval (e.g., 15s, 1m) (default: 15s)
+    #[arg(long, value_name = "DURATION")]
+    pub(crate) scrape_interval: Option<String>,
 
     /// Grafana dashboard file to import: Classic JSON, or V2 resource JSON or YAML
     /// (e.g., ./dashboard.json, ./dashboard.yaml)

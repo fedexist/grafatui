@@ -27,6 +27,7 @@ pub(crate) struct Config {
     pub(crate) refresh_rate: Option<u64>,
     pub(crate) time_range: Option<String>,
     pub(crate) step: Option<String>,
+    pub(crate) scrape_interval: Option<String>,
     pub(crate) theme: Option<String>,
     pub(crate) grafana_json: Option<PathBuf>,
     pub(crate) annotations_file: Option<PathBuf>,
