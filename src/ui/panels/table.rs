@@ -17,10 +17,16 @@
 use crate::app::{AppState, PanelState};
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, Paragraph, Row, Table},
+    widgets::{Block, Borders, Paragraph, Row, Table, TableState},
 };
 
-pub(super) fn render_table(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
+pub(super) fn render_table(
+    frame: &mut Frame,
+    area: Rect,
+    p: &PanelState,
+    app: &AppState,
+    context: super::PanelRenderContext,
+) {
     let theme = &app.theme;
 
     let header = ["Series", "Value"];
@@ -43,6 +49,7 @@ pub(super) fn render_table(frame: &mut Frame, area: Rect, p: &PanelState, app: &
         return;
     }
 
+    let rows_len = rows.len();
     let table = Table::new(
         rows,
         [Constraint::Percentage(70), Constraint::Percentage(30)],
@@ -59,5 +66,14 @@ pub(super) fn render_table(frame: &mut Frame, area: Rect, p: &PanelState, app: &
     .block(Block::default().borders(Borders::NONE))
     .column_spacing(1);
 
-    frame.render_widget(table, area);
+    if context.content_fit {
+        let offset = super::content::table_row_offset(
+            rows_len,
+            context.body_offset,
+            area.height.saturating_sub(2),
+        );
+        frame.render_stateful_widget(table, area, &mut TableState::default().with_offset(offset));
+    } else {
+        frame.render_widget(table, area);
+    }
 }

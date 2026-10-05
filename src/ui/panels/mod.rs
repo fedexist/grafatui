@@ -37,6 +37,13 @@ use heatmap::render_heatmap;
 use stat::render_stat;
 use table::render_table;
 
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct PanelRenderContext {
+    pub(crate) index: usize,
+    pub(crate) content_fit: bool,
+    pub(crate) body_offset: u64,
+}
+
 /// Renders a single panel.
 ///
 /// This function handles:
@@ -48,7 +55,7 @@ use table::render_table;
 pub(crate) fn render_panel(
     frame: &mut Frame,
     area: Rect,
-    panel_index: usize,
+    context: PanelRenderContext,
     p: &PanelState,
     app: &AppState,
     is_selected: bool,
@@ -93,14 +100,14 @@ pub(crate) fn render_panel(
         PanelType::Graph => render_graph_panel(
             frame,
             inner_area,
-            panel_index,
+            context.index,
             p,
             app,
             cursor_x,
             is_selected,
         ),
         PanelType::Unknown => {
-            render_graph_panel(frame, inner_area, panel_index, p, app, cursor_x, false);
+            render_graph_panel(frame, inner_area, context.index, p, app, cursor_x, false);
             None
         }
         PanelType::Gauge => {
@@ -112,7 +119,7 @@ pub(crate) fn render_panel(
             None
         }
         PanelType::Table => {
-            render_table(frame, inner_area, p, app);
+            render_table(frame, inner_area, p, app, context);
             None
         }
         PanelType::Stat => {

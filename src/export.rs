@@ -297,12 +297,27 @@ pub(crate) fn render_svg(app: &AppState, viewport: Rect) -> String {
     for item in ui::visible_dashboard_rects(viewport, app) {
         let selected = app.selected_item == Some(item.id);
         match item.kind {
-            ui::DashboardRectKind::Panel { index } => {
+            ui::DashboardRectKind::Panel {
+                index,
+                content_fit,
+                body_offset,
+            } => {
                 let Some(panel) = app.panels.get(index) else {
                     continue;
                 };
                 let panel_rect = scaled_rect(item.rect);
-                render_panel(app, index, panel, panel_rect, selected, &mut out);
+                render_panel(
+                    app,
+                    ui::PanelRenderContext {
+                        index,
+                        content_fit,
+                        body_offset,
+                    },
+                    panel,
+                    panel_rect,
+                    selected,
+                    &mut out,
+                );
             }
             ui::DashboardRectKind::Row {
                 row_id,
@@ -492,7 +507,7 @@ fn render_footer(
 
 fn render_panel(
     app: &AppState,
-    panel_index: usize,
+    context: ui::PanelRenderContext,
     panel: &PanelState,
     rect: PlotRect,
     selected: bool,
@@ -545,7 +560,7 @@ fn render_panel(
 
     match panel.panel_type {
         PanelType::Graph | PanelType::Unknown => {
-            render_graph_panel(app, panel_index, panel, inner, out)
+            render_graph_panel(app, context.index, panel, inner, out)
         }
         PanelType::Stat => render_stat_panel(app, panel, inner, out),
         PanelType::Gauge => render_gauge_panel(app, panel, inner, out),
