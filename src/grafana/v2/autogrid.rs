@@ -138,11 +138,12 @@ fn parse_options(
         ))?,
         _ => 320_u32.div_ceil(LOGICAL_CELL_HEIGHT_PX),
     };
-    reject_enabled(spec, "fillScreen", path)?;
+    let fill_screen = optional_bool_from(spec, "fillScreen", path)?;
     reject_enabled(spec, "fitContent", path)?;
     optional_bool_from(spec, "matchRowHeights", path)?;
     validate_height_bounds(spec, path)?;
     Ok(AutoGridOptions {
+        fill_screen,
         max_columns,
         min_column_width,
         row_height,

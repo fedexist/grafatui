@@ -138,7 +138,6 @@ fn auto_grid_import_reports_native_paths_for_malformed_settings() {
 #[test]
 fn auto_grid_import_rejects_deferred_behavior_and_accepts_false_defaults() {
     for (field, value) in [
-        ("fillScreen", serde_json::json!(true)),
         ("fitContent", serde_json::json!(true)),
         ("minHeightMode", serde_json::json!("none")),
         ("maxHeightMode", serde_json::json!("short")),
@@ -275,3 +274,5 @@ fn auto_grid_import_warns_on_unknown_settings() {
         "spec.layout.spec.items[0].spec.futureItemSetting"
     );
 }
+
+mod fill_screen;
