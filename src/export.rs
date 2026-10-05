@@ -297,22 +297,14 @@ pub(crate) fn render_svg(app: &AppState, viewport: Rect) -> String {
     for item in ui::visible_dashboard_rects(viewport, app) {
         let selected = app.selected_item == Some(item.id);
         match item.kind {
-            ui::DashboardRectKind::Panel {
-                index,
-                content_fit,
-                body_offset,
-            } => {
+            ui::DashboardRectKind::Panel { index, .. } => {
                 let Some(panel) = app.panels.get(index) else {
                     continue;
                 };
                 let panel_rect = scaled_rect(item.rect);
                 render_panel(
                     app,
-                    ui::PanelRenderContext {
-                        index,
-                        content_fit,
-                        body_offset,
-                    },
+                    ui::panel_render_context(app, &item).unwrap(),
                     panel,
                     panel_rect,
                     selected,

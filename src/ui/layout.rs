@@ -48,6 +48,7 @@ pub(crate) enum DashboardRectKind {
     Panel {
         index: usize,
         content_fit: bool,
+        body_scroll: bool,
         body_offset: u64,
     },
 }
@@ -251,13 +252,22 @@ pub(crate) fn visible_dashboard_rects(area: Rect, app: &AppState) -> Vec<Dashboa
         return app
             .selected_panel_index()
             .map(|index| {
+                let body_scroll = app
+                    .layout
+                    .auto_grid_settings_for_panel(index)
+                    .is_some_and(|(o, fit)| o.max_height.is_some() && fit.unwrap_or(o.fit_content))
+                    && app
+                        .panels
+                        .get(index)
+                        .is_some_and(|p| p.panel_type == crate::app::PanelType::Table);
                 vec![DashboardRect {
                     id: DashboardItemId::Panel(index),
                     rect: inner_area,
                     disclosure_rect: None,
                     kind: DashboardRectKind::Panel {
                         index,
-                        content_fit: false,
+                        content_fit: body_scroll,
+                        body_scroll,
                         body_offset: 0,
                     },
                 }]
@@ -385,6 +395,7 @@ fn panel_rect(index: usize, rect: Rect) -> DashboardRect {
         kind: DashboardRectKind::Panel {
             index,
             content_fit: false,
+            body_scroll: false,
             body_offset: 0,
         },
     }
@@ -431,6 +442,7 @@ pub(crate) fn hit_test(app: &AppState, area: Rect, x: u16, y: u16) -> Option<Das
 #[cfg(test)]
 mod tests {
     mod auto_grid;
+    mod bounds_scroll;
     mod content_fit;
     mod fill_screen;
     use super::*;
@@ -567,7 +579,9 @@ mod tests {
             DashboardRectKind::Panel {
                 index: 0,
                 content_fit: false,
-                body_offset: 0
+                body_scroll: false,
+                body_offset: 0,
+                ..
             }
         ));
         assert_eq!(rects[1].id, DashboardItemId::Panel(0));
@@ -762,4 +776,30 @@ mod tests {
             y: row.rect.y,
         }));
     }
+}
+
+/// Read only: document clipping and local offsets remain distinct until rendering.
+pub(crate) fn panel_render_context(
+    app: &AppState,
+    item: &DashboardRect,
+) -> Option<super::panels::PanelRenderContext> {
+    let DashboardRectKind::Panel {
+        index,
+        content_fit,
+        body_scroll,
+        body_offset,
+    } = item.kind
+    else {
+        return None;
+    };
+    Some(super::panels::PanelRenderContext {
+        index,
+        content_fit,
+        body_offset,
+        local_body_offset: if body_scroll {
+            app.panel_body_scroll.get(&index).map_or(0, |s| s.offset)
+        } else {
+            0
+        },
+    })
 }

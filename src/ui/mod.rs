@@ -32,3 +32,6 @@ pub(crate) use layout::{
 pub(crate) use panels::{PanelRenderContext, calculate_y_bounds, measure_panel_content};
 pub(crate) use panels::{prepare_table_rows, table_row_offset};
 pub(crate) use tabs::{render_tab_bar, tab_at, tab_bar_geometry, tab_title};
+
+pub(crate) use layout::panel_render_context;
+pub(crate) use panels::content::{PanelBodyMetrics, panel_body_metrics, panel_body_window};

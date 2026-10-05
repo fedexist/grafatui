@@ -15,7 +15,7 @@
  */
 
 use super::layout::{DashboardRectKind, centered_rect, visible_dashboard_rects};
-use super::panels::{PanelRenderContext, render_panel};
+use super::panels::render_panel;
 use crate::app::{AppMode, AppState, PanelState};
 use crate::{dashboard::DashboardRow, theme::Theme};
 use humantime::format_duration;
@@ -55,48 +55,17 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
     let area = chunks[1];
     let charts_block = Block::default().borders(Borders::ALL);
     frame.render_widget(charts_block, area);
-    let inner_area = area.inner(Margin {
-        vertical: 1,
-        horizontal: 1,
-    });
-
     let mut selected_rendered_cluster = None;
-    if app.mode == AppMode::Fullscreen || app.mode == AppMode::FullscreenInspect {
-        if let Some((panel_index, p)) = app
-            .selected_panel_index()
-            .and_then(|index| app.panels.get(index).map(|panel| (index, panel)))
-        {
-            selected_rendered_cluster = render_panel(
-                frame,
-                inner_area,
-                PanelRenderContext {
-                    index: panel_index,
-                    ..Default::default()
-                },
-                p,
-                app,
-                true,
-                app.cursor_x,
-            );
-        }
-    } else {
+    {
         for item in visible_dashboard_rects(size, app) {
             match item.kind {
-                DashboardRectKind::Panel {
-                    index,
-                    content_fit,
-                    body_offset,
-                } => {
+                DashboardRectKind::Panel { index, .. } => {
                     if let Some(panel) = app.panels.get(index) {
                         let is_selected = app.selected_item == Some(item.id);
                         let rendered_cluster = render_panel(
                             frame,
                             item.rect,
-                            PanelRenderContext {
-                                index,
-                                content_fit,
-                                body_offset,
-                            },
+                            super::panel_render_context(app, &item).unwrap(),
                             panel,
                             app,
                             is_selected,

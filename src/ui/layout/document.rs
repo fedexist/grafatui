@@ -63,6 +63,7 @@ fn project_layout_items(
                     item.kind = DashboardRectKind::Panel {
                         index: panel.index,
                         content_fit: panel.content_fit,
+                        body_scroll: panel.body_scroll,
                         body_offset: 0,
                     };
                     item
@@ -245,6 +246,7 @@ fn panel_rect(index: usize, rect: LogicalRect) -> ProjectedDashboardRect {
         kind: DashboardRectKind::Panel {
             index,
             content_fit: false,
+            body_scroll: false,
             body_offset: 0,
         },
     }
@@ -286,10 +288,14 @@ pub(super) fn clip_projected_rect(
         disclosure_rect,
         kind: match item.kind {
             DashboardRectKind::Panel {
-                index, content_fit, ..
+                index,
+                content_fit,
+                body_scroll,
+                ..
             } => DashboardRectKind::Panel {
                 index,
                 content_fit,
+                body_scroll,
                 body_offset: if content_fit { top - item.rect.y } else { 0 },
             },
             other => other,
