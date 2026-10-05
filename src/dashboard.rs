@@ -1,3 +1,5 @@
+pub(crate) mod autogrid;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct RowId(usize);
 
@@ -27,6 +29,7 @@ pub(crate) enum DashboardItemId {
 pub(crate) enum DashboardLayoutItem {
     Row(DashboardRow),
     Tabs(DashboardTabs),
+    AutoGrid(autogrid::DashboardAutoGrid),
     Panel(usize),
 }
 
@@ -264,7 +267,7 @@ fn find_tabs(items: &[DashboardLayoutItem], id: TabGroupId) -> Option<&Dashboard
                     return Some(found);
                 }
             }
-            DashboardLayoutItem::Panel(_) => {}
+            DashboardLayoutItem::Panel(_) | DashboardLayoutItem::AutoGrid(_) => {}
         }
     }
     None
@@ -288,7 +291,7 @@ fn find_tabs_mut(items: &mut [DashboardLayoutItem], id: TabGroupId) -> Option<&m
                     return Some(found);
                 }
             }
-            DashboardLayoutItem::Panel(_) => {}
+            DashboardLayoutItem::Panel(_) | DashboardLayoutItem::AutoGrid(_) => {}
         }
     }
     None
@@ -301,6 +304,14 @@ fn collect_visible_items(
 ) {
     for item in items {
         match item {
+            DashboardLayoutItem::AutoGrid(group) => {
+                visible.extend(
+                    group
+                        .panels
+                        .iter()
+                        .map(|&index| VisibleDashboardItem::panel(index, depth)),
+                );
+            }
             DashboardLayoutItem::Panel(index) => {
                 visible.push(VisibleDashboardItem::panel(*index, depth))
             }
@@ -336,6 +347,15 @@ fn find_ancestors(
 ) -> bool {
     for item in items {
         match item {
+            DashboardLayoutItem::AutoGrid(group) => {
+                if group
+                    .panels
+                    .iter()
+                    .any(|&index| target == DashboardItemId::Panel(index))
+                {
+                    return true;
+                }
+            }
             DashboardLayoutItem::Panel(index) if target == DashboardItemId::Panel(*index) => {
                 return true;
             }
@@ -370,6 +390,38 @@ fn find_ancestors(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auto_grid_is_transparent_to_visibility_and_ancestors() {
+        use super::autogrid::{AutoGridOptions, DashboardAutoGrid};
+        let row = RowId::new(0);
+        let mut layout = DashboardLayout::new(vec![DashboardLayoutItem::Row(DashboardRow::new(
+            row,
+            "Section",
+            false,
+            false,
+            vec![DashboardLayoutItem::AutoGrid(DashboardAutoGrid {
+                options: AutoGridOptions::default(),
+                panels: vec![2, 0],
+            })],
+        ))]);
+        assert_eq!(layout.visible_panel_indices(), vec![2, 0]);
+        assert_eq!(layout.visible_items()[1], VisibleDashboardItem::panel(2, 1));
+        assert_eq!(layout.first_visible(), Some(DashboardItemId::Row(row)));
+        layout.set_row_collapsed(row, true).unwrap();
+        assert!(layout.visible_panel_indices().is_empty());
+        assert_eq!(
+            layout.nearest_visible_ancestor(DashboardItemId::Panel(2)),
+            Some(DashboardItemId::Row(row))
+        );
+        assert_eq!(
+            layout
+                .set_row_collapsed(row, false)
+                .unwrap()
+                .newly_visible_panels,
+            vec![2, 0]
+        );
+    }
 
     #[test]
     fn tabs_switch_returns_only_revealed_panels() {
