@@ -31,5 +31,5 @@ pub(crate) use layout::{
 };
 #[cfg(test)]
 pub(crate) use panels::prepare_table_rows;
-pub(crate) use panels::{calculate_y_bounds, measure_panel_content};
+pub(crate) use panels::{PanelRenderContext, calculate_y_bounds, measure_panel_content};
 pub(crate) use tabs::{render_tab_bar, tab_at, tab_bar_geometry, tab_title};

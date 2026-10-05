@@ -58,7 +58,7 @@ fn auto_grid_render(
     }
     let area = Rect::new(0, 0, size.width, size.height);
     for item in crate::ui::visible_dashboard_rects(area, app) {
-        if let crate::ui::DashboardRectKind::Panel { index } = item.kind {
+        if let crate::ui::DashboardRectKind::Panel { index, .. } = item.kind {
             assert_eq!(
                 buffer
                     .cell((item.rect.x + 1, item.rect.y))
@@ -95,7 +95,7 @@ fn auto_grid_actual_buffers_reflow_on_resize() {
             crate::ui::visible_dashboard_rects(area, &app)
                 .iter()
                 .filter_map(|r| match r.kind {
-                    crate::ui::DashboardRectKind::Panel { index } => Some(index),
+                    crate::ui::DashboardRectKind::Panel { index, .. } => Some(index),
                     _ => None,
                 })
                 .collect::<Vec<_>>(),

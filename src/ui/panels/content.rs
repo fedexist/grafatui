@@ -31,3 +31,8 @@ pub(crate) fn prepare_table_rows(panel: &PanelState) -> Vec<TableRowContent<'_>>
         })
         .collect()
 }
+
+/// Clamp in document coordinates before narrowing to the supplied row count.
+pub(crate) fn table_row_offset(row_count: usize, body_offset: u64, capacity: u16) -> usize {
+    body_offset.min(row_count.saturating_sub(usize::from(capacity)) as u64) as usize
+}

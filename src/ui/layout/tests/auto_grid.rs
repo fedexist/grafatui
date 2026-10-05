@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn auto_grid_solver_reflows_at_minimum_width_breakpoints() {
-    use super::super::autogrid::project_auto_grid;
+    use super::project_fixed_auto_grid as project_auto_grid;
     use crate::dashboard::autogrid::AutoGridOptions;
     let options = AutoGridOptions::default();
     for (width, columns) in [(44, 1), (45, 1), (89, 1), (90, 2), (134, 2), (135, 3)] {
@@ -30,7 +30,7 @@ fn auto_grid_solver_reflows_at_minimum_width_breakpoints() {
 
 #[test]
 fn auto_grid_solver_handles_empty_small_and_large_documents() {
-    use super::super::autogrid::project_auto_grid;
+    use super::project_fixed_auto_grid as project_auto_grid;
     use crate::dashboard::autogrid::AutoGridOptions;
     let options = AutoGridOptions {
         max_columns: 3,

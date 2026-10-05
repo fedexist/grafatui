@@ -1,4 +1,4 @@
-use super::super::autogrid::project_auto_grid;
+use super::project_fixed_auto_grid as project_auto_grid;
 use super::*;
 use crate::dashboard::autogrid::AutoGridOptions;
 
