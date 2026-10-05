@@ -251,3 +251,46 @@ async fn auto_grid_terminal_flow_buffers_keep_identity() {
     assert_eq!(app.selected_item, Some(DashboardItemId::Panel(0)));
     auto_grid_render(&mut app, resized, "lifecycle-up", &["A"]);
 }
+
+#[tokio::test]
+async fn auto_grid_end_and_manual_scroll_stay_within_document() {
+    let mut app = auto_grid_test_app();
+    let size = Size::new(100, 24);
+    auto_grid_render(&mut app, size, "manual-initial", &["A", "B"]);
+    handle_key(key(KeyCode::End), size, &mut app).await.unwrap();
+    assert_eq!(app.vertical_scroll, 7);
+    auto_grid_render(&mut app, size, "manual-end", &["C", "D"]);
+    handle_key(key(KeyCode::PageUp), size, &mut app)
+        .await
+        .unwrap();
+    assert_eq!(app.vertical_scroll, 0);
+    auto_grid_render(&mut app, size, "manual-page-up", &["A", "B"]);
+    for _ in 0..3 {
+        handle_key(key(KeyCode::PageDown), size, &mut app)
+            .await
+            .unwrap();
+        assert_eq!(app.vertical_scroll, 7);
+    }
+    assert_eq!(app.vertical_scroll, 7);
+    auto_grid_render(&mut app, size, "manual-page-down", &["C", "D"]);
+    handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::ScrollUp,
+            column: 1,
+            row: 4,
+            modifiers: KeyModifiers::NONE,
+        },
+        size,
+        &mut app,
+    )
+    .await
+    .unwrap();
+    assert_eq!(app.vertical_scroll, 6);
+    auto_grid_render(&mut app, size, "manual-wheel-up", &["C", "D"]);
+    handle_key(key(KeyCode::Home), size, &mut app)
+        .await
+        .unwrap();
+    assert_eq!(app.vertical_scroll, 0);
+    assert_eq!(app.selected_item, Some(DashboardItemId::Panel(0)));
+    auto_grid_render(&mut app, size, "manual-home", &["A", "B"]);
+}
