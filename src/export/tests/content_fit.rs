@@ -123,3 +123,46 @@ fn content_fit_recording_tracks_data_and_resize() {
     stop_recording(&mut app, RecordingCompletionReason::Quit).unwrap();
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn content_fit_export_preserves_numeric_missing_and_threshold_colors() {
+    use crate::app::{ThresholdMode, ThresholdStep, Thresholds};
+    let mut app = fitted_app();
+    app.theme.palette[0] = Color::Rgb(1, 2, 3);
+    app.theme.text = Color::Rgb(4, 5, 6);
+    app.panels[0].series = rows(3);
+    app.panels[0].series[0].visible = false;
+    app.panels[0].series[2].value = None;
+    app.panels[0].display.no_value = Some("missing".into());
+    for fit in [false, true] {
+        let DashboardLayoutItem::AutoGrid(group) = &mut app.layout.items[0] else {
+            panic!()
+        };
+        group.options.fit_content = fit;
+        app.panels[0].thresholds = None;
+        let svg = render_svg(&app, Rect::new(0, 0, 100, 40));
+        assert!(!svg.contains("row01"));
+        assert!(
+            svg.contains(r##"fill="#010203" font-size="11.0" text-anchor="start">2.00</text>"##),
+            "numeric default color changed"
+        );
+        assert!(
+            svg.contains(r##"fill="#040506" font-size="11.0" text-anchor="start">missing</text>"##)
+        );
+        app.panels[0].thresholds = Some(Thresholds {
+            mode: ThresholdMode::Absolute,
+            steps: vec![ThresholdStep {
+                value: None,
+                color: Color::Rgb(7, 8, 9),
+            }],
+            style: None,
+        });
+        let svg = render_svg(&app, Rect::new(0, 0, 100, 40));
+        assert!(
+            svg.contains(r##"fill="#070809" font-size="11.0" text-anchor="start">2.00</text>"##)
+        );
+        assert!(
+            svg.contains(r##"fill="#040506" font-size="11.0" text-anchor="start">missing</text>"##)
+        );
+    }
+}

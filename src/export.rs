@@ -1181,8 +1181,14 @@ fn render_table_panel(
         let value = series.value;
         let value_color = series
             .color
-            .map(|color| color_hex(color, "#e6e6e6"))
-            .unwrap_or_else(|| text.clone());
+            .map(|color| color_hex(color, "#00ff88"))
+            .unwrap_or_else(|| {
+                if series.has_value {
+                    color_hex(app.theme.palette[0], "#00ff88")
+                } else {
+                    text.clone()
+                }
+            });
         write_text(
             out,
             rect.left + 6.0,
