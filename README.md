@@ -93,8 +93,11 @@ grafatui man
 ```
 
 Grafana 13 users can import an exact `dashboard.grafana.app/v2` JSON resource
-with recursive `GridLayout`, `RowsLayout`, and `TabsLayout` containers. Auto-grid,
-repeat, conditional rendering, nested non-empty layout variables, library panels, and
+with recursive `GridLayout`, `RowsLayout`, `TabsLayout`, and static `AutoGridLayout`
+containers. AutoGrid supports responsive columns and fixed heights; see the
+[compatibility matrix](docs/grafana-compatibility.md#static-autogrid-fundamentals)
+for sizing options and deferred features. Full-screen/content fitting, repeat,
+conditional rendering, nested non-empty layout variables, library panels, and
 Resource YAML remain unsupported; export **Model: Classic** under **Export as
 code → Advanced options** for those dashboards. See the
 [dashboard import guide](https://fedexist.github.io/grafatui/grafana-dashboard-import.html)
