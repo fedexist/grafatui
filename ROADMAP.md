@@ -209,12 +209,19 @@ with a clear import error rather than silently changing the dashboard.
 | **V2 Resource JSON compatibility** | `apiVersion: dashboard.grafana.app/v2` with a `GridLayout` | Imports Grafana 13's default JSON format without requiring a Classic export | 🔴 | ✅ |
 | **Rows layout** | `RowsLayout` and nested row layouts | Preserves dashboard grouping and collapsed sections | 🔴 | ✅ |
 | **Tabs layout** | `TabsLayout` and nested tabs | Preserves tabbed dashboard organization | 🔴 | ✅ |
-| **Auto-grid layout** | `AutoGridLayout` | Preserves automatic panel placement and sizing | 🔴 | 📋 |
+| **Auto-grid fundamentals** | Static `AutoGridLayout` | Responsive ordered placement, fixed heights, nested rows/tabs, navigation and exports | 🟡 | 🔶 Stage 1 implemented |
+| **Full auto-grid layout** | `fillScreen`, content fitting and height bounds | Completes automatic sizing and panel-body scrolling | 🔴 | 📋 |
 | **Repeat and dynamic layouts** | Layout and element `repeat` settings | Expands panels or groups from variable values | 🔴 | 📋 |
 | **Conditional rendering** | `conditionalRendering` on supported containers | Shows or hides content using v2 conditions | 🔴 | 📋 |
 | **Nested layout variables** | Variables scoped to rows and tabs | Preserves local variable scope in dynamic dashboards | 🔴 | 📋 |
 | **Library panel resolution** | `LibraryPanel` element references | Imports reusable panels by resolving their external definitions | 🔴 | 📋 |
 | **V2 Resource YAML** | YAML representation of the v2 resource | Supports Grafana's alternative as-code export format | 🟡 | 💡 |
+
+AutoGrid is developed in separate stages: (1) static fundamentals, (2)
+`fillScreen`, (3) content fitting/bounds/row matching/body scrolling, (4)
+variable options and scopes, (5) repeat, then (6) conditional rendering. Each
+stage has a focused PR and interaction/export coverage. Stage 1 does not mark
+full AutoGrid compatibility complete.
 
 ---
 
