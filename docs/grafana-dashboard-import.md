@@ -6,21 +6,21 @@ panels in the terminal.
 | Format | Status | Requirements |
 |---|---|---|
 | Classic JSON | ✅ Supported | Non-resource object with fields such as `title`, `panels`, and `templating` |
-| V2 Resource JSON | 🔶 Partial | JSON only, exact `apiVersion: dashboard.grafana.app/v2`, and recursive grid, row, tab, or static AutoGrid containers |
+| V2 Resource JSON | 🔶 Partial | JSON only, exact `apiVersion: dashboard.grafana.app/v2`, and recursive grid, row, tab, or AutoGrid containers |
 | V1 Resource JSON | ❌ Unsupported | The `dashboard.grafana.app/v1` resource envelope is not accepted |
 | Resource YAML | ❌ Unsupported | `--grafana-json` accepts JSON only |
 
 The supported V2 subset maps inline `Panel` elements, Prometheus `PanelQuery`
 queries, top-level variables, `timeSettings.autoRefresh`, supported field
-configuration, fixed-grid positions, static AutoGrid placement, and nested `RowsLayout`/`TabsLayout` containers to the
+configuration, fixed-grid positions, AutoGrid placement, and nested `RowsLayout`/`TabsLayout` containers to the
 same Grafatui behavior as Classic JSON.
 
 Rows and tabs may recursively contain `GridLayout`, `RowsLayout`, `TabsLayout`,
-or static `AutoGridLayout`. AutoGrid adapts columns to terminal width and supports
-fixed row heights or `fillScreen` growth. See [Static AutoGrid sizing](grafana-compatibility.md#static-autogrid-sizing)
+or `AutoGridLayout`. AutoGrid adapts columns to terminal width and supports
+fixed row heights, `fillScreen` growth, and table content fitting with minima and row matching. See [Static AutoGrid sizing](grafana-compatibility.md#static-autogrid-sizing)
 for supported sizing options and the runnable example.
 
-AutoGrid content fitting, repeat, conditional rendering, nested non-empty layout variables,
+AutoGrid maximum heights, repeat, conditional rendering, nested non-empty layout variables,
 library panels, and Resource YAML remain unsupported; unsupported V2 layouts
 and fields are fatal import errors. Repeated grid items are also rejected rather
 than silently changing the dashboard.
@@ -38,7 +38,7 @@ than silently changing the dashboard.
 grafatui --prometheus-url http://localhost:9090 --grafana-json ./node-exporter.json
 ```
 
-Grafana 13 defaults to the V2 Resource model. Its supported grid, row, tab, and static AutoGrid
+Grafana 13 defaults to the V2 Resource model. Its supported grid, row, tab, and AutoGrid
 JSON resources can be imported directly. For dynamic AutoGrid or other deferred
 V2 features, use this Classic export path as the fallback. Grafana documents the available models and export controls in
 [Export a dashboard as code](https://grafana.com/docs/grafana/latest/visualizations/dashboards/share-dashboards-panels/#export-a-dashboard-as-code).

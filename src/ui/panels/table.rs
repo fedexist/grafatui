@@ -17,27 +17,28 @@
 use crate::app::{AppState, PanelState};
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, Paragraph, Row, Table},
+    widgets::{Block, Borders, Paragraph, Row, Table, TableState},
 };
 
-pub(super) fn render_table(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
+pub(super) fn render_table(
+    frame: &mut Frame,
+    area: Rect,
+    p: &PanelState,
+    app: &AppState,
+    context: super::PanelRenderContext,
+) {
     let theme = &app.theme;
 
     let header = ["Series", "Value"];
-    let rows: Vec<Row> = p
-        .series
-        .iter()
-        .filter(|s| s.visible)
-        .map(|s| {
-            let val_str = p.display.format_value(s.value);
-            let color = s
-                .value
-                .and_then(|v| p.get_color_for_value(v))
-                .unwrap_or(theme.text);
-
+    let rows: Vec<Row> = super::prepare_table_rows(p)
+        .into_iter()
+        .map(|row| {
             Row::new(vec![
-                Span::styled(s.name.clone(), Style::default().fg(theme.text)),
-                Span::styled(val_str, Style::default().fg(color)),
+                Span::styled(row.name, Style::default().fg(theme.text)),
+                Span::styled(
+                    row.value,
+                    Style::default().fg(row.color.unwrap_or(theme.text)),
+                ),
             ])
         })
         .collect();
@@ -48,6 +49,7 @@ pub(super) fn render_table(frame: &mut Frame, area: Rect, p: &PanelState, app: &
         return;
     }
 
+    let rows_len = rows.len();
     let table = Table::new(
         rows,
         [Constraint::Percentage(70), Constraint::Percentage(30)],
@@ -64,5 +66,14 @@ pub(super) fn render_table(frame: &mut Frame, area: Rect, p: &PanelState, app: &
     .block(Block::default().borders(Borders::NONE))
     .column_spacing(1);
 
-    frame.render_widget(table, area);
+    if context.content_fit {
+        let offset = super::content::table_row_offset(
+            rows_len,
+            context.body_offset,
+            area.height.saturating_sub(2),
+        );
+        frame.render_stateful_widget(table, area, &mut TableState::default().with_offset(offset));
+    } else {
+        frame.render_widget(table, area);
+    }
 }

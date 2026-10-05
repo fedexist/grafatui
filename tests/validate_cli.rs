@@ -46,9 +46,9 @@ fn auto_grid_validate_accepts_static_fixture() {
 fn auto_grid_validate_reports_unsupported_and_fractional_settings() {
     for (field, value, expected) in [
         (
-            "fitContent",
-            serde_json::json!(true),
-            "spec.layout.spec.fitContent",
+            "maxHeightMode",
+            serde_json::json!("short"),
+            "spec.layout.spec.maxHeightMode",
         ),
         (
             "maxColumnCount",
@@ -375,6 +375,47 @@ fn fill_screen_validate_accepts_true_and_rejects_invalid_inactive() {
             assert!(
                 String::from_utf8_lossy(&output.stderr)
                     .contains("spec.layout.spec.tabs[1].spec.layout.spec.fillScreen")
+            );
+        }
+    }
+}
+
+#[test]
+fn content_fit_validate_accepts_unbounded_and_rejects_maximum() {
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/dashboards/grafana_v2_autogrid_content_fit.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+        .args(["--validate", "--strict", "--grafana-json"])
+        .arg(example)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut json: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/grafana/v2_autogrid_layout.json")).unwrap();
+    let spec = &mut json["spec"]["layout"]["spec"];
+    spec["fitContent"] = serde_json::json!(true);
+    spec["minHeightMode"] = serde_json::json!("none");
+    spec["matchRowHeights"] = serde_json::json!(false);
+    for maximum in [false, true] {
+        let mut value = json.clone();
+        if maximum {
+            value["spec"]["layout"]["spec"]["maxHeightMode"] = serde_json::json!("short");
+        }
+        let path = write_dashboard("content-fit", &value.to_string());
+        let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+            .args(["--validate", "--strict", "--grafana-json"])
+            .arg(&path)
+            .output()
+            .unwrap();
+        fs::remove_file(path).unwrap();
+        assert_eq!(output.status.success(), !maximum);
+        if maximum {
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("spec.layout.spec.maxHeightMode")
             );
         }
     }

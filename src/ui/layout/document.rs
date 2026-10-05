@@ -51,14 +51,22 @@ fn project_layout_items(
                     cursor_y,
                     area.height,
                     &group.options,
-                    &group.panels,
+                    &group.items,
+                    |index, width| {
+                        app.panels
+                            .get(index)
+                            .and_then(|p| crate::ui::measure_panel_content(p, width))
+                    },
                 );
-                output.extend(
-                    projected
-                        .panels
-                        .into_iter()
-                        .map(|panel| panel_rect(panel.index, panel.rect)),
-                );
+                output.extend(projected.panels.into_iter().map(|panel| {
+                    let mut item = panel_rect(panel.index, panel.rect);
+                    item.kind = DashboardRectKind::Panel {
+                        index: panel.index,
+                        content_fit: panel.content_fit,
+                        body_offset: 0,
+                    };
+                    item
+                }));
                 cursor_y = cursor_y.saturating_add(projected.content_height);
             }
             DashboardLayoutItem::Row(row) if row.hidden_header => {
@@ -234,7 +242,11 @@ fn panel_rect(index: usize, rect: LogicalRect) -> ProjectedDashboardRect {
         id: DashboardItemId::Panel(index),
         rect,
         disclosure_width: None,
-        kind: DashboardRectKind::Panel { index },
+        kind: DashboardRectKind::Panel {
+            index,
+            content_fit: false,
+            body_offset: 0,
+        },
     }
 }
 
@@ -272,6 +284,15 @@ pub(super) fn clip_projected_rect(
         id: item.id,
         rect,
         disclosure_rect,
-        kind: item.kind,
+        kind: match item.kind {
+            DashboardRectKind::Panel {
+                index, content_fit, ..
+            } => DashboardRectKind::Panel {
+                index,
+                content_fit,
+                body_offset: if content_fit { top - item.rect.y } else { 0 },
+            },
+            other => other,
+        },
     })
 }

@@ -43,6 +43,7 @@ where
         let timeout = app.refresh_every.saturating_sub(app.last_refresh.elapsed());
 
         if event::poll(timeout)? {
+            let before_refresh = app.last_refresh;
             let action = match event::read()? {
                 Event::Key(key) => {
                     let size = terminal.size()?;
@@ -59,6 +60,7 @@ where
                 _ => InputAction::Redraw,
             };
 
+            reconcile_after_refresh(terminal_viewport(terminal)?, app, before_refresh);
             match action {
                 InputAction::Quit => {
                     finalize_recording_before_quit(app)?;
@@ -84,10 +86,24 @@ where
         }
 
         if app.last_refresh.elapsed() >= app.refresh_every {
+            let before_refresh = app.last_refresh;
             app.refresh().await?;
+            reconcile_after_refresh(terminal_viewport(terminal)?, app, before_refresh);
             needs_draw = true;
             capture_recording_after_change(terminal, app)?;
         }
+    }
+}
+
+fn reconcile_after_refresh(viewport: Rect, app: &mut AppState, before: std::time::Instant) {
+    if app.last_refresh != before
+        && matches!(
+            app.mode,
+            crate::app::AppMode::Normal | crate::app::AppMode::Inspect
+        )
+    {
+        ui::scroll_selected_into_view(viewport, app);
+        ui::clamp_dashboard_scroll(viewport, app);
     }
 }
 
@@ -176,6 +192,171 @@ mod tests {
             "dashed-line".to_string(),
             export,
         )
+    }
+
+    fn content_fit_test_app() -> AppState {
+        use crate::dashboard::autogrid::{AutoGridOptions, DashboardAutoGrid, test_items};
+        use crate::dashboard::{DashboardLayout, DashboardLayoutItem};
+        let mut app = test_app(ExportOptions::default());
+        let template = app.panels[0].clone();
+        app.panels = (0..4)
+            .map(|i| {
+                let mut p = template.clone();
+                p.title = ["A", "B", "C", "D"][i].into();
+                p.panel_type = if i == 2 {
+                    PanelType::Stat
+                } else {
+                    PanelType::Table
+                };
+                p.series = (0..[3, 20, 1, 0][i])
+                    .map(|j| SeriesView {
+                        name: format!("row{:02}", j + 1),
+                        value: Some((j + 1) as f64),
+                        points: vec![],
+                        visible: true,
+                    })
+                    .collect();
+                p
+            })
+            .collect();
+        app.apply_layout(DashboardLayout::new(vec![DashboardLayoutItem::AutoGrid(
+            DashboardAutoGrid {
+                options: AutoGridOptions {
+                    fit_content: true,
+                    min_height: Some(0),
+                    match_row_heights: false,
+                    ..Default::default()
+                },
+                items: test_items(vec![0, 1, 2, 3]),
+            },
+        )]));
+        app.title = "AutoGrid".into();
+        app.view_end_ts = 1_783_080_000;
+        app
+    }
+
+    #[test]
+    fn content_fit_refresh_reconciles_scroll() {
+        use crate::dashboard::DashboardItemId;
+        let mut app = content_fit_test_app();
+        app.selected_item = Some(DashboardItemId::Panel(3));
+        app.vertical_scroll = 1;
+        let before = app.last_refresh;
+        app.panels[1].series.truncate(1);
+        app.last_refresh = std::time::Instant::now();
+        reconcile_after_refresh(Rect::new(0, 0, 100, 48), &mut app, before);
+        assert_eq!(app.selected_item, Some(DashboardItemId::Panel(3)));
+        assert_eq!(app.vertical_scroll, 0);
+        // No completed refresh: manual scrolling must survive the event boundary.
+        app.vertical_scroll = 1;
+        let before = app.last_refresh;
+        reconcile_after_refresh(Rect::new(0, 0, 100, 48), &mut app, before);
+        assert_eq!(app.vertical_scroll, 1);
+        // Fullscreen has its own presentation and keeps its dashboard position.
+        app.mode = crate::app::AppMode::Fullscreen;
+        app.last_refresh = std::time::Instant::now();
+        reconcile_after_refresh(Rect::new(0, 0, 100, 48), &mut app, before);
+        assert_eq!(app.vertical_scroll, 1);
+    }
+
+    #[tokio::test]
+    async fn content_fit_manual_refresh_keeps_focus_through_data_changes() {
+        use crate::app::QueryMode;
+        use crate::dashboard::DashboardItemId;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            for b_rows in [1, 20] {
+                for _ in 0..4 {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    let mut request = Vec::new();
+                    let mut chunk = [0; 4096];
+                    while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                        let n = socket.read(&mut chunk).await.unwrap();
+                        assert!(n > 0);
+                        request.extend_from_slice(&chunk[..n]);
+                    }
+                    let request = String::from_utf8(request).unwrap();
+                    let count = if request.contains("query=B&") {
+                        b_rows
+                    } else if request.contains("query=A&") {
+                        3
+                    } else if request.contains("query=C&") {
+                        1
+                    } else {
+                        0
+                    };
+                    let result=(1..=count).map(|i|serde_json::json!({"metric":{"__name__":format!("row{i:02}")},"value":[1783080000,i.to_string()]})).collect::<Vec<_>>();
+                    let body=serde_json::json!({"status":"success","data":{"resultType":"vector","result":result}}).to_string();
+                    socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+                }
+            }
+        });
+        let mut app = content_fit_test_app();
+
+        for p in &mut app.panels {
+            p.exprs = vec![p.title.clone()];
+            p.legends = vec![Some("{{__name__}}".into())];
+            p.query_modes = vec![QueryMode::Instant];
+        }
+        let size = ratatui::layout::Size::new(100, 24);
+        let viewport = Rect::new(0, 0, 100, 24);
+        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        terminal.draw(|f| ui::draw_ui(f, &mut app)).unwrap();
+        for _ in 0..3 {
+            input::handle_key(
+                KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+                size,
+                &mut app,
+            )
+            .await
+            .unwrap();
+            terminal.draw(|f| ui::draw_ui(f, &mut app)).unwrap();
+        }
+        assert_eq!(app.selected_item, Some(DashboardItemId::Panel(3)));
+        for count in [1, 20] {
+            app.prometheus = PromClient::new(format!("http://{address}"));
+            let before = app.last_refresh;
+            input::handle_key(
+                KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
+                size,
+                &mut app,
+            )
+            .await
+            .unwrap();
+            reconcile_after_refresh(viewport, &mut app, before);
+            assert_eq!(app.panels[1].series.len(), count);
+            assert!(app.panels.iter().all(|p| p.last_error.is_none()));
+            assert_eq!(app.selected_item, Some(DashboardItemId::Panel(3)));
+            assert!(
+                ui::visible_dashboard_rects(viewport, &app)
+                    .iter()
+                    .any(|r| r.id == DashboardItemId::Panel(3))
+            );
+            app.view_end_ts = 1_783_080_000;
+            app.prometheus = PromClient::new("http://localhost:9090".into());
+            terminal.draw(|f| ui::draw_ui(f, &mut app)).unwrap();
+        }
+        ui::scroll_selected_into_view(Rect::new(0, 0, 140, 48), &mut app);
+        assert_eq!(app.selected_item, Some(DashboardItemId::Panel(3)));
+        let mut resized = Terminal::new(TestBackend::new(140, 48)).unwrap();
+        resized.draw(|f| ui::draw_ui(f, &mut app)).unwrap();
+        let text = resized
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        for title in ["A", "B", "C", "D"] {
+            assert!(text.contains(&format!("┌{title}")));
+        }
+        server.await.unwrap();
     }
 
     #[test]

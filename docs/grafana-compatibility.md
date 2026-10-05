@@ -19,7 +19,7 @@ and what Grafatui currently supports.
 ## Dashboard Schema Models
 
 Grafatui imports the non-resource Classic JSON model and recursive `GridLayout`,
-`RowsLayout`, `TabsLayout`, and static `AutoGridLayout` containers from the V2 Resource JSON model. In Grafana 13, use
+`RowsLayout`, `TabsLayout`, and `AutoGridLayout` containers from the V2 Resource JSON model. In Grafana 13, use
 **Export as code → Advanced options → Model: Classic** as the fallback for
 unsupported advanced V2 dashboards. See the
 [dashboard import guide](grafana-dashboard-import.md) for detailed steps.
@@ -28,7 +28,7 @@ unsupported advanced V2 dashboards. See the
 |---|---|---|
 | Classic JSON | ✅ Supported | Accepted by `--grafana-json`; the remaining tables describe support for its fields |
 | V1 Resource JSON | ❌ Not Implemented | The Kubernetes-style `dashboard.grafana.app/v1` resource envelope is not accepted |
-| V2 Resource JSON | 🔶 Partial | JSON-only exact `dashboard.grafana.app/v2` resources with recursive grid, row, tab, and static AutoGrid layouts are supported |
+| V2 Resource JSON | 🔶 Partial | JSON-only exact `dashboard.grafana.app/v2` resources with recursive grid, row, tab, and AutoGrid layouts are supported |
 | Resource YAML | ❌ Not Implemented | `--grafana-json` accepts JSON only |
 
 ### V2 Resource JSON Subset
@@ -37,20 +37,20 @@ unsupported advanced V2 dashboards. See the
 |---|---|---|
 | Exact `apiVersion: dashboard.grafana.app/v2` | ✅ Supported | Other resource versions are rejected |
 | `spec.layout.kind: GridLayout` | ✅ Supported | `GridLayoutItem` coordinates map to Grafatui's fixed 24-column grid |
-| `spec.layout.kind: RowsLayout` | ✅ Supported | Nested grid, row, tab, and static AutoGrid children preserve row titles, nesting, collapsed state, and hidden-header transparency |
-| `spec.layout.kind: TabsLayout` | ✅ Supported | Nested grid, row, tab, and static AutoGrid children preserve titles and show one active tab per group |
+| `spec.layout.kind: RowsLayout` | ✅ Supported | Nested grid, row, tab, and AutoGrid children preserve row titles, nesting, collapsed state, and hidden-header transparency |
+| `spec.layout.kind: TabsLayout` | ✅ Supported | Nested grid, row, tab, and AutoGrid children preserve titles and show one active tab per group |
 | Inline `Panel` elements | ✅ Supported | Supported panel visualization groups map through the Classic-equivalent importer |
 | Prometheus `PanelQuery` queries | ✅ Supported | Non-Prometheus datasources emit import diagnostics and are skipped |
 | Top-level `spec.variables` | 🔶 Partial | Supported variable kinds map to Grafatui variables; unsupported kinds emit diagnostics |
 | `spec.timeSettings.autoRefresh` | ✅ Supported | Used as the dashboard refresh interval |
 | `vizConfig.spec.fieldConfig` | 🔶 Partial | The supported Classic-equivalent field configuration subset applies |
-| `AutoGridLayout` | 🔶 Partial | Static ordered panels at root or inside rows/tabs; responsive columns and fixed or viewport-filled row heights share TUI, hit-test, scroll, and export geometry |
+| `AutoGridLayout` | 🔶 Partial | Ordered panels at root or inside rows/tabs; responsive columns, fillScreen, table content fitting, minima and row matching share TUI, hit-test, scroll, and export geometry |
 | Repeated grid items and row repeat | ❌ Not Implemented | Rejected as fatal import errors |
 | Conditional rendering, non-empty nested variables, and library panels | ❌ Not Implemented | Deferred V2 features |
 
 ### Static AutoGrid sizing
 
-Stages 1–2 support `AutoGridLayoutItem` panel references in source order, including
+Stages 1–3a support `AutoGridLayoutItem` panel references in source order, including
 empty groups, collapsed rows, and inactive tabs. Column counts respond to the
 available terminal width. Resizing preserves panel selection and adjusts scroll
 to keep it reachable. SVG/PNG snapshots and recordings use the same layout.
@@ -62,10 +62,11 @@ to keep it reachable. SVG/PNG snapshots and recordings use the same layout.
 | `columnWidth` | Positive finite pixels required for `custom`; rounds upward to cells |
 | `rowHeightMode` | `short`, `standard`, `tall`, or `custom`; default `standard` |
 | `rowHeight` | Positive finite pixels required for `custom`; rounds upward to cells |
-| `matchRowHeights` | Boolean; either value is equivalent for uniform fixed heights |
+| `matchRowHeights` | Boolean; default true stretches siblings to their row track; false retains each panel contribution, leaving unused gaps |
 | `fillScreen` | Boolean; default false. True grows rows to fill their containing content viewport, preserving baseline minimum heights |
-| Layout/item `fitContent` | Boolean false accepted; true is a field error until later stages |
-| Height bounds | Explicit bounds are field errors; `maxHeightMode: unlimited` without `maxHeight` is accepted |
+| Layout/item `fitContent` | Boolean; layout default false, item omission inherits layout, explicit true/false overrides it. Tables fit visible rows; charts and error overlays retain baseline height |
+| `minHeightMode`, `minHeight` | Omission inherits row height; `none` removes the floor; `short`/`standard`/`tall` use 10/18/29 cells; `custom` requires positive finite pixels rounded upward |
+| Maximum height bounds | Explicit caps are field errors; `maxHeightMode: unlimited` without `maxHeight` is accepted |
 | Item `repeat`, `conditionalRendering` | Field errors; deferred to later stages |
 | Unknown settings | Emit `unsupported_autogrid_setting`; `--strict` rejects the warning |
 
@@ -92,13 +93,36 @@ Empty grids consume no height. This setting does not enter single-panel fullscre
 Run [the fill-screen example](../examples/dashboards/grafana_v2_autogrid_fill_screen.json)
 with the same command, substituting its filename.
 
-Full AutoGrid compatibility remains incomplete. Subsequent stages add
-content fitting and bounds, row matching, panel-body scrolling,
-variable options/scopes, repeats, and conditional visibility. Unsupported
-settings fail during import, including inside inactive tabs and collapsed rows.
+Table fitting counts only visible series, preserving existing ordering, value
+formatting, threshold colors and single-row cell clipping. A nonempty table needs
+N + 4 cells for N rows, its column header, margin and borders; an empty table
+needs 3. Widths with no body space need only borders. Unsupported renderers
+(graph, unknown, stat, gauge, bar gauge, heatmap) and errors retain the baseline.
+A missing minimum inherits `rowHeight`; supplied dimensions are validated even
+when their mode does not consume them. Fixed panels still contribute their full
+baseline to prevent overlap beside shorter fitted tables.
+
+With fitting, row tracks follow the tallest contribution. `fillScreen` distributes
+only extra height above those tracks and keeps a baseline track floor.
+`matchRowHeights: false` keeps individual heights even in filled grids; unused
+gaps have no click target. This setting now also prevents fixed panels from
+stretching during fill growth. Dashboard scrolling reveals lower fitted table
+rows while keeping the clipped panel title and table header visible. Refreshes
+reconcile focus and scroll after table data grows or shrinks. SVG/PNG and
+recordings use the same row window and logical 18-pixel spacing.
+
+Run [the content-fit example](../examples/dashboards/grafana_v2_autogrid_content_fit.json)
+with the same command, substituting its filename.
+
+Full AutoGrid compatibility remains incomplete. Stage 3a implements unbounded
+table fitting, overrides, minima and row matching. Stage 3b will add maximum
+heights, independent panel-body scrolling and wrapped-error fitting. Later
+stages add variable options/scopes, repeats and conditional visibility.
+Unsupported settings fail during import, including inside inactive tabs and
+collapsed rows.
 
 Grafana V2 Resource YAML remains unsupported. Use a Classic export for any
-advanced V2 dashboard outside this static layout subset.
+advanced V2 dashboard outside this layout subset.
 
 ---
 
