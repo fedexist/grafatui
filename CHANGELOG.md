@@ -4,6 +4,46 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.1.13] - 2026-10-05
+
+### ⛰️  Features
+
+- Import Grafana v2 rows layouts ([c979f5a](https://github.com/fedexist/grafatui/commit/c979f5ab7022cfde4ed4a85a56215267bcc538f4))
+- Preserve Classic dashboard rows ([a78da80](https://github.com/fedexist/grafatui/commit/a78da807282cb67ccab8a83511c771835e4f256c))
+- Make dashboard state row aware ([e9eaabb](https://github.com/fedexist/grafatui/commit/e9eaabb102699d85f536fb5bb6d85ed2677f7a3e))
+- Add interactive dashboard rows ([91231d5](https://github.com/fedexist/grafatui/commit/91231d5ac48d9cea13ed9e5245601c1fa0da9d66))
+- Export visible dashboard rows ([fdc1a3f](https://github.com/fedexist/grafatui/commit/fdc1a3f633a84f0cf418c9154da88192f88d851c))
+- Add Grafana v2 tabs layout support ([833b677](https://github.com/fedexist/grafatui/commit/833b677614cc18f9c7fc827ddce9cbdaa22430cb))
+- Establish native AutoGrid groups and responsive placement ([7312be5](https://github.com/fedexist/grafatui/commit/7312be53f90ee89a7e54d8f7b9d28263e955f068))
+- Import static Grafana v2 AutoGrid layouts ([018c7ea](https://github.com/fedexist/grafatui/commit/018c7ea54a7db9470c712966354f77f7c3028b7b))
+- Share wide AutoGrid geometry across TUI and exports ([23c9ba3](https://github.com/fedexist/grafatui/commit/23c9ba3124e23456e7286d547514783af6851c58))
+- Retain AutoGrid fillScreen and grow row tracks ([3653a77](https://github.com/fedexist/grafatui/commit/3653a776a9d83f864339f2eed3aa8b87102ef34c))
+- Integrate AutoGrid viewport filling with nested layouts ([fc1c253](https://github.com/fedexist/grafatui/commit/fc1c2536c447e6a401909808384193a64b09785d))
+- Retain AutoGrid content-fit settings and measure table content ([da37757](https://github.com/fedexist/grafatui/commit/da3775754ff57973e6e3f2391d7151feddee0fa4))
+- Project content-sized AutoGrid rows and reconcile data changes ([12cdbff](https://github.com/fedexist/grafatui/commit/12cdbff83257101055c6fbff4f2161eb8d499f3e))
+- Export and document AutoGrid content fitting ([f1e8b4a](https://github.com/fedexist/grafatui/commit/f1e8b4a442912ca511434b0b5cd2f88a268de6fa))
+
+### 🐛 Bug Fixes
+
+- Bound AutoGrid dashboard scrolling to document extent ([5b8a4fc](https://github.com/fedexist/grafatui/commit/5b8a4fcc7f56b07ba41edb5ea431ffd7e0ab217a))
+- Preserve table export value colors ([73857f2](https://github.com/fedexist/grafatui/commit/73857f2b7c2ea06eebdc084470f56a5d6a415604))
+
+### 📚 Documentation
+
+- Demonstrate interactive Grafana rows ([73cfe5d](https://github.com/fedexist/grafatui/commit/73cfe5d1bbc803db5ab4a1c1ed9b8be1f5a7b814))
+- Describe static AutoGrid support and remaining stages ([ac6b1b2](https://github.com/fedexist/grafatui/commit/ac6b1b2f13e21392de55c5f11271115641c9913d))
+- Align import guides with static AutoGrid support ([38a3ea0](https://github.com/fedexist/grafatui/commit/38a3ea0e72ccf15fc6f6ef6d55266a8ea0a01fc7))
+- Correct AutoGrid fillScreen support statement ([c1e5bdd](https://github.com/fedexist/grafatui/commit/c1e5bdd09852f7d02fdab226d3eeb84fbeb55bff))
+
+### 🚜 Refactor
+
+- Carry dashboard layout through Grafana imports ([cf15bca](https://github.com/fedexist/grafatui/commit/cf15bcafdc82e6dc552bec5e62aaa1bf4abae324))
+
+### ⚙️ Miscellaneous Tasks
+
+- Update ratatui to 0.30.2 ([b8369ce](https://github.com/fedexist/grafatui/commit/b8369cecc0f417947b3093aaa8689a249c674989))
+
+
 ## [0.1.12] - 2026-08-25
 
 ### ⛰️  Features
