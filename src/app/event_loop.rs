@@ -32,6 +32,7 @@ pub(crate) async fn run_app<B: ratatui::backend::Backend>(
 where
     <B as ratatui::backend::Backend>::Error: Send + Sync + 'static,
 {
+    super::panel_scroll::reconcile_panel_body_scroll(terminal_viewport(terminal)?, app);
     let mut needs_draw = true;
 
     loop {
@@ -105,6 +106,7 @@ fn reconcile_after_refresh(viewport: Rect, app: &mut AppState, before: std::time
         ui::scroll_selected_into_view(viewport, app);
         ui::clamp_dashboard_scroll(viewport, app);
     }
+    super::panel_scroll::reconcile_panel_body_scroll(viewport, app);
 }
 
 fn terminal_viewport<B: ratatui::backend::Backend>(terminal: &Terminal<B>) -> Result<Rect>
@@ -355,6 +357,78 @@ mod tests {
             .collect::<String>();
         for title in ["A", "B", "C", "D"] {
             assert!(text.contains(&format!("┌{title}")));
+        }
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn bounds_scroll_manual_and_periodic_refresh_clamp_real_data() {
+        use crate::{
+            app::QueryMode,
+            app::panel_scroll::{PanelBodyIdentity, PanelBodyScroll},
+            dashboard::{DashboardItemId, DashboardLayoutItem},
+        };
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            for count in [1, 20] {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let mut bytes = [0; 4096];
+                while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                    let n = socket.read(&mut bytes).await.unwrap();
+                    assert!(n > 0);
+                    request.extend_from_slice(&bytes[..n]);
+                }
+                assert!(String::from_utf8(request).unwrap().contains("query=B&"));
+                let result=(1..=count).map(|n|serde_json::json!({"metric":{"__name__":format!("row{n:02}")},"value":[1783080000,n.to_string()]})).collect::<Vec<_>>();
+                let body=serde_json::json!({"status":"success","data":{"resultType":"vector","result":result}}).to_string();
+                socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+            }
+        });
+        let mut app = content_fit_test_app();
+        app.panels = vec![app.panels[1].clone()];
+        app.panels[0].exprs = vec!["B".into()];
+        app.panels[0].legends = vec![Some("{{__name__}}".into())];
+        app.panels[0].query_modes = vec![QueryMode::Instant];
+        let DashboardLayoutItem::AutoGrid(g) = &mut app.layout.items[0] else {
+            panic!()
+        };
+        g.options.max_height = Some(10);
+        g.items = crate::dashboard::autogrid::test_items(vec![0]);
+        app.selected_item = Some(DashboardItemId::Panel(0));
+        app.panel_body_scroll.insert(
+            0,
+            PanelBodyScroll {
+                identity: PanelBodyIdentity::Table,
+                offset: 14,
+            },
+        );
+        app.prometheus = PromClient::new(format!("http://{address}"));
+        let viewport = Rect::new(0, 0, 100, 40);
+        for periodic in [false, true] {
+            let before = app.last_refresh;
+            if periodic {
+                app.refresh().await.unwrap();
+            } else {
+                input::handle_key(
+                    KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
+                    ratatui::layout::Size::new(100, 40),
+                    &mut app,
+                )
+                .await
+                .unwrap();
+            }
+            reconcile_after_refresh(viewport, &mut app, before);
+            assert_eq!(app.panels[0].series.len(), if periodic { 20 } else { 1 });
+            assert_eq!(app.panel_body_scroll[&0].offset, 0);
+            assert_eq!(app.selected_item, Some(DashboardItemId::Panel(0)));
+            assert!(app.panels[0].last_error.is_none());
         }
         server.await.unwrap();
     }
