@@ -46,9 +46,9 @@ fn auto_grid_validate_accepts_static_fixture() {
 fn auto_grid_validate_reports_unsupported_and_fractional_settings() {
     for (field, value, expected) in [
         (
-            "fitContent",
-            serde_json::json!(true),
-            "spec.layout.spec.fitContent",
+            "maxHeightMode",
+            serde_json::json!("short"),
+            "spec.layout.spec.maxHeightMode",
         ),
         (
             "maxColumnCount",

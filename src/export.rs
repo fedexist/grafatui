@@ -1883,7 +1883,7 @@ mod tests {
         app.apply_layout(DashboardLayout::new(vec![DashboardLayoutItem::AutoGrid(
             DashboardAutoGrid {
                 options: AutoGridOptions::default(),
-                panels: vec![0, 1, 2, 3],
+                items: crate::dashboard::autogrid::test_items(vec![0, 1, 2, 3]),
             },
         )]));
         let viewport = Rect::new(0, 0, 140, 40);
@@ -1938,7 +1938,7 @@ mod tests {
                     fill_screen: true,
                     ..Default::default()
                 },
-                panels: vec![0, 1, 2, 3],
+                items: crate::dashboard::autogrid::test_items(vec![0, 1, 2, 3]),
             },
         )]));
         let viewport = Rect::new(0, 0, 140, 48);

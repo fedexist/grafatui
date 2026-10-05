@@ -307,9 +307,9 @@ fn collect_visible_items(
             DashboardLayoutItem::AutoGrid(group) => {
                 visible.extend(
                     group
-                        .panels
+                        .items
                         .iter()
-                        .map(|&index| VisibleDashboardItem::panel(index, depth)),
+                        .map(|item| VisibleDashboardItem::panel(item.index, depth)),
                 );
             }
             DashboardLayoutItem::Panel(index) => {
@@ -349,9 +349,9 @@ fn find_ancestors(
         match item {
             DashboardLayoutItem::AutoGrid(group) => {
                 if group
-                    .panels
+                    .items
                     .iter()
-                    .any(|&index| target == DashboardItemId::Panel(index))
+                    .any(|item| target == DashboardItemId::Panel(item.index))
                 {
                     return true;
                 }
@@ -402,7 +402,7 @@ mod tests {
             false,
             vec![DashboardLayoutItem::AutoGrid(DashboardAutoGrid {
                 options: AutoGridOptions::default(),
-                panels: vec![2, 0],
+                items: crate::dashboard::autogrid::test_items(vec![2, 0]),
             })],
         ))]);
         assert_eq!(layout.visible_panel_indices(), vec![2, 0]);
