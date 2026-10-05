@@ -211,7 +211,7 @@ mod tests {
                 p.series = (0..[3, 20, 1, 0][i])
                     .map(|j| SeriesView {
                         name: format!("row{:02}", j + 1),
-                        value: Some(j as f64),
+                        value: Some((j + 1) as f64),
                         points: vec![],
                         visible: true,
                     })
@@ -230,6 +230,7 @@ mod tests {
                 items: test_items(vec![0, 1, 2, 3]),
             },
         )]));
+        app.title = "AutoGrid".into();
         app.view_end_ts = 1_783_080_000;
         app
     }
@@ -297,7 +298,7 @@ mod tests {
             }
         });
         let mut app = content_fit_test_app();
-        app.prometheus = PromClient::new(format!("http://{address}"));
+
         for p in &mut app.panels {
             p.exprs = vec![p.title.clone()];
             p.legends = vec![Some("{{__name__}}".into())];
@@ -319,6 +320,7 @@ mod tests {
         }
         assert_eq!(app.selected_item, Some(DashboardItemId::Panel(3)));
         for count in [1, 20] {
+            app.prometheus = PromClient::new(format!("http://{address}"));
             let before = app.last_refresh;
             input::handle_key(
                 KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
@@ -337,10 +339,23 @@ mod tests {
                     .any(|r| r.id == DashboardItemId::Panel(3))
             );
             app.view_end_ts = 1_783_080_000;
+            app.prometheus = PromClient::new("http://localhost:9090".into());
             terminal.draw(|f| ui::draw_ui(f, &mut app)).unwrap();
         }
         ui::scroll_selected_into_view(Rect::new(0, 0, 140, 48), &mut app);
         assert_eq!(app.selected_item, Some(DashboardItemId::Panel(3)));
+        let mut resized = Terminal::new(TestBackend::new(140, 48)).unwrap();
+        resized.draw(|f| ui::draw_ui(f, &mut app)).unwrap();
+        let text = resized
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        for title in ["A", "B", "C", "D"] {
+            assert!(text.contains(&format!("┌{title}")));
+        }
         server.await.unwrap();
     }
 

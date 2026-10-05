@@ -538,11 +538,22 @@ fn render_panel(
         FONT_SIZE,
     );
 
-    let inner = PlotRect {
-        left: rect.left + PANEL_PADDING,
-        top: rect.top + TITLE_HEIGHT,
-        width: (rect.width - PANEL_PADDING * 2.0).max(0.0),
-        height: (rect.height - TITLE_HEIGHT - PANEL_PADDING).max(0.0),
+    let fitted_table =
+        context.content_fit && panel.panel_type == PanelType::Table && panel.last_error.is_none();
+    let inner = if fitted_table {
+        PlotRect {
+            left: rect.left + CELL_WIDTH,
+            top: rect.top + CELL_HEIGHT,
+            width: (rect.width - CELL_WIDTH * 2.0).max(0.0),
+            height: (rect.height - CELL_HEIGHT * 2.0).max(0.0),
+        }
+    } else {
+        PlotRect {
+            left: rect.left + PANEL_PADDING,
+            top: rect.top + TITLE_HEIGHT,
+            width: (rect.width - PANEL_PADDING * 2.0).max(0.0),
+            height: (rect.height - TITLE_HEIGHT - PANEL_PADDING).max(0.0),
+        }
     };
 
     if let Some(err) = &panel.last_error {
@@ -565,7 +576,7 @@ fn render_panel(
         PanelType::Stat => render_stat_panel(app, panel, inner, out),
         PanelType::Gauge => render_gauge_panel(app, panel, inner, out),
         PanelType::BarGauge => render_bar_gauge_panel(app, panel, inner, out),
-        PanelType::Table => render_table_panel(app, panel, inner, out),
+        PanelType::Table => render_table_panel(app, panel, inner, context, out),
         PanelType::Heatmap => render_heatmap_panel(app, panel, inner, out),
     }
 }
@@ -1095,12 +1106,17 @@ fn render_bar_gauge_panel(app: &AppState, panel: &PanelState, rect: PlotRect, ou
     }
 }
 
-fn render_table_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &mut String) {
-    let values = panel
-        .series
-        .iter()
-        .filter(|series| series.visible)
-        .collect::<Vec<_>>();
+fn render_table_panel(
+    app: &AppState,
+    panel: &PanelState,
+    rect: PlotRect,
+    context: ui::PanelRenderContext,
+    out: &mut String,
+) {
+    if context.content_fit && (rect.width == 0.0 || rect.height == 0.0) {
+        return;
+    }
+    let values = ui::prepare_table_rows(panel);
     if values.is_empty() {
         render_no_data(app, rect, out);
         return;
@@ -1109,9 +1125,26 @@ fn render_table_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
     let text = color_hex(app.theme.text, "#e6e6e6");
     let title = color_hex(app.theme.title, "#00c8ff");
     let border = color_hex(app.theme.border, "#555555");
-    let row_height = 20.0;
+    let row_height = if context.content_fit {
+        CELL_HEIGHT
+    } else {
+        20.0
+    };
     let value_x = rect.left + rect.width * 0.7;
-    let max_rows = ((rect.height - row_height) / row_height).floor().max(1.0) as usize;
+    let max_rows = if context.content_fit {
+        ((rect.height / CELL_HEIGHT).floor().max(0.0) as usize).saturating_sub(2)
+    } else {
+        ((rect.height - row_height) / row_height).floor().max(1.0) as usize
+    };
+    let offset = if context.content_fit {
+        ui::table_row_offset(
+            values.len(),
+            context.body_offset,
+            max_rows.min(u16::MAX as usize) as u16,
+        )
+    } else {
+        0
+    };
 
     write_text(
         out,
@@ -1142,21 +1175,19 @@ fn render_table_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
         },
     );
 
-    for (row, series) in values.into_iter().take(max_rows).enumerate() {
-        let y = rect.top + row_height * (row as f64 + 2.0) - 5.0;
-        let value = series
-            .value
-            .map(|value| panel.display.format_number(value))
-            .unwrap_or_else(|| panel.display.format_value(None));
+    for (row, series) in values.into_iter().skip(offset).take(max_rows).enumerate() {
+        let y = rect.top + row_height * (row as f64 + if context.content_fit { 3.0 } else { 2.0 })
+            - 5.0;
+        let value = series.value;
         let value_color = series
-            .value
-            .map(|value| value_color(app, panel, value))
+            .color
+            .map(|color| color_hex(color, "#e6e6e6"))
             .unwrap_or_else(|| text.clone());
         write_text(
             out,
             rect.left + 6.0,
             y,
-            &series.name,
+            series.name,
             &text,
             "start",
             SMALL_FONT_SIZE,
@@ -1875,6 +1906,9 @@ mod tests {
             export,
         )
     }
+
+    #[path = "content_fit.rs"]
+    mod content_fit;
 
     #[test]
     fn auto_grid_export_uses_visible_projection_and_records_resize() {
