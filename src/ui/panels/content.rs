@@ -3,11 +3,18 @@ use crate::app::{PanelState, PanelType};
 use ratatui::style::Color;
 
 pub(crate) fn measure_panel_content(panel: &PanelState, outer_width: u16) -> Option<u64> {
-    if panel.last_error.is_some() || panel.panel_type != PanelType::Table {
+    if panel.panel_type != PanelType::Table {
         return None;
     }
     if outer_width.saturating_sub(2) == 0 {
         return Some(2);
+    }
+    if let Some(error) = &panel.last_error {
+        return Some(
+            super::error_body::error_body_window(error, outer_width - 2, 0, 0)
+                .total_lines
+                .saturating_add(2),
+        );
     }
     let rows = panel.series.iter().filter(|s| s.visible).count() as u64;
     Some(if rows == 0 { 3 } else { rows.saturating_add(4) })

@@ -32,7 +32,10 @@ fn content_fit_measurement_matches_table_body() {
     assert_eq!(rows[0].value, "missing");
     for err in ["first\nsecond", "averylongwordwithnospaces", "Unicode 水é"] {
         p.last_error = Some(err.into());
-        assert_eq!(measure_panel_content(p, 40), None);
+        assert_eq!(
+            measure_panel_content(p, 40),
+            Some(if err.contains("\n") { 4 } else { 3 })
+        );
     }
     for kind in [
         PanelType::Graph,
@@ -133,7 +136,7 @@ fn content_fit_measurement_real_buffers_keep_rows_and_errors() {
     let mut app = auto_grid_test_app();
     app.panels[0].panel_type = PanelType::Table;
     app.panels[0].last_error = Some("first line\nsecond line Unicode 水é".into());
-    assert_eq!(measure_panel_content(&app.panels[0], 40), None);
+    assert_eq!(measure_panel_content(&app.panels[0], 40), Some(4));
     let buffer = content_fit_render(
         &mut app,
         Size::new(40, 24),
@@ -400,7 +403,7 @@ async fn content_fit_gap_click_errors_shrink_and_tiny_buffers() {
             .into_iter()
             .find(|r| r.id == DashboardItemId::Panel(1))
             .unwrap();
-        assert_eq!(item.rect.height, if error.is_some() { 18 } else { 24 });
+        assert_eq!(item.rect.height, if error.is_some() { 4 } else { 24 });
         content_fit_render(
             &mut app,
             size,
@@ -599,5 +602,29 @@ fn content_fit_hidden_header_and_formatted_table_buffer() {
     );
     for width in [3, 6, 10, 40] {
         assert_eq!(measure_panel_content(&app.panels[0], width), Some(6));
+    }
+}
+
+#[test]
+fn bounds_scroll_measurement_fits_table_errors_only() {
+    let mut app = auto_grid_test_app();
+    let p = &mut app.panels[0];
+    p.panel_type = PanelType::Table;
+    p.last_error = Some("one two three four".into());
+    assert_eq!(measure_panel_content(p, 10), Some(5));
+    assert_eq!(measure_panel_content(p, 20), Some(3));
+    assert_eq!(measure_panel_content(p, 2), Some(2));
+    p.last_error = Some(String::new());
+    assert_eq!(measure_panel_content(p, 20), Some(3));
+    for kind in [
+        PanelType::Graph,
+        PanelType::Unknown,
+        PanelType::Stat,
+        PanelType::Gauge,
+        PanelType::BarGauge,
+        PanelType::Heatmap,
+    ] {
+        p.panel_type = kind;
+        assert_eq!(measure_panel_content(p, 10), None);
     }
 }

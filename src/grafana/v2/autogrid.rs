@@ -146,11 +146,12 @@ fn parse_options(
     let match_row_heights =
         !spec.contains_key("matchRowHeights") || optional_bool_from(spec, "matchRowHeights", path)?;
     let min_height = parse_min_height(spec, path)?;
-    validate_max_height(spec, path)?;
+    let max_height = parse_max_height(spec, path)?;
     Ok(AutoGridOptions {
         fill_screen,
         fit_content,
         min_height,
+        max_height,
         match_row_heights,
         max_columns,
         min_column_width,
@@ -173,26 +174,16 @@ fn parse_min_height(spec: &JsonObject, path: &str) -> Result<Option<u32>> {
     }))
 }
 
-fn validate_max_height(spec: &JsonObject, path: &str) -> Result<()> {
-    let max = optional_pixels(spec, "maxHeight", path, LOGICAL_CELL_HEIGHT_PX)?;
-    if spec.contains_key("maxHeightMode") {
-        let value = mode(
-            spec,
-            "maxHeightMode",
-            path,
-            "unlimited",
-            &["unlimited", "short", "standard", "tall", "custom"],
-        )?;
-        ensure!(
-            value == "unlimited",
-            "unsupported Grafana V2 AutoGrid content height bound at {path}.maxHeightMode"
-        );
-    }
-    ensure!(
-        max.is_none(),
-        "unsupported Grafana V2 AutoGrid content height bound at {path}.maxHeight"
-    );
-    Ok(())
+fn parse_max_height(spec: &JsonObject, path: &str) -> Result<Option<u32>> {
+    let custom = optional_pixels(spec, "maxHeight", path, LOGICAL_CELL_HEIGHT_PX)?;
+    Ok(match mode(spec, "maxHeightMode", path, "unlimited", &["unlimited", "short", "standard", "tall", "custom"])? {
+        "unlimited" => None,
+        "short" => Some(168_u32.div_ceil(LOGICAL_CELL_HEIGHT_PX)),
+        "standard" => Some(320_u32.div_ceil(LOGICAL_CELL_HEIGHT_PX)),
+        "tall" => Some(512_u32.div_ceil(LOGICAL_CELL_HEIGHT_PX)),
+        "custom" => Some(custom.ok_or_else(|| anyhow!("invalid Grafana V2 AutoGrid custom height at {path}.maxHeight: missing required positive number"))?),
+        _ => unreachable!(),
+    })
 }
 
 fn mode<'a>(

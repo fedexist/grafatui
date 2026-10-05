@@ -17,6 +17,7 @@
 mod bar_gauge;
 mod content;
 pub(crate) use content::{measure_panel_content, prepare_table_rows, table_row_offset};
+mod error_body;
 mod gauge;
 mod graph;
 mod heatmap;
