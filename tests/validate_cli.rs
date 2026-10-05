@@ -29,6 +29,53 @@ fn example_dashboard(name: &str) -> PathBuf {
 }
 
 #[test]
+fn auto_grid_validate_accepts_static_fixture() {
+    let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+        .args(["--validate", "--strict", "--grafana-json"])
+        .arg(fixture("v2_autogrid_layout.json"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn auto_grid_validate_reports_unsupported_and_fractional_settings() {
+    for (field, value, expected) in [
+        (
+            "fillScreen",
+            serde_json::json!(true),
+            "spec.layout.spec.fillScreen",
+        ),
+        (
+            "maxColumnCount",
+            serde_json::json!(2.5),
+            "autogrid_column_limit_rounded",
+        ),
+    ] {
+        let mut json: serde_json::Value =
+            serde_json::from_str(include_str!("fixtures/grafana/v2_autogrid_layout.json")).unwrap();
+        json["spec"]["layout"]["spec"][field] = value;
+        let path = write_dashboard(field, &json.to_string());
+        let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+            .args(["--validate", "--strict", "--grafana-json"])
+            .arg(&path)
+            .output()
+            .unwrap();
+        fs::remove_file(path).unwrap();
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(expected),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
 fn validate_strict_exits_nonzero_when_warnings_exist() {
     let path = write_dashboard(
         "strict",
