@@ -278,7 +278,8 @@ pub(crate) fn visible_dashboard_rects(area: Rect, app: &AppState) -> Vec<Dashboa
 
     let (projected, cell_h) = projected_dashboard_rects(inner_area, app);
 
-    let scroll_offset = u64::try_from(app.vertical_scroll)
+    let limit = document_scroll_limit(&projected, inner_area.height, cell_h);
+    let scroll_offset = u64::try_from(app.vertical_scroll.min(limit))
         .unwrap_or(u64::MAX)
         .saturating_mul(u64::from(cell_h));
     projected
@@ -292,6 +293,41 @@ fn projected_dashboard_rects(
     app: &AppState,
 ) -> (Vec<document::ProjectedDashboardRect>, u16) {
     document::project_dashboard(area, app)
+}
+
+fn document_scroll_limit(
+    items: &[document::ProjectedDashboardRect],
+    viewport_height: u16,
+    cell_h: u16,
+) -> usize {
+    let extent = items
+        .iter()
+        .map(|item| item.rect.y.saturating_add(item.rect.height))
+        .max()
+        .unwrap_or(0);
+    let quantum = u64::from(cell_h.max(1));
+    let limit = extent
+        .saturating_sub(u64::from(viewport_height))
+        .div_ceil(quantum)
+        // A short final fragment must remain visible even in a tiny viewport.
+        .min(extent.saturating_sub(1) / quantum);
+    usize::try_from(limit).unwrap_or(usize::MAX)
+}
+
+pub(crate) fn clamp_dashboard_scroll(area: Rect, app: &mut AppState) {
+    if app
+        .layout
+        .items
+        .iter()
+        .all(|item| matches!(item, DashboardLayoutItem::Panel(_)))
+    {
+        return;
+    }
+    let inner = dashboard_inner_area(area);
+    let (items, cell_h) = projected_dashboard_rects(inner, app);
+    app.vertical_scroll =
+        app.vertical_scroll
+            .min(document_scroll_limit(&items, inner.height, cell_h));
 }
 
 pub(crate) fn scroll_selected_into_view(area: Rect, app: &mut AppState) {
