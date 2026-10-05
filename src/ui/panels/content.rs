@@ -46,3 +46,64 @@ pub(crate) fn prepare_table_rows(panel: &PanelState) -> Vec<TableRowContent<'_>>
 pub(crate) fn table_row_offset(row_count: usize, body_offset: u64, capacity: u16) -> usize {
     body_offset.min(row_count.saturating_sub(usize::from(capacity)) as u64) as usize
 }
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PanelBodyMetrics {
+    pub(crate) total: u64,
+    pub(crate) capacity: u16,
+    pub(crate) document_offset: u64,
+}
+
+impl PanelBodyMetrics {
+    pub(crate) fn max_local_offset(self) -> u64 {
+        self.total
+            .saturating_sub(self.document_offset)
+            .saturating_sub(u64::from(self.capacity))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PanelBodyWindow {
+    pub(crate) first: u64,
+    pub(crate) length: u16,
+}
+
+pub(crate) fn panel_body_window(
+    total: u64,
+    document_offset: u64,
+    local_offset: u64,
+    capacity: u16,
+) -> PanelBodyWindow {
+    let first = document_offset
+        .saturating_add(local_offset)
+        .min(total.saturating_sub(u64::from(capacity)));
+    PanelBodyWindow {
+        first,
+        length: total.saturating_sub(first).min(u64::from(capacity)) as u16,
+    }
+}
+
+pub(crate) fn panel_body_metrics(
+    panel: &PanelState,
+    outer_width: u16,
+    outer_height: u16,
+    document_offset: u64,
+) -> PanelBodyMetrics {
+    let inner_width = outer_width.saturating_sub(2);
+    let (total, capacity) = if let Some(error) = &panel.last_error {
+        (
+            super::error_body::error_body_window(error, inner_width, 0, 0).total_lines,
+            outer_height.saturating_sub(2),
+        )
+    } else {
+        (
+            panel.series.iter().filter(|s| s.visible).count() as u64,
+            outer_height.saturating_sub(4),
+        )
+    };
+    PanelBodyMetrics {
+        total,
+        capacity: if inner_width == 0 { 0 } else { capacity },
+        document_offset,
+    }
+}

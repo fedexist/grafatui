@@ -293,6 +293,8 @@ pub(crate) struct AppState {
     pub(crate) view_end_ts: i64,
     /// Vertical scroll offset.
     pub(crate) vertical_scroll: usize,
+    /// Scroll state belongs to panel identity, not its visible position.
+    pub(crate) panel_body_scroll: HashMap<usize, super::panel_scroll::PanelBodyScroll>,
     /// Dashboard title.
     pub(crate) title: String,
     /// Whether to show the debug bar.
@@ -373,6 +375,7 @@ impl AppState {
             last_refresh: Instant::now() - refresh_every,
             view_end_ts: chrono::Utc::now().timestamp(),
             vertical_scroll: 0,
+            panel_body_scroll: HashMap::new(),
             title,
             debug_bar: false,
             vars: HashMap::new(),

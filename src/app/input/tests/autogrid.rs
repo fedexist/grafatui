@@ -298,3 +298,6 @@ async fn auto_grid_end_and_manual_scroll_stay_within_document() {
 mod fill_screen;
 
 mod content_fit;
+
+#[path = "autogrid/bounds_scroll.rs"]
+mod bounds_scroll;

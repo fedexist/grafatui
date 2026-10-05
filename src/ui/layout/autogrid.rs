@@ -14,6 +14,7 @@ pub(crate) struct AutoGridPanelRect {
     pub(crate) index: usize,
     pub(crate) rect: LogicalRect,
     pub(crate) content_fit: bool,
+    pub(crate) body_scroll: bool,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -40,6 +41,10 @@ pub(crate) fn project_auto_grid(
     let remainder = usize::from(width) % columns;
     let baseline = u64::from(options.row_height.max(1));
     let minimum = options.min_height.map(u64::from).unwrap_or(baseline);
+    let cap = options
+        .max_height
+        .map(|h| u64::from(h).max(minimum))
+        .unwrap_or(u64::MAX);
     let requested_fit =
         options.fit_content || items.iter().any(|item| item.fit_content == Some(true));
     let floor = if requested_fit && !options.fill_screen {
@@ -58,12 +63,13 @@ pub(crate) fn project_auto_grid(
             .then(|| measure(item.index, outer_width))
             .flatten();
         let height = natural
-            .map(|height| height.max(minimum))
+            .map(|height| height.max(minimum).min(cap))
             .unwrap_or(baseline);
         tracks[position / columns] = tracks[position / columns].max(height);
         panels.push(AutoGridPanelRect {
             index: item.index,
             content_fit: natural.is_some(),
+            body_scroll: natural.is_some() && options.max_height.is_some(),
             rect: LogicalRect {
                 x: area_x.saturating_add((column * base_width + column.min(remainder)) as u16),
                 y: 0,
@@ -88,7 +94,11 @@ pub(crate) fn project_auto_grid(
         for panel in panels.iter_mut().skip(row * columns).take(columns) {
             panel.rect.y = cursor;
             if options.match_row_heights {
-                panel.rect.height = *track;
+                panel.rect.height = if panel.content_fit {
+                    (*track).min(cap)
+                } else {
+                    *track
+                };
             }
         }
         cursor = cursor.saturating_add(*track);
