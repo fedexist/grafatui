@@ -1914,6 +1914,67 @@ mod tests {
     }
 
     #[test]
+    fn fill_screen_export_records_width_and_height_changes() {
+        use crate::dashboard::autogrid::{AutoGridOptions, DashboardAutoGrid};
+        let dir = test_export_dir("fill-screen");
+        let mut app = test_app(ExportOptions {
+            dir: dir.clone(),
+            format: ExportFormat::Both,
+            record_max_frames: 10,
+        });
+        app.view_end_ts = 1_783_080_000;
+        app.panels = (0..4)
+            .map(|index| {
+                let mut panel = test_panel(1_783_079_900.0);
+                panel.title = ["A", "B", "C", "D"][index].into();
+                panel.panel_type = PanelType::Stat;
+                panel.series[0].value = Some((index + 1) as f64);
+                panel
+            })
+            .collect();
+        app.apply_layout(DashboardLayout::new(vec![DashboardLayoutItem::AutoGrid(
+            DashboardAutoGrid {
+                options: AutoGridOptions {
+                    fill_screen: true,
+                    ..Default::default()
+                },
+                panels: vec![0, 1, 2, 3],
+            },
+        )]));
+        let viewport = Rect::new(0, 0, 140, 48);
+        let svg = render_svg(&app, viewport);
+        assert!(svg.contains(r#"width="1400" height="864""#));
+        // Hand-derived positions after the dashboard's border/header/footer margins.
+        for (x, y, w, h) in [
+            (10.0, 72.0, 460.0, 378.0),
+            (470.0, 72.0, 460.0, 378.0),
+            (930.0, 72.0, 460.0, 378.0),
+            (10.0, 450.0, 460.0, 360.0),
+        ] {
+            assert!(svg.contains(&format!(
+                r#"<rect x="{x:.0}" y="{y:.0}" width="{w:.0}" height="{h:.0}""#
+            )));
+        }
+        toggle_recording(&mut app, viewport).unwrap();
+        assert_eq!(app.recording.as_ref().unwrap().frame_count, 1);
+        let narrow = Rect::new(0, 0, 100, 48);
+        capture_recording_frame(&mut app, narrow).unwrap();
+        assert_eq!(app.recording.as_ref().unwrap().frame_count, 2);
+        let taller = Rect::new(0, 0, 100, 60);
+        capture_recording_frame(&mut app, taller).unwrap();
+        assert_eq!(app.recording.as_ref().unwrap().frame_count, 3);
+        capture_recording_frame(&mut app, taller).unwrap();
+        assert_eq!(app.recording.as_ref().unwrap().frame_count, 3);
+        let recording = app.recording.as_ref().unwrap();
+        for frame in 1..=3 {
+            assert!(recording.dir.join(format!("frame-{frame:06}.png")).exists());
+            assert!(recording.dir.join(format!("frame-{frame:06}.svg")).exists());
+        }
+        toggle_recording(&mut app, narrow).unwrap();
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn svg_tab_switch_changes_frame_and_escapes_active_title() {
         let recording_dir = test_export_dir("tabs-recording");
         let mut app = test_app(ExportOptions {
