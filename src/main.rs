@@ -18,6 +18,7 @@ mod annotations;
 mod app;
 mod config;
 mod dashboard;
+mod display_units;
 mod export;
 mod grafana;
 mod prom;
