@@ -220,6 +220,20 @@ fn import_layout_nodes(
     let mut items = Vec::new();
     for node in nodes {
         match node {
+            model::LayoutNode::AutoGrid(group) => {
+                let mut panels = Vec::with_capacity(group.panels.len());
+                for panel in group.panels {
+                    if let Some(index) = import_panel(panel, out)? {
+                        panels.push(index);
+                    }
+                }
+                items.push(crate::dashboard::DashboardLayoutItem::AutoGrid(
+                    crate::dashboard::autogrid::DashboardAutoGrid {
+                        options: group.options,
+                        panels,
+                    },
+                ));
+            }
             model::LayoutNode::Panel(panel) => {
                 if let Some(index) = import_panel(panel, out)? {
                     items.push(crate::dashboard::DashboardLayoutItem::Panel(index));

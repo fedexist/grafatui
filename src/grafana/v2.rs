@@ -4,6 +4,8 @@ use serde_json::Value;
 
 use super::model;
 
+mod autogrid;
+
 pub(super) const V2_API_VERSION: &str = "dashboard.grafana.app/v2";
 
 type JsonObject = serde_json::Map<String, Value>;
@@ -69,6 +71,7 @@ fn parse_layout(
         "GridLayout" => parse_grid_layout(layout, elements, path, diagnostics),
         "RowsLayout" => parse_rows_layout(layout, elements, path, diagnostics),
         "TabsLayout" => parse_tabs_layout(layout, elements, path, diagnostics),
+        "AutoGridLayout" => autogrid::parse_auto_grid_layout(layout, elements, path, diagnostics),
         kind => anyhow::bail!("unsupported Grafana V2 layout `{kind}` at {path}.kind"),
     }
 }
@@ -154,7 +157,8 @@ fn parse_grid_layout(
                 grid.element_name
             )
         })?;
-        if let Some(panel) = parse_panel(element, &element_path, grid.position, diagnostics)? {
+        if let Some(panel) = parse_panel(element, &element_path, Some(grid.position), diagnostics)?
+        {
             nodes.push(model::LayoutNode::Panel(panel));
         }
     }
@@ -473,7 +477,7 @@ fn parse_grid_item(value: &Value, path: &str) -> Result<ResolvedGridItem> {
 fn parse_panel(
     value: &Value,
     path: &str,
-    grid: model::GridPos,
+    grid: Option<model::GridPos>,
     diagnostics: &mut Vec<super::ImportDiagnostic>,
 ) -> Result<Option<model::Panel>> {
     let element = value
@@ -583,7 +587,7 @@ fn parse_panel(
         source_path: path.to_string(),
         targets,
         count_as_skipped_if_empty: has_visible_target && !has_supported_visible_target,
-        grid: Some(grid),
+        grid,
         field_defaults: Some(field_defaults),
         reduce_options_path: viz_spec
             .options
