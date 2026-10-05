@@ -44,18 +44,18 @@ unsupported advanced V2 dashboards. See the
 | Top-level `spec.variables` | 🔶 Partial | Supported variable kinds map to Grafatui variables; unsupported kinds emit diagnostics |
 | `spec.timeSettings.autoRefresh` | ✅ Supported | Used as the dashboard refresh interval |
 | `vizConfig.spec.fieldConfig` | 🔶 Partial | The supported Classic-equivalent field configuration subset applies |
-| `AutoGridLayout` | 🔶 Partial | Static ordered panels at root or inside rows/tabs; responsive columns and fixed row heights share TUI, hit-test, scroll, and export geometry |
+| `AutoGridLayout` | 🔶 Partial | Static ordered panels at root or inside rows/tabs; responsive columns and fixed or viewport-filled row heights share TUI, hit-test, scroll, and export geometry |
 | Repeated grid items and row repeat | ❌ Not Implemented | Rejected as fatal import errors |
 | Conditional rendering, non-empty nested variables, and library panels | ❌ Not Implemented | Deferred V2 features |
 
-### Static AutoGrid fundamentals
+### Static AutoGrid sizing
 
-Stage 1 supports `AutoGridLayoutItem` panel references in source order, including
+Stages 1–2 support `AutoGridLayoutItem` panel references in source order, including
 empty groups, collapsed rows, and inactive tabs. Column counts respond to the
 available terminal width. Resizing preserves panel selection and adjusts scroll
 to keep it reachable. SVG/PNG snapshots and recordings use the same layout.
 
-| AutoGrid setting | Stage 1 behavior |
+| AutoGrid setting | Supported behavior |
 |---|---|
 | `maxColumnCount` | Default 3; finite values at least 1; fractions round down and emit `autogrid_column_limit_rounded` (rejected by `--strict`) |
 | `columnWidthMode` | `narrow`, `standard`, `wide`, or `custom`; default `standard` |
@@ -63,7 +63,8 @@ to keep it reachable. SVG/PNG snapshots and recordings use the same layout.
 | `rowHeightMode` | `short`, `standard`, `tall`, or `custom`; default `standard` |
 | `rowHeight` | Positive finite pixels required for `custom`; rounds upward to cells |
 | `matchRowHeights` | Boolean; either value is equivalent for uniform fixed heights |
-| `fillScreen`, layout/item `fitContent` | Boolean false accepted; true is a field error until later stages |
+| `fillScreen` | Boolean; default false. True grows rows to fill their containing content viewport, preserving baseline minimum heights |
+| Layout/item `fitContent` | Boolean false accepted; true is a field error until later stages |
 | Height bounds | Explicit bounds are field errors; `maxHeightMode: unlimited` without `maxHeight` is accepted |
 | Item `repeat`, `conditionalRendering` | Field errors; deferred to later stages |
 | Unknown settings | Emit `unsupported_autogrid_setting`; `--strict` rejects the warning |
@@ -81,8 +82,18 @@ grafatui --grafana-json examples/dashboards/grafana_v2_autogrid.json \
   --prometheus-url http://localhost:9090
 ```
 
+With `fillScreen: true`, extra height is shared across row tracks, with remainder
+cells assigned to earlier rows. Each visible row header or tab bar deducts one
+cell from its child viewport; hidden row headers deduct nothing. Minimum row
+heights can overflow and scroll. Scrolling and preceding siblings do not change
+the allocation; following siblings begin after the filled grid's full extent.
+Empty grids consume no height. This setting does not enter single-panel fullscreen.
+
+Run [the fill-screen example](../examples/dashboards/grafana_v2_autogrid_fill_screen.json)
+with the same command, substituting its filename.
+
 Full AutoGrid compatibility remains incomplete. Subsequent stages add
-`fillScreen`, content fitting and bounds, row matching, panel-body scrolling,
+content fitting and bounds, row matching, panel-body scrolling,
 variable options/scopes, repeats, and conditional visibility. Unsupported
 settings fail during import, including inside inactive tabs and collapsed rows.
 
