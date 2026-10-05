@@ -294,3 +294,5 @@ async fn auto_grid_end_and_manual_scroll_stay_within_document() {
     assert_eq!(app.selected_item, Some(DashboardItemId::Panel(0)));
     auto_grid_render(&mut app, size, "manual-home", &["A", "B"]);
 }
+
+mod fill_screen;

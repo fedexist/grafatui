@@ -16,11 +16,11 @@ configuration, fixed-grid positions, static AutoGrid placement, and nested `Rows
 same Grafatui behavior as Classic JSON.
 
 Rows and tabs may recursively contain `GridLayout`, `RowsLayout`, `TabsLayout`,
-or static `AutoGridLayout`. AutoGrid adapts columns to terminal width and keeps
-fixed row heights. See [Static AutoGrid fundamentals](grafana-compatibility.md#static-autogrid-fundamentals)
+or static `AutoGridLayout`. AutoGrid adapts columns to terminal width and supports
+fixed row heights or `fillScreen` growth. See [Static AutoGrid sizing](grafana-compatibility.md#static-autogrid-sizing)
 for supported sizing options and the runnable example.
 
-AutoGrid full-screen/content fitting, repeat, conditional rendering, nested non-empty layout variables,
+AutoGrid content fitting, repeat, conditional rendering, nested non-empty layout variables,
 library panels, and Resource YAML remain unsupported; unsupported V2 layouts
 and fields are fatal import errors. Repeated grid items are also rejected rather
 than silently changing the dashboard.

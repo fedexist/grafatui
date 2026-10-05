@@ -89,3 +89,167 @@ fn fill_screen_solver_handles_empty_presets_and_wide_document_coordinates() {
     );
     assert_eq!(p.panels.len(), 3);
 }
+
+fn filled_grid(panels: Vec<usize>) -> DashboardLayoutItem {
+    DashboardLayoutItem::AutoGrid(crate::dashboard::autogrid::DashboardAutoGrid {
+        options: AutoGridOptions {
+            fill_screen: true,
+            ..Default::default()
+        },
+        panels,
+    })
+}
+
+#[test]
+fn fill_screen_nested_headers_reduce_allocation_once() {
+    let row = RowId::new(0);
+    let tabs = TabGroupId::new(0);
+    for hidden in [false, true] {
+        let mut app = app_with(
+            ["A", "B", "C"]
+                .into_iter()
+                .map(|title| panel(title, None))
+                .collect(),
+            DashboardLayout::new(vec![DashboardLayoutItem::Row(DashboardRow::new(
+                row,
+                "R",
+                false,
+                hidden,
+                vec![DashboardLayoutItem::Tabs(DashboardTabs::new(
+                    tabs,
+                    vec![
+                        DashboardTab {
+                            title: "First".into(),
+                            children: vec![filled_grid(vec![0, 1])],
+                        },
+                        DashboardTab {
+                            title: "Second".into(),
+                            children: vec![filled_grid(vec![2])],
+                        },
+                    ],
+                ))],
+            ))]),
+        );
+        let viewport = Rect::new(0, 0, 140, 48);
+        let (logical, _) = projected_dashboard_rects(dashboard_inner_area(viewport), &app);
+        let panel_height = logical
+            .iter()
+            .find(|p| p.id == DashboardItemId::Panel(0))
+            .unwrap()
+            .rect
+            .height;
+        assert_eq!(panel_height, if hidden { 40 } else { 39 });
+        let rects = visible_panel_rects(viewport, &app);
+        assert_eq!(
+            rects,
+            if hidden {
+                vec![(Rect::new(1, 5, 69, 40), 0), (Rect::new(70, 5, 69, 40), 1)]
+            } else {
+                vec![(Rect::new(1, 6, 69, 39), 0), (Rect::new(70, 6, 69, 39), 1)]
+            }
+        );
+        app.layout.set_active_tab(tabs, 1).unwrap();
+        assert_eq!(
+            visible_panel_rects(viewport, &app),
+            vec![(
+                if hidden {
+                    Rect::new(1, 5, 138, 40)
+                } else {
+                    Rect::new(1, 6, 138, 39)
+                },
+                2
+            )]
+        );
+        if !hidden {
+            app.layout.set_row_collapsed(row, true).unwrap();
+            assert!(visible_panel_rects(viewport, &app).is_empty());
+        }
+    }
+    // Repeated nesting must deduct each header, independent of document position.
+    let mut child = filled_grid(vec![0]);
+    for i in 0..4 {
+        child = DashboardLayoutItem::Row(DashboardRow::new(
+            RowId::new(i),
+            "R",
+            false,
+            false,
+            vec![child],
+        ));
+    }
+    let app = app_with(vec![panel("A", None)], DashboardLayout::new(vec![child]));
+    assert_eq!(
+        visible_panel_rects(Rect::new(0, 0, 140, 48), &app),
+        vec![(Rect::new(1, 8, 138, 37), 0)]
+    );
+}
+
+#[test]
+fn fill_screen_resize_reconciles_stored_scroll() {
+    let mut app = app_with(
+        ["A", "B", "C", "D"]
+            .into_iter()
+            .map(|title| panel(title, None))
+            .collect(),
+        DashboardLayout::new(vec![filled_grid(vec![0, 1, 2, 3])]),
+    );
+    app.selected_item = Some(DashboardItemId::Panel(3));
+    for (viewport, scroll, want) in [
+        (Rect::new(0, 0, 140, 48), 0, Rect::new(1, 25, 46, 20)),
+        (Rect::new(0, 0, 40, 24), 18, Rect::new(1, 4, 38, 17)),
+        (Rect::new(0, 0, 100, 48), 0, Rect::new(50, 25, 49, 20)),
+    ] {
+        scroll_selected_into_view(viewport, &mut app);
+        assert_eq!(app.vertical_scroll, scroll);
+        assert_eq!(app.selected_item, Some(DashboardItemId::Panel(3)));
+        let rect = visible_panel_rects(viewport, &app)
+            .into_iter()
+            .find(|(_, i)| *i == 3)
+            .unwrap()
+            .0;
+        assert_eq!(rect, want);
+        assert_eq!(
+            hit_test(&app, viewport, rect.x, rect.y).unwrap().id,
+            DashboardItemId::Panel(3)
+        );
+    }
+}
+
+#[test]
+fn fill_screen_sibling_allocations_ignore_document_position_and_scroll() {
+    let mut app = app_with(
+        ["A", "B"]
+            .into_iter()
+            .map(|title| panel(title, None))
+            .collect(),
+        DashboardLayout::new(vec![
+            DashboardLayoutItem::Row(DashboardRow::new(
+                RowId::new(0),
+                "Before",
+                true,
+                false,
+                vec![],
+            )),
+            filled_grid(vec![0]),
+            filled_grid(vec![1]),
+            DashboardLayoutItem::Row(DashboardRow::new(
+                RowId::new(1),
+                "After",
+                true,
+                false,
+                vec![],
+            )),
+        ]),
+    );
+    let area = dashboard_inner_area(Rect::new(0, 0, 140, 48));
+    for scroll in [0, 7, 20, usize::MAX] {
+        app.vertical_scroll = scroll;
+        let (items, _) = projected_dashboard_rects(area, &app);
+        assert_eq!(
+            items
+                .iter()
+                .map(|p| (p.rect.y, p.rect.height))
+                .collect::<Vec<_>>(),
+            vec![(0, 1), (1, 41), (42, 41), (83, 1)]
+        );
+    }
+}

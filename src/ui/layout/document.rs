@@ -86,7 +86,10 @@ fn project_layout_items(
                     cursor_y = project_layout_items(
                         &row.children,
                         depth + 1,
-                        area,
+                        Rect {
+                            height: area.height.saturating_sub(1),
+                            ..area
+                        },
                         cursor_y,
                         cell_h,
                         app,
@@ -128,7 +131,10 @@ fn project_layout_items(
                         cursor_y = project_layout_items(
                             &tab.children,
                             depth + 1,
-                            area,
+                            Rect {
+                                height: area.height.saturating_sub(1),
+                                ..area
+                            },
                             cursor_y,
                             cell_h,
                             app,
