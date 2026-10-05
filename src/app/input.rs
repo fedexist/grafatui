@@ -544,6 +544,7 @@ fn toggle_series_visibility(app: &mut AppState, c: char) {
 
 #[cfg(test)]
 mod tests {
+    mod autogrid;
     use super::*;
     use crate::app::{GraphOptions, PanelOptions, PanelState, PanelType, SeriesView};
     use crate::dashboard::{
