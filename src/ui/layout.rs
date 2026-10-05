@@ -348,6 +348,7 @@ pub(crate) fn scroll_selected_into_view(area: Rect, app: &mut AppState) {
         return;
     }
     let (items, cell_h) = projected_dashboard_rects(inner, app);
+    let limit = document_scroll_limit(&items, inner.height, cell_h);
     let Some(item) = items.into_iter().find(|item| {
         item.id == selected && !matches!(item.kind, DashboardRectKind::TabEmpty { .. })
     }) else {
@@ -366,7 +367,8 @@ pub(crate) fn scroll_selected_into_view(area: Rect, app: &mut AppState) {
         upper
     } else {
         app.vertical_scroll.clamp(lower, upper.max(lower))
-    };
+    }
+    .min(limit);
 }
 
 fn panel_rect(index: usize, rect: Rect) -> DashboardRect {
@@ -419,6 +421,7 @@ pub(crate) fn hit_test(app: &AppState, area: Rect, x: u16, y: u16) -> Option<Das
 #[cfg(test)]
 mod tests {
     mod auto_grid;
+    mod fill_screen;
     use super::*;
 
     use crate::{

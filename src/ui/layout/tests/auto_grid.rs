@@ -6,7 +6,7 @@ fn auto_grid_solver_reflows_at_minimum_width_breakpoints() {
     use crate::dashboard::autogrid::AutoGridOptions;
     let options = AutoGridOptions::default();
     for (width, columns) in [(44, 1), (45, 1), (89, 1), (90, 2), (134, 2), (135, 3)] {
-        let projected = project_auto_grid(5, width, 7, &options, &[8, 3, 6, 2]);
+        let projected = project_auto_grid(5, width, 7, 0, &options, &[8, 3, 6, 2]);
         assert_eq!(projected.panels[columns].rect.y, 25, "width={width}");
         assert_eq!(
             projected.panels.iter().map(|p| p.index).collect::<Vec<_>>(),
@@ -15,7 +15,7 @@ fn auto_grid_solver_reflows_at_minimum_width_breakpoints() {
         assert_eq!(projected.panels[0].rect.x, 5);
         assert_eq!(projected.content_height, if columns == 1 { 72 } else { 36 });
     }
-    let projected = project_auto_grid(0, 136, 0, &options, &[0, 1, 2, 3]);
+    let projected = project_auto_grid(0, 136, 0, 0, &options, &[0, 1, 2, 3]);
     assert_eq!(
         projected
             .panels
@@ -36,13 +36,21 @@ fn auto_grid_solver_handles_empty_small_and_large_documents() {
         max_columns: 3,
         min_column_width: 20,
         row_height: 70_000,
+        fill_screen: false,
     };
-    assert_eq!(project_auto_grid(0, 0, 0, &options, &[0]).content_height, 0);
-    assert!(project_auto_grid(0, 40, 0, &options, &[]).panels.is_empty());
-    let small = project_auto_grid(0, 1, 0, &options, &[0, 1]);
+    assert_eq!(
+        project_auto_grid(0, 0, 0, 0, &options, &[0]).content_height,
+        0
+    );
+    assert!(
+        project_auto_grid(0, 40, 0, 0, &options, &[])
+            .panels
+            .is_empty()
+    );
+    let small = project_auto_grid(0, 1, 0, 0, &options, &[0, 1]);
     assert_eq!(small.panels[0].rect.width, 1);
     assert_eq!(small.panels[1].rect.y, 70_000);
-    let large = project_auto_grid(2, 19, 70_000, &options, &[0, 1, 2]);
+    let large = project_auto_grid(2, 19, 70_000, 0, &options, &[0, 1, 2]);
     assert_eq!(
         large.panels.iter().map(|p| p.rect.y).collect::<Vec<_>>(),
         vec![70_000, 140_000, 210_000]
@@ -52,15 +60,17 @@ fn auto_grid_solver_handles_empty_small_and_large_documents() {
         0,
         200,
         0,
+        0,
         &AutoGridOptions {
             max_columns: 2,
             min_column_width: 20,
             row_height: 10,
+            fill_screen: false,
         },
         &[0, 1, 2],
     );
     assert_eq!(capped.panels[2].rect.y, 10);
-    let fewer = project_auto_grid(0, 200, 0, &options, &[0]);
+    let fewer = project_auto_grid(0, 200, 0, 0, &options, &[0]);
     assert_eq!(fewer.panels[0].rect.width, 200);
 }
 
@@ -85,6 +95,7 @@ fn auto_grid_large_document_scrolls_without_overlap() {
         max_columns: 1,
         min_column_width: 20,
         row_height: 70_002,
+        fill_screen: false,
     });
     app.selected_item = Some(DashboardItemId::Panel(1));
     scroll_selected_into_view(Rect::new(0, 0, 100, 24), &mut app);
@@ -218,6 +229,7 @@ fn auto_grid_sibling_after_large_extent_remains_reachable() {
         max_columns: 1,
         min_column_width: 45,
         row_height: 70_000,
+        fill_screen: false,
     });
     app.layout
         .items
