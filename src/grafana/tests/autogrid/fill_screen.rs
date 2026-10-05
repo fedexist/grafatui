@@ -10,14 +10,12 @@ fn fill_screen_import_accepts_true_without_warnings() {
 }
 
 #[test]
-fn fill_screen_import_rejects_content_fitting_at_its_own_path() {
+fn fill_screen_import_retains_content_fitting() {
     let mut json = auto_grid_resource();
     json["spec"]["layout"]["spec"]["fillScreen"] = serde_json::json!(true);
     json["spec"]["layout"]["spec"]["fitContent"] = serde_json::json!(true);
-    let error = parse_grafana_dashboard(&json.to_string())
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("spec.layout.spec.fitContent"), "{error}");
+    let imported = parse_grafana_dashboard(&json.to_string()).unwrap();
+    assert!(auto_grid_options(&imported).fit_content);
 }
 
 #[test]

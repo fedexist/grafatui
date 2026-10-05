@@ -24,7 +24,7 @@ pub(super) enum LayoutNode {
 #[derive(Debug)]
 pub(super) struct AutoGrid {
     pub(super) options: crate::dashboard::autogrid::AutoGridOptions,
-    pub(super) panels: Vec<Panel>,
+    pub(super) items: Vec<AutoGridItem>,
 }
 
 #[derive(Debug)]
@@ -134,4 +134,10 @@ pub(super) struct Thresholds {
 pub(super) struct ThresholdStep {
     pub(super) value: Option<f64>,
     pub(super) color: Option<String>,
+}
+
+#[derive(Debug)]
+pub(super) struct AutoGridItem {
+    pub(super) panel: Panel,
+    pub(super) fit_content: Option<bool>,
 }

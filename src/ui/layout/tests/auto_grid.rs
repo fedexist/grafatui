@@ -37,6 +37,7 @@ fn auto_grid_solver_handles_empty_small_and_large_documents() {
         min_column_width: 20,
         row_height: 70_000,
         fill_screen: false,
+        ..Default::default()
     };
     assert_eq!(
         project_auto_grid(0, 0, 0, 0, &options, &[0]).content_height,
@@ -66,6 +67,7 @@ fn auto_grid_solver_handles_empty_small_and_large_documents() {
             min_column_width: 20,
             row_height: 10,
             fill_screen: false,
+            ..Default::default()
         },
         &[0, 1, 2],
     );
@@ -83,7 +85,7 @@ fn auto_grid_app(options: crate::dashboard::autogrid::AutoGridOptions) -> AppSta
         DashboardLayout::new(vec![DashboardLayoutItem::AutoGrid(
             crate::dashboard::autogrid::DashboardAutoGrid {
                 options,
-                panels: vec![0, 1, 2, 3],
+                items: crate::dashboard::autogrid::test_items(vec![0, 1, 2, 3]),
             },
         )]),
     )
@@ -96,6 +98,7 @@ fn auto_grid_large_document_scrolls_without_overlap() {
         min_column_width: 20,
         row_height: 70_002,
         fill_screen: false,
+        ..Default::default()
     });
     app.selected_item = Some(DashboardItemId::Panel(1));
     scroll_selected_into_view(Rect::new(0, 0, 100, 24), &mut app);
@@ -157,14 +160,14 @@ fn auto_grid_nested_projection_respects_active_and_collapsed_branches() {
                         title: "First".into(),
                         children: vec![DashboardLayoutItem::AutoGrid(DashboardAutoGrid {
                             options: AutoGridOptions::default(),
-                            panels: vec![0, 1],
+                            items: crate::dashboard::autogrid::test_items(vec![0, 1]),
                         })],
                     },
                     DashboardTab {
                         title: "Second".into(),
                         children: vec![DashboardLayoutItem::AutoGrid(DashboardAutoGrid {
                             options: AutoGridOptions::default(),
-                            panels: vec![2],
+                            items: crate::dashboard::autogrid::test_items(vec![2]),
                         })],
                     },
                 ],
@@ -212,7 +215,7 @@ fn auto_grid_empty_group_does_not_move_following_sibling() {
         DashboardLayout::new(vec![
             DashboardLayoutItem::AutoGrid(DashboardAutoGrid {
                 options: AutoGridOptions::default(),
-                panels: vec![],
+                items: crate::dashboard::autogrid::test_items(vec![]),
             }),
             DashboardLayoutItem::Panel(0),
         ]),
@@ -230,6 +233,7 @@ fn auto_grid_sibling_after_large_extent_remains_reachable() {
         min_column_width: 45,
         row_height: 70_000,
         fill_screen: false,
+        ..Default::default()
     });
     app.layout
         .items

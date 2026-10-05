@@ -24,20 +24,15 @@ pub(super) fn render_table(frame: &mut Frame, area: Rect, p: &PanelState, app: &
     let theme = &app.theme;
 
     let header = ["Series", "Value"];
-    let rows: Vec<Row> = p
-        .series
-        .iter()
-        .filter(|s| s.visible)
-        .map(|s| {
-            let val_str = p.display.format_value(s.value);
-            let color = s
-                .value
-                .and_then(|v| p.get_color_for_value(v))
-                .unwrap_or(theme.text);
-
+    let rows: Vec<Row> = super::prepare_table_rows(p)
+        .into_iter()
+        .map(|row| {
             Row::new(vec![
-                Span::styled(s.name.clone(), Style::default().fg(theme.text)),
-                Span::styled(val_str, Style::default().fg(color)),
+                Span::styled(row.name, Style::default().fg(theme.text)),
+                Span::styled(
+                    row.value,
+                    Style::default().fg(row.color.unwrap_or(theme.text)),
+                ),
             ])
         })
         .collect();

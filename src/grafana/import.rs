@@ -221,16 +221,19 @@ fn import_layout_nodes(
     for node in nodes {
         match node {
             model::LayoutNode::AutoGrid(group) => {
-                let mut panels = Vec::with_capacity(group.panels.len());
-                for panel in group.panels {
-                    if let Some(index) = import_panel(panel, out)? {
-                        panels.push(index);
+                let mut retained_items = Vec::with_capacity(group.items.len());
+                for item in group.items {
+                    if let Some(index) = import_panel(item.panel, out)? {
+                        retained_items.push(crate::dashboard::autogrid::AutoGridItem {
+                            index,
+                            fit_content: item.fit_content,
+                        });
                     }
                 }
                 items.push(crate::dashboard::DashboardLayoutItem::AutoGrid(
                     crate::dashboard::autogrid::DashboardAutoGrid {
                         options: group.options,
-                        panels,
+                        items: retained_items,
                     },
                 ));
             }

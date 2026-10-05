@@ -96,7 +96,7 @@ fn filled_grid(panels: Vec<usize>) -> DashboardLayoutItem {
             fill_screen: true,
             ..Default::default()
         },
-        panels,
+        items: crate::dashboard::autogrid::test_items(panels),
     })
 }
 

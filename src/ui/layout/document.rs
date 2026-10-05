@@ -51,7 +51,11 @@ fn project_layout_items(
                     cursor_y,
                     area.height,
                     &group.options,
-                    &group.panels,
+                    &group
+                        .items
+                        .iter()
+                        .map(|item| item.index)
+                        .collect::<Vec<_>>(),
                 );
                 output.extend(
                     projected
