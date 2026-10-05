@@ -41,7 +41,7 @@ pub(super) fn parse_auto_grid_layout(
     );
     let items_path = format!("{spec_path}.items");
     let items = require_array_from(spec, "items", &items_path)?;
-    let mut panels = Vec::with_capacity(items.len());
+    let mut retained_items = Vec::with_capacity(items.len());
     for (index, item) in items.iter().enumerate() {
         let item_path = format!("{items_path}[{index}]");
         let item = item.as_object().ok_or_else(|| {
@@ -56,7 +56,10 @@ pub(super) fn parse_auto_grid_layout(
                 "unsupported Grafana V2 AutoGrid setting at {item_spec_path}.{field}"
             );
         }
-        reject_enabled(item_spec, "fitContent", &item_spec_path)?;
+        let fit_content = item_spec
+            .contains_key("fitContent")
+            .then(|| optional_bool_from(item_spec, "fitContent", &item_spec_path))
+            .transpose()?;
         warn_unknown(
             item_spec,
             &["element", "repeat", "conditionalRendering", "fitContent"],
@@ -72,12 +75,12 @@ pub(super) fn parse_auto_grid_layout(
         })?;
         let element_path = format!("spec.elements[{name:?}]");
         if let Some(panel) = parse_panel(element, &element_path, None, diagnostics)? {
-            panels.push(panel);
+            retained_items.push(model::AutoGridItem { panel, fit_content });
         }
     }
     Ok(vec![model::LayoutNode::AutoGrid(model::AutoGrid {
         options,
-        panels,
+        items: retained_items,
     })])
 }
 
@@ -139,30 +142,39 @@ fn parse_options(
         _ => 320_u32.div_ceil(LOGICAL_CELL_HEIGHT_PX),
     };
     let fill_screen = optional_bool_from(spec, "fillScreen", path)?;
-    reject_enabled(spec, "fitContent", path)?;
-    optional_bool_from(spec, "matchRowHeights", path)?;
-    validate_height_bounds(spec, path)?;
+    let fit_content = optional_bool_from(spec, "fitContent", path)?;
+    let match_row_heights =
+        !spec.contains_key("matchRowHeights") || optional_bool_from(spec, "matchRowHeights", path)?;
+    let min_height = parse_min_height(spec, path)?;
+    validate_max_height(spec, path)?;
     Ok(AutoGridOptions {
         fill_screen,
+        fit_content,
+        min_height,
+        match_row_heights,
         max_columns,
         min_column_width,
         row_height,
     })
 }
 
-fn validate_height_bounds(spec: &JsonObject, path: &str) -> Result<()> {
-    let min = optional_pixels(spec, "minHeight", path, LOGICAL_CELL_HEIGHT_PX)?;
-    let max = optional_pixels(spec, "maxHeight", path, LOGICAL_CELL_HEIGHT_PX)?;
-    if spec.contains_key("minHeightMode") {
-        mode(
-            spec,
-            "minHeightMode",
-            path,
-            "none",
-            &["none", "short", "standard", "tall", "custom"],
-        )?;
-        bail!("unsupported Grafana V2 AutoGrid content height bound at {path}.minHeightMode");
+fn parse_min_height(spec: &JsonObject, path: &str) -> Result<Option<u32>> {
+    let custom = optional_pixels(spec, "minHeight", path, LOGICAL_CELL_HEIGHT_PX)?;
+    if !spec.contains_key("minHeightMode") {
+        return Ok(None);
     }
+    Ok(Some(match mode(spec, "minHeightMode", path, "none", &["none", "short", "standard", "tall", "custom"])? {
+        "none" => 0,
+        "short" => 168_u32.div_ceil(LOGICAL_CELL_HEIGHT_PX),
+        "standard" => 320_u32.div_ceil(LOGICAL_CELL_HEIGHT_PX),
+        "tall" => 512_u32.div_ceil(LOGICAL_CELL_HEIGHT_PX),
+        "custom" => custom.ok_or_else(|| anyhow!("invalid Grafana V2 AutoGrid custom height at {path}.minHeight: missing required positive number"))?,
+        _ => unreachable!(),
+    }))
+}
+
+fn validate_max_height(spec: &JsonObject, path: &str) -> Result<()> {
+    let max = optional_pixels(spec, "maxHeight", path, LOGICAL_CELL_HEIGHT_PX)?;
     if spec.contains_key("maxHeightMode") {
         let value = mode(
             spec,
@@ -176,10 +188,6 @@ fn validate_height_bounds(spec: &JsonObject, path: &str) -> Result<()> {
             "unsupported Grafana V2 AutoGrid content height bound at {path}.maxHeightMode"
         );
     }
-    ensure!(
-        min.is_none(),
-        "unsupported Grafana V2 AutoGrid content height bound at {path}.minHeight"
-    );
     ensure!(
         max.is_none(),
         "unsupported Grafana V2 AutoGrid content height bound at {path}.maxHeight"
@@ -228,14 +236,6 @@ fn optional_pixels(
             "invalid Grafana V2 AutoGrid size at {path}.{field}: exceeds supported document dimensions");
         Ok(cells as u32)
     }).transpose()
-}
-
-fn reject_enabled(spec: &JsonObject, field: &str, path: &str) -> Result<()> {
-    ensure!(
-        !optional_bool_from(spec, field, path)?,
-        "unsupported Grafana V2 AutoGrid setting at {path}.{field}"
-    );
-    Ok(())
 }
 
 fn warn_unknown(

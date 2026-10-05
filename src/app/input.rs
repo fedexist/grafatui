@@ -175,9 +175,13 @@ pub(super) async fn handle_mouse(
                 app.selected_item = Some(item.id);
                 if clicked_disclosure {
                     app.toggle_selected_row().await?;
+                    ensure_selected_item_visible(terminal_size, app);
+                    ui::clamp_dashboard_scroll(rect, app);
                 }
                 if let Some((group_id, index)) = tab_target {
                     app.activate_tab(group_id, index).await?;
+                    ensure_selected_item_visible(terminal_size, app);
+                    ui::clamp_dashboard_scroll(rect, app);
                 }
 
                 match app.mode {

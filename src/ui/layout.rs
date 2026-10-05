@@ -47,6 +47,8 @@ pub(crate) enum DashboardRectKind {
     },
     Panel {
         index: usize,
+        content_fit: bool,
+        body_offset: u64,
     },
 }
 
@@ -253,7 +255,11 @@ pub(crate) fn visible_dashboard_rects(area: Rect, app: &AppState) -> Vec<Dashboa
                     id: DashboardItemId::Panel(index),
                     rect: inner_area,
                     disclosure_rect: None,
-                    kind: DashboardRectKind::Panel { index },
+                    kind: DashboardRectKind::Panel {
+                        index,
+                        content_fit: false,
+                        body_offset: 0,
+                    },
                 }]
             })
             .unwrap_or_default();
@@ -376,7 +382,11 @@ fn panel_rect(index: usize, rect: Rect) -> DashboardRect {
         id: DashboardItemId::Panel(index),
         rect,
         disclosure_rect: None,
-        kind: DashboardRectKind::Panel { index },
+        kind: DashboardRectKind::Panel {
+            index,
+            content_fit: false,
+            body_offset: 0,
+        },
     }
 }
 
@@ -385,7 +395,7 @@ pub(crate) fn visible_panel_rects(area: Rect, app: &AppState) -> Vec<(Rect, usiz
     visible_dashboard_rects(area, app)
         .into_iter()
         .filter_map(|item| match item.kind {
-            DashboardRectKind::Panel { index } => Some((item.rect, index)),
+            DashboardRectKind::Panel { index, .. } => Some((item.rect, index)),
             DashboardRectKind::Row { .. }
             | DashboardRectKind::Tabs { .. }
             | DashboardRectKind::TabEmpty { .. } => None,
@@ -421,8 +431,27 @@ pub(crate) fn hit_test(app: &AppState, area: Rect, x: u16, y: u16) -> Option<Das
 #[cfg(test)]
 mod tests {
     mod auto_grid;
+    mod content_fit;
     mod fill_screen;
     use super::*;
+    fn project_fixed_auto_grid(
+        x: u16,
+        w: u16,
+        y: u64,
+        h: u16,
+        options: &crate::dashboard::autogrid::AutoGridOptions,
+        indices: &[usize],
+    ) -> super::autogrid::AutoGridProjection {
+        super::autogrid::project_auto_grid(
+            x,
+            w,
+            y,
+            h,
+            options,
+            &crate::dashboard::autogrid::test_items(indices.to_vec()),
+            |_, _| None,
+        )
+    }
 
     use crate::{
         app::{GridUnit, PanelOptions, PanelType, YAxisMode},
@@ -535,7 +564,11 @@ mod tests {
         assert_eq!(rects[0].rect.height, 1);
         assert!(matches!(
             rects[1].kind,
-            DashboardRectKind::Panel { index: 0 }
+            DashboardRectKind::Panel {
+                index: 0,
+                content_fit: false,
+                body_offset: 0
+            }
         ));
         assert_eq!(rects[1].id, DashboardItemId::Panel(0));
         assert_eq!(rects[1].rect.y, rects[0].rect.bottom());
@@ -698,7 +731,7 @@ mod tests {
         let panel_indices = rects
             .into_iter()
             .filter_map(|item| match item.kind {
-                DashboardRectKind::Panel { index } => Some(index),
+                DashboardRectKind::Panel { index, .. } => Some(index),
                 DashboardRectKind::Row { .. }
                 | DashboardRectKind::Tabs { .. }
                 | DashboardRectKind::TabEmpty { .. } => None,

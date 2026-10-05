@@ -138,10 +138,7 @@ fn auto_grid_import_reports_native_paths_for_malformed_settings() {
 #[test]
 fn auto_grid_import_rejects_deferred_behavior_and_accepts_false_defaults() {
     for (field, value) in [
-        ("fitContent", serde_json::json!(true)),
-        ("minHeightMode", serde_json::json!("none")),
         ("maxHeightMode", serde_json::json!("short")),
-        ("minHeight", serde_json::json!(20)),
         ("maxHeight", serde_json::json!(30)),
     ] {
         let mut json = auto_grid_resource();
@@ -157,7 +154,6 @@ fn auto_grid_import_rejects_deferred_behavior_and_accepts_false_defaults() {
     for (field, value) in [
         ("repeat", serde_json::json!({})),
         ("conditionalRendering", serde_json::json!({})),
-        ("fitContent", serde_json::json!(true)),
         ("fitContent", serde_json::json!("false")),
     ] {
         let mut json = auto_grid_resource();
@@ -276,3 +272,5 @@ fn auto_grid_import_warns_on_unknown_settings() {
 }
 
 mod fill_screen;
+
+mod content_fit;

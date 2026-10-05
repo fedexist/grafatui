@@ -1,4 +1,4 @@
-use crate::dashboard::autogrid::AutoGridOptions;
+use crate::dashboard::autogrid::{AutoGridItem, AutoGridOptions};
 
 /// Unscrolled document coordinates; convert to Ratatui coordinates after clipping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,6 +13,7 @@ pub(crate) struct LogicalRect {
 pub(crate) struct AutoGridPanelRect {
     pub(crate) index: usize,
     pub(crate) rect: LogicalRect,
+    pub(crate) content_fit: bool,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -27,46 +28,73 @@ pub(crate) fn project_auto_grid(
     origin_y: u64,
     allocated_height: u16,
     options: &AutoGridOptions,
-    panels: &[usize],
+    items: &[AutoGridItem],
+    measure: impl Fn(usize, u16) -> Option<u64>,
 ) -> AutoGridProjection {
-    if width == 0 || panels.is_empty() {
+    if width == 0 || items.is_empty() {
         return AutoGridProjection::default();
     }
     let fitting = (u32::from(width) / options.min_column_width.max(1)).max(1) as usize;
-    let columns = options.max_columns.max(1).min(panels.len()).min(fitting);
+    let columns = options.max_columns.max(1).min(items.len()).min(fitting);
     let base_width = usize::from(width) / columns;
     let remainder = usize::from(width) % columns;
-    let rows = panels.len().div_ceil(columns) as u64;
-    let baseline_extent = rows.saturating_mul(u64::from(options.row_height.max(1)));
-    let content_height = if options.fill_screen {
-        baseline_extent.max(u64::from(allocated_height))
+    let baseline = u64::from(options.row_height.max(1));
+    let minimum = options.min_height.map(u64::from).unwrap_or(baseline);
+    let requested_fit =
+        options.fit_content || items.iter().any(|item| item.fit_content == Some(true));
+    let floor = if requested_fit && !options.fill_screen {
+        baseline.min(minimum)
     } else {
-        baseline_extent
+        baseline
     };
-    let base_height = content_height / rows;
-    let height_remainder = content_height % rows;
-    let projected = panels
+    let mut tracks = vec![floor; items.len().div_ceil(columns)];
+    let mut panels = Vec::with_capacity(items.len());
+    for (position, item) in items.iter().enumerate() {
+        let column = position % columns;
+        let outer_width = (base_width + usize::from(column < remainder)) as u16;
+        let natural = item
+            .fit_content
+            .unwrap_or(options.fit_content)
+            .then(|| measure(item.index, outer_width))
+            .flatten();
+        let height = natural
+            .map(|height| height.max(minimum))
+            .unwrap_or(baseline);
+        tracks[position / columns] = tracks[position / columns].max(height);
+        panels.push(AutoGridPanelRect {
+            index: item.index,
+            content_fit: natural.is_some(),
+            rect: LogicalRect {
+                x: area_x.saturating_add((column * base_width + column.min(remainder)) as u16),
+                y: 0,
+                width: outer_width,
+                height,
+            },
+        });
+    }
+    let natural_extent = tracks
         .iter()
-        .enumerate()
-        .map(|(position, &index)| {
-            let column = position % columns;
-            let row = (position / columns) as u64;
-            AutoGridPanelRect {
-                index,
-                rect: LogicalRect {
-                    x: area_x.saturating_add((column * base_width + column.min(remainder)) as u16),
-                    y: origin_y.saturating_add(
-                        row.saturating_mul(base_height)
-                            .saturating_add(row.min(height_remainder)),
-                    ),
-                    width: (base_width + usize::from(column < remainder)) as u16,
-                    height: base_height + u64::from(row < height_remainder),
-                },
+        .fold(0_u64, |total, height| total.saturating_add(*height));
+    let extra = if options.fill_screen {
+        u64::from(allocated_height).saturating_sub(natural_extent)
+    } else {
+        0
+    };
+    let row_count = tracks.len() as u64;
+    let mut cursor = origin_y;
+    for (row, track) in tracks.iter_mut().enumerate() {
+        *track =
+            track.saturating_add(extra / row_count + u64::from((row as u64) < extra % row_count));
+        for panel in panels.iter_mut().skip(row * columns).take(columns) {
+            panel.rect.y = cursor;
+            if options.match_row_heights {
+                panel.rect.height = *track;
             }
-        })
-        .collect();
+        }
+        cursor = cursor.saturating_add(*track);
+    }
     AutoGridProjection {
-        panels: projected,
-        content_height,
+        panels,
+        content_height: natural_extent.saturating_add(extra),
     }
 }

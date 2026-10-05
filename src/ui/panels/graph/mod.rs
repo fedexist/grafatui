@@ -1045,7 +1045,7 @@ mod tests {
                 rendered_cluster = crate::ui::panels::render_panel(
                     frame,
                     Rect::new(0, 0, 80, 20),
-                    0,
+                    crate::ui::PanelRenderContext::default(),
                     &app.panels[0],
                     &app,
                     true,
