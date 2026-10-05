@@ -18,6 +18,13 @@ pub(super) enum LayoutNode {
     Panel(Panel),
     Row(Row),
     Tabs(Tabs),
+    AutoGrid(AutoGrid),
+}
+
+#[derive(Debug)]
+pub(super) struct AutoGrid {
+    pub(super) options: crate::dashboard::autogrid::AutoGridOptions,
+    pub(super) panels: Vec<Panel>,
 }
 
 #[derive(Debug)]
