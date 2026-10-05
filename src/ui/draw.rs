@@ -139,8 +139,19 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
     } else {
         "↑/↓ navigate"
     };
+    let body_hint = if app.mode != AppMode::Search
+        && app.annotation_modal.is_none()
+        && super::panel_body_viewports(size, app).iter().any(|b| {
+            Some(b.index) == app.selected_panel_index()
+                && b.metrics.capacity > 0
+                && b.metrics.max_local_offset() > 0
+        }) {
+        "Ctrl+↑/↓ PgUp/PgDn Home/End body | "
+    } else {
+        ""
+    };
     let summary = format!(
-        "Mode: {}{} | Prom: {} | range={} step={:?} refresh={} | grid={} | panels={} (skipped {}) errors={} | keys: {navigation_hint}, r refresh, e export, Ctrl+E record, +/- range, q quit, ? debug:{}",
+        "{body_hint}Mode: {}{} | Prom: {} | range={} step={:?} refresh={} | grid={} | panels={} (skipped {}) errors={} | keys: {navigation_hint}, r refresh, e export, Ctrl+E record, +/- range, q quit, ? debug:{}",
         mode_display,
         if app.recording.is_some() { " REC" } else { "" },
         app.prometheus.base,
