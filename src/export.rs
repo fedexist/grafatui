@@ -30,8 +30,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-const CELL_WIDTH: f64 = 10.0;
-const CELL_HEIGHT: f64 = 18.0;
+const CELL_WIDTH: f64 = crate::display_units::LOGICAL_CELL_WIDTH_PX as f64;
+const CELL_HEIGHT: f64 = crate::display_units::LOGICAL_CELL_HEIGHT_PX as f64;
 const FONT_SIZE: f64 = 13.0;
 const SMALL_FONT_SIZE: f64 = 11.0;
 const PANEL_PADDING: f64 = 12.0;
@@ -1859,6 +1859,58 @@ mod tests {
             "dashed-line".to_string(),
             export,
         )
+    }
+
+    #[test]
+    fn auto_grid_export_uses_visible_projection_and_records_resize() {
+        use crate::dashboard::autogrid::{AutoGridOptions, DashboardAutoGrid};
+        let dir = test_export_dir("auto-grid");
+        let mut app = test_app(ExportOptions {
+            dir: dir.clone(),
+            format: ExportFormat::Both,
+            record_max_frames: 10,
+        });
+        app.view_end_ts = 1_783_080_000;
+        app.panels = (0..4)
+            .map(|index| {
+                let mut panel = test_panel(1_783_079_900.0);
+                panel.title = ["A", "B", "C", "D"][index].into();
+                panel.panel_type = PanelType::Stat;
+                panel.series[0].value = Some((index + 1) as f64);
+                panel
+            })
+            .collect();
+        app.apply_layout(DashboardLayout::new(vec![DashboardLayoutItem::AutoGrid(
+            DashboardAutoGrid {
+                options: AutoGridOptions::default(),
+                panels: vec![0, 1, 2, 3],
+            },
+        )]));
+        let viewport = Rect::new(0, 0, 140, 40);
+        let svg = render_svg(&app, viewport);
+        assert!(svg.contains(r#"width="1400" height="720""#));
+        // Hand-derived positions after the dashboard's border/header/footer margins.
+        for (x, y, w, h) in [
+            (10.0, 72.0, 460.0, 324.0),
+            (470.0, 72.0, 460.0, 324.0),
+            (930.0, 72.0, 460.0, 324.0),
+            (10.0, 396.0, 460.0, 270.0),
+        ] {
+            assert!(svg.contains(&format!(
+                r#"<rect x="{x:.0}" y="{y:.0}" width="{w:.0}" height="{h:.0}""#
+            )));
+        }
+        toggle_recording(&mut app, viewport).unwrap();
+        assert_eq!(app.recording.as_ref().unwrap().frame_count, 1);
+        let narrow = Rect::new(0, 0, 100, 40);
+        capture_recording_frame(&mut app, narrow).unwrap();
+        assert_eq!(app.recording.as_ref().unwrap().frame_count, 2);
+        capture_recording_frame(&mut app, narrow).unwrap();
+        assert_eq!(app.recording.as_ref().unwrap().frame_count, 2);
+        let recording = app.recording.as_ref().unwrap();
+        assert!(recording.dir.join("frame-000001.png").exists());
+        toggle_recording(&mut app, narrow).unwrap();
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

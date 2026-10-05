@@ -315,6 +315,7 @@ fn is_variable_name_char(ch: char) -> bool {
 
 #[cfg(test)]
 mod tests {
+    mod autogrid;
     use super::*;
 
     fn test_model_panel(kind: &str, expr: Option<&str>) -> model::LayoutNode {
@@ -531,12 +532,11 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_v2_layouts() {
-        let json =
-            minimal_v2_with_layout(serde_json::json!({"kind": "AutoGridLayout", "spec": {}}));
+        let json = minimal_v2_with_layout(serde_json::json!({"kind": "FutureLayout", "spec": {}}));
         let error = parse_grafana_dashboard(&json.to_string())
             .unwrap_err()
             .to_string();
-        assert!(error.contains("AutoGridLayout"));
+        assert!(error.contains("FutureLayout"));
         assert!(error.contains("spec.layout.kind"));
     }
 
@@ -862,12 +862,12 @@ mod tests {
     fn v2_rows_reject_nested_unsupported_layouts_at_native_paths() {
         let json = v2_row_resource_with_field(
             "layout",
-            serde_json::json!({"kind": "AutoGridLayout", "spec": {}}),
+            serde_json::json!({"kind": "FutureLayout", "spec": {}}),
         );
         let error = parse_grafana_dashboard(&json.to_string())
             .unwrap_err()
             .to_string();
-        assert!(error.contains("AutoGridLayout"));
+        assert!(error.contains("FutureLayout"));
         assert!(
             error.contains("spec.layout.spec.rows[0].spec.layout.kind"),
             "unexpected error: {error}"

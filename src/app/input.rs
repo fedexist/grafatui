@@ -200,10 +200,18 @@ pub(super) async fn handle_mouse(
         }
         MouseEventKind::ScrollDown => {
             app.vertical_scroll = app.vertical_scroll.saturating_add(1);
+            ui::clamp_dashboard_scroll(
+                Rect::new(0, 0, terminal_size.width, terminal_size.height),
+                app,
+            );
             Ok(InputAction::Redraw)
         }
         MouseEventKind::ScrollUp => {
             app.vertical_scroll = app.vertical_scroll.saturating_sub(1);
+            ui::clamp_dashboard_scroll(
+                Rect::new(0, 0, terminal_size.width, terminal_size.height),
+                app,
+            );
             Ok(InputAction::Redraw)
         }
         _ => Ok(InputAction::Redraw),
@@ -404,6 +412,10 @@ async fn handle_normal_key(
         }
         _ => shared_key_action(handle_shared_keys(key, app).await?),
     };
+    ui::clamp_dashboard_scroll(
+        Rect::new(0, 0, terminal_size.width, terminal_size.height),
+        app,
+    );
     Ok(action)
 }
 
@@ -544,6 +556,7 @@ fn toggle_series_visibility(app: &mut AppState, c: char) {
 
 #[cfg(test)]
 mod tests {
+    mod autogrid;
     use super::*;
     use crate::app::{GraphOptions, PanelOptions, PanelState, PanelType, SeriesView};
     use crate::dashboard::{
