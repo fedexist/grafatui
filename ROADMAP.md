@@ -211,7 +211,8 @@ with a clear import error rather than silently changing the dashboard.
 | **Tabs layout** | `TabsLayout` and nested tabs | Preserves tabbed dashboard organization | 🔴 | ✅ |
 | **Auto-grid fundamentals** | Static `AutoGridLayout` | Responsive ordered placement, fixed heights, nested rows/tabs, navigation and exports | 🟡 | 🔶 Stage 1 implemented |
 | **Auto-grid viewport filling** | `fillScreen` | Minimum-preserving row growth, nested allocation, resize and exports | 🟢 | ✅ Stage 2 implemented |
-| **Full auto-grid layout** | Content fitting and height bounds | Completes automatic sizing and panel-body scrolling | 🔴 | 📋 |
+| **Auto-grid content fitting** | Table `fitContent`, minima and matching | Unbounded measured tables, item overrides, refresh reconciliation and shared export windows | 🟢 | ✅ Stage 3a implemented |
+| **Full auto-grid layout** | Maximum heights, body scrolling and error fitting | Completes content sizing and capped content access | 🔴 | 📋 Stage 3b planned |
 | **Repeat and dynamic layouts** | Layout and element `repeat` settings | Expands panels or groups from variable values | 🔴 | 📋 |
 | **Conditional rendering** | `conditionalRendering` on supported containers | Shows or hides content using v2 conditions | 🔴 | 📋 |
 | **Nested layout variables** | Variables scoped to rows and tabs | Preserves local variable scope in dynamic dashboards | 🔴 | 📋 |
@@ -221,7 +222,7 @@ with a clear import error rather than silently changing the dashboard.
 AutoGrid is developed in separate stages: (1) static fundamentals, (2)
 `fillScreen`, (3) content fitting/bounds/row matching/body scrolling, (4)
 variable options and scopes, (5) repeat, then (6) conditional rendering. Each
-stage has a focused PR and interaction/export coverage. Stages 1–2 do not mark
+stage has a focused PR and interaction/export coverage. Stages 1–3a do not mark
 full AutoGrid compatibility complete.
 
 ---

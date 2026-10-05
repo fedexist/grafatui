@@ -52,6 +52,38 @@ fn content_fit_measurement_matches_table_body() {
     }
 }
 
+fn content_fit_render(
+    app: &mut AppState,
+    size: Size,
+    label: &str,
+    titles: &[&str],
+) -> ratatui::buffer::Buffer {
+    let buffer = auto_grid_render(app, size, label, titles);
+    for item in crate::ui::visible_dashboard_rects(Rect::new(0, 0, size.width, size.height), app) {
+        match item.kind {
+            crate::ui::DashboardRectKind::Row { collapsed, .. } => {
+                let cell = buffer.cell((item.rect.x, item.rect.y)).unwrap();
+                assert_eq!(cell.symbol(), if collapsed { "▶" } else { "▼" });
+                if app.selected_item == Some(item.id) {
+                    assert_eq!(cell.fg, app.theme.border_selected);
+                    assert!(cell.modifier.contains(ratatui::style::Modifier::BOLD));
+                }
+            }
+            crate::ui::DashboardRectKind::Tabs { .. } if app.selected_item == Some(item.id) => {
+                assert!((item.rect.x..item.rect.right()).any(|x| {
+                    buffer
+                        .cell((x, item.rect.y))
+                        .unwrap()
+                        .modifier
+                        .contains(ratatui::style::Modifier::UNDERLINED)
+                }));
+            }
+            _ => {}
+        }
+    }
+    buffer
+}
+
 fn buffer_text(buffer: &ratatui::buffer::Buffer) -> String {
     buffer.content.iter().map(|cell| cell.symbol()).collect()
 }
@@ -84,7 +116,7 @@ fn content_fit_measurement_real_buffers_keep_rows_and_errors() {
             measure_panel_content(&app.panels[0], 40),
             Some(u64::from(h))
         );
-        let buffer = auto_grid_render(
+        let buffer = content_fit_render(
             &mut app,
             Size::new(40, 40),
             &format!("content-fit-measure-{n}"),
@@ -102,7 +134,7 @@ fn content_fit_measurement_real_buffers_keep_rows_and_errors() {
     app.panels[0].panel_type = PanelType::Table;
     app.panels[0].last_error = Some("first line\nsecond line Unicode 水é".into());
     assert_eq!(measure_panel_content(&app.panels[0], 40), None);
-    let buffer = auto_grid_render(
+    let buffer = content_fit_render(
         &mut app,
         Size::new(40, 24),
         "content-fit-error-baseline",
@@ -224,7 +256,7 @@ fn content_fit_projector_respects_matching_and_fill() {
             "{width}x{height} matching={matching} fill={fill}"
         );
         assert_eq!(app.selected_item, Some(DashboardItemId::Panel(0)));
-        auto_grid_render(
+        content_fit_render(
             &mut app,
             Size::new(width, height),
             &format!("content-fit-mixed-{width}x{height}-{matching}-{fill}"),
@@ -236,7 +268,7 @@ fn content_fit_projector_respects_matching_and_fill() {
         crate::ui::hit_test(&app, Rect::new(0, 0, 100, 48), 51, 36),
         None
     );
-    let buffer = auto_grid_render(
+    let buffer = content_fit_render(
         &mut app,
         Size::new(100, 48),
         "content-fit-gap",
@@ -255,19 +287,19 @@ async fn content_fit_scroll_reveals_last_row() {
     };
     group.items.truncate(1);
     let size = Size::new(100, 24);
-    let buffer = auto_grid_render(&mut app, size, "content-fit-home", &["A"]);
+    let buffer = content_fit_render(&mut app, size, "content-fit-home", &["A"]);
     assert!(buffer_text(&buffer).contains("row01"));
     assert!(!buffer_text(&buffer).contains("row20"));
     handle_key(key(KeyCode::End), size, &mut app).await.unwrap();
     assert_eq!(app.vertical_scroll, 3);
-    let buffer = auto_grid_render(&mut app, size, "content-fit-end", &["A"]);
+    let buffer = content_fit_render(&mut app, size, "content-fit-end", &["A"]);
     assert!(buffer_text(&buffer).contains("row20"));
     assert!(!buffer_text(&buffer).contains("row01"));
     handle_key(key(KeyCode::Home), size, &mut app)
         .await
         .unwrap();
     assert_eq!(app.vertical_scroll, 0);
-    let buffer = auto_grid_render(&mut app, size, "content-fit-home-restored", &["A"]);
+    let buffer = content_fit_render(&mut app, size, "content-fit-home-restored", &["A"]);
     assert!(buffer_text(&buffer).contains("row01"));
 }
 
@@ -312,22 +344,22 @@ async fn content_fit_nested_keyboard_buffers_follow_rows_and_tabs() {
     )]));
     let size = Size::new(140, 48);
     assert_eq!(app.visible_panel_indices(), vec![0, 1]);
-    auto_grid_render(&mut app, size, "content-fit-nested-initial", &["A", "B"]);
+    content_fit_render(&mut app, size, "content-fit-nested-initial", &["A", "B"]);
     handle_key(key(KeyCode::Enter), size, &mut app)
         .await
         .unwrap();
     assert!(app.visible_panel_indices().is_empty());
-    auto_grid_render(&mut app, size, "content-fit-nested-collapsed", &[]);
+    content_fit_render(&mut app, size, "content-fit-nested-collapsed", &[]);
     handle_key(key(KeyCode::Enter), size, &mut app)
         .await
         .unwrap();
     assert_eq!(app.visible_panel_indices(), vec![0, 1]);
-    auto_grid_render(&mut app, size, "content-fit-nested-expanded", &["A", "B"]);
+    content_fit_render(&mut app, size, "content-fit-nested-expanded", &["A", "B"]);
     handle_key(key(KeyCode::Down), size, &mut app)
         .await
         .unwrap();
     assert_eq!(app.selected_item, Some(DashboardItemId::Tabs(tabs)));
-    auto_grid_render(
+    content_fit_render(
         &mut app,
         size,
         "content-fit-nested-tabs-focused",
@@ -337,12 +369,12 @@ async fn content_fit_nested_keyboard_buffers_follow_rows_and_tabs() {
         .await
         .unwrap();
     assert_eq!(app.visible_panel_indices(), vec![2]);
-    auto_grid_render(&mut app, size, "content-fit-nested-second", &["C"]);
+    content_fit_render(&mut app, size, "content-fit-nested-second", &["C"]);
     handle_key(key(KeyCode::Left), size, &mut app)
         .await
         .unwrap();
     assert_eq!(app.visible_panel_indices(), vec![0, 1]);
-    auto_grid_render(&mut app, size, "content-fit-nested-first", &["A", "B"]);
+    content_fit_render(&mut app, size, "content-fit-nested-first", &["A", "B"]);
 }
 
 #[tokio::test]
@@ -369,7 +401,7 @@ async fn content_fit_gap_click_errors_shrink_and_tiny_buffers() {
             .find(|r| r.id == DashboardItemId::Panel(1))
             .unwrap();
         assert_eq!(item.rect.height, if error.is_some() { 18 } else { 24 });
-        auto_grid_render(
+        content_fit_render(
             &mut app,
             size,
             if error.is_some() {
@@ -389,7 +421,7 @@ async fn content_fit_gap_click_errors_shrink_and_tiny_buffers() {
     app.vertical_scroll = 70_000;
     crate::ui::clamp_dashboard_scroll(Rect::new(0, 0, 100, 24), &mut app);
     assert_eq!(app.vertical_scroll, 0);
-    let buffer = auto_grid_render(
+    let buffer = content_fit_render(
         &mut app,
         Size::new(100, 24),
         "content-fit-shrink-clamped",
@@ -431,7 +463,7 @@ async fn content_fit_mouse_collapse_bounds_document_scroll() {
     .unwrap();
     assert!(app.visible_panel_indices().is_empty());
     assert_eq!(app.vertical_scroll, 0);
-    auto_grid_render(&mut app, size, "content-fit-mouse-collapsed", &[]);
+    content_fit_render(&mut app, size, "content-fit-mouse-collapsed", &[]);
     handle_mouse(
         MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
@@ -446,7 +478,7 @@ async fn content_fit_mouse_collapse_bounds_document_scroll() {
     .unwrap();
     assert_eq!(app.visible_panel_indices(), vec![0, 1, 2, 3]);
     assert_eq!(app.selected_item, Some(DashboardItemId::Row(RowId::new(0))));
-    auto_grid_render(
+    content_fit_render(
         &mut app,
         size,
         "content-fit-mouse-expanded",
@@ -509,7 +541,7 @@ async fn content_fit_mouse_tab_switch_clamps_shorter_content() {
         app.selected_item,
         Some(DashboardItemId::Tabs(TabGroupId::new(0)))
     );
-    auto_grid_render(&mut app, size, "content-fit-tab-shortened", &["B"]);
+    content_fit_render(&mut app, size, "content-fit-tab-shortened", &["B"]);
 }
 
 #[test]
@@ -539,7 +571,7 @@ fn content_fit_hidden_header_and_formatted_table_buffer() {
     )]));
     assert_eq!(app.visible_panel_indices(), vec![0]);
     assert_eq!(app.selected_item, Some(DashboardItemId::Panel(0)));
-    let buffer = auto_grid_render(
+    let buffer = content_fit_render(
         &mut app,
         Size::new(100, 24),
         "content-fit-hidden-formatted",

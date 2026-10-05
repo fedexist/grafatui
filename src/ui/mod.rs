@@ -29,7 +29,6 @@ pub(crate) use layout::{
     DashboardRect, DashboardRectKind, clamp_dashboard_scroll, hit_test, scroll_selected_into_view,
     visible_dashboard_rects, visible_panel_rects,
 };
-#[cfg(test)]
-pub(crate) use panels::prepare_table_rows;
 pub(crate) use panels::{PanelRenderContext, calculate_y_bounds, measure_panel_content};
+pub(crate) use panels::{prepare_table_rows, table_row_offset};
 pub(crate) use tabs::{render_tab_bar, tab_at, tab_bar_geometry, tab_title};
