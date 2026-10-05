@@ -46,9 +46,9 @@ fn auto_grid_validate_accepts_static_fixture() {
 fn auto_grid_validate_reports_unsupported_and_fractional_settings() {
     for (field, value, expected) in [
         (
-            "fillScreen",
+            "fitContent",
             serde_json::json!(true),
-            "spec.layout.spec.fillScreen",
+            "spec.layout.spec.fitContent",
         ),
         (
             "maxColumnCount",
@@ -338,4 +338,44 @@ fn validate_strict_rejects_v2_unsupported_datasource_warning() {
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("warning[grafana.import.unsupported_datasource]"));
     assert!(stderr.contains("validation failed with 1 warning(s)"));
+}
+
+#[test]
+fn fill_screen_validate_accepts_true_and_rejects_invalid_inactive() {
+    let mut json: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/grafana/v2_autogrid_layout.json")).unwrap();
+    json["spec"]["layout"]["spec"]["fillScreen"] = serde_json::json!(true);
+    for inactive in [false, true] {
+        if inactive {
+            let grid = json["spec"]["layout"].clone();
+            let mut bad = grid.clone();
+            bad["spec"]["fillScreen"] = serde_json::json!("true");
+            json["spec"]["layout"] = serde_json::json!({"kind":"TabsLayout","spec":{"tabs":[
+                {"kind":"TabsLayoutTab","spec":{"title":"First","layout":grid}},
+                {"kind":"TabsLayoutTab","spec":{"title":"Second","layout":bad}}
+            ]}});
+        }
+        let path = write_dashboard(
+            if inactive { "fill-bad" } else { "fill-good" },
+            &json.to_string(),
+        );
+        let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+            .args(["--validate", "--strict", "--grafana-json"])
+            .arg(&path)
+            .output()
+            .unwrap();
+        fs::remove_file(path).unwrap();
+        assert_eq!(
+            output.status.success(),
+            !inactive,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if inactive {
+            assert!(
+                String::from_utf8_lossy(&output.stderr)
+                    .contains("spec.layout.spec.tabs[1].spec.layout.spec.fillScreen")
+            );
+        }
+    }
 }

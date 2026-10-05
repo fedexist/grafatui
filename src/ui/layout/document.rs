@@ -45,8 +45,14 @@ fn project_layout_items(
         match item {
             DashboardLayoutItem::Panel(_) => unreachable!(),
             DashboardLayoutItem::AutoGrid(group) => {
-                let projected =
-                    project_auto_grid(area.x, area.width, cursor_y, &group.options, &group.panels);
+                let projected = project_auto_grid(
+                    area.x,
+                    area.width,
+                    cursor_y,
+                    area.height,
+                    &group.options,
+                    &group.panels,
+                );
                 output.extend(
                     projected
                         .panels

@@ -419,6 +419,7 @@ pub(crate) fn hit_test(app: &AppState, area: Rect, x: u16, y: u16) -> Option<Das
 #[cfg(test)]
 mod tests {
     mod auto_grid;
+    mod fill_screen;
     use super::*;
 
     use crate::{
