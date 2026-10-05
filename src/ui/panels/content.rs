@@ -17,6 +17,8 @@ pub(crate) struct TableRowContent<'a> {
     pub(crate) name: &'a str,
     pub(crate) value: String,
     pub(crate) color: Option<Color>,
+    /// SVG uses distinct default colors for numeric and missing values.
+    pub(crate) has_value: bool,
 }
 
 pub(crate) fn prepare_table_rows(panel: &PanelState) -> Vec<TableRowContent<'_>> {
@@ -28,6 +30,7 @@ pub(crate) fn prepare_table_rows(panel: &PanelState) -> Vec<TableRowContent<'_>>
             name: &s.name,
             value: panel.display.format_value(s.value),
             color: s.value.and_then(|value| panel.get_color_for_value(value)),
+            has_value: s.value.is_some(),
         })
         .collect()
 }
