@@ -223,7 +223,7 @@ fn validate_accepts_grafana13_server_serialized_exports() {
 #[test]
 fn validate_accepts_grafana13_yaml_export() {
     let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
-        .args(["--validate", "--format", "json", "--grafana-dashboard"])
+        .args(["--validate", "--format", "json", "--grafana-json"])
         .arg(fixture("v2_grafana13_export.yaml"))
         .output()
         .unwrap();

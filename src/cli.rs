@@ -39,7 +39,7 @@ pub(crate) struct Args {
 
     /// Grafana dashboard file to import: Classic JSON, or V2 resource JSON or YAML
     /// (e.g., ./dashboard.json, ./dashboard.yaml)
-    #[arg(long, visible_alias = "grafana-dashboard", value_name = "FILE")]
+    #[arg(long, value_name = "FILE")]
     pub(crate) grafana_json: Option<PathBuf>,
 
     /// Optional JSONL point-event file to overlay on graph panels.
@@ -179,10 +179,10 @@ mod tests {
     }
 
     #[test]
-    fn grafana_dashboard_is_an_alias_for_grafana_json() {
-        let args = Args::parse_from(["grafatui", "--grafana-dashboard", "dashboard.yaml"]);
-
-        assert_eq!(args.grafana_json, Some(PathBuf::from("dashboard.yaml")));
+    fn grafana_dashboard_is_not_a_new_cli_alias() {
+        assert!(
+            Args::try_parse_from(["grafatui", "--grafana-dashboard", "dashboard.yaml"]).is_err()
+        );
     }
 
     #[test]
