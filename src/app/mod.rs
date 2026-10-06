@@ -15,6 +15,7 @@
  */
 
 mod data;
+mod dynamic;
 mod event_loop;
 mod input;
 pub(crate) mod panel_scroll;

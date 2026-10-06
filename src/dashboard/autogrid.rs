@@ -53,3 +53,9 @@ pub(crate) fn test_items(indices: Vec<usize>) -> Vec<AutoGridItem> {
         })
         .collect()
 }
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AutoGridBehavior {
+    pub(crate) repeat: Option<String>,
+    pub(crate) conditions: Option<super::conditions::Conditions>,
+}

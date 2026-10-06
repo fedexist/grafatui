@@ -34,6 +34,7 @@ pub(super) struct Tabs {
 
 #[derive(Debug)]
 pub(super) struct Tab {
+    pub(super) variables: Vec<Variable>,
     pub(super) title: String,
     #[allow(dead_code)]
     pub(super) source_path: String,
@@ -42,6 +43,7 @@ pub(super) struct Tab {
 
 #[derive(Debug)]
 pub(super) struct Row {
+    pub(super) variables: Vec<Variable>,
     pub(super) title: String,
     pub(super) collapsed: bool,
     pub(super) hidden_header: bool,
@@ -52,6 +54,7 @@ pub(super) struct Row {
 
 #[derive(Debug)]
 pub(super) struct Variable {
+    pub(super) retained: Option<crate::dashboard::variables::Variable>,
     pub(super) name: String,
     pub(super) kind: Option<String>,
     pub(super) current: Option<VariableCurrent>,
@@ -138,6 +141,7 @@ pub(super) struct ThresholdStep {
 
 #[derive(Debug)]
 pub(super) struct AutoGridItem {
+    pub(super) behavior: crate::dashboard::autogrid::AutoGridBehavior,
     pub(super) panel: Panel,
     pub(super) fit_content: Option<bool>,
 }

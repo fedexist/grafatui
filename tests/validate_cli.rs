@@ -435,3 +435,17 @@ fn bounds_scroll_validate_accepts_bounded_example() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn dynamic_auto_grid_validate_accepts_example_without_connecting_to_prometheus() {
+    let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+        .args(["--validate", "--strict", "--grafana-json"])
+        .arg(example_dashboard("grafana_v2_autogrid_dynamic.json"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

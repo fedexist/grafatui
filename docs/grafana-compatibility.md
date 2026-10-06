@@ -44,9 +44,11 @@ unsupported advanced V2 dashboards. See the
 | Top-level `spec.variables` | 🔶 Partial | Supported variable kinds map to Grafatui variables; unsupported kinds emit diagnostics |
 | `spec.timeSettings.autoRefresh` | ✅ Supported | Used as the dashboard refresh interval |
 | `vizConfig.spec.fieldConfig` | 🔶 Partial | The supported Classic-equivalent field configuration subset applies |
-| `AutoGridLayout` | 🔶 Partial | Ordered panels at root or inside rows/tabs; responsive columns, fillScreen, table content fitting, minimum/maximum heights and row matching share TUI, hit-test, scroll, and export geometry |
+| `AutoGridLayout` | ✅ Supported | Ordered panels at root or inside rows/tabs; responsive columns, fillScreen, table content fitting, minimum/maximum heights and row matching share TUI, hit-test, scroll, and export geometry; repeats and conditional visibility use scoped variables |
 | Repeated grid items and row repeat | ❌ Not Implemented | Rejected as fatal import errors |
-| Conditional rendering, non-empty nested variables, and library panels | ❌ Not Implemented | Deferred V2 features |
+| Row/tab local variables | 🔶 Partial | Supported variable kinds retain scopes for descendant panel queries, AutoGrid repeats and predicates |
+| AutoGrid item conditional rendering | ✅ Supported | Variable, query-data and time-range conditions; AND/OR and show/hide composition |
+| Row/tab conditional rendering and library panels | ❌ Not Implemented | Deferred V2 features |
 
 ### Static AutoGrid sizing
 
@@ -67,7 +69,7 @@ to keep it reachable. SVG/PNG snapshots and recordings use the same layout.
 | Layout/item `fitContent` | Boolean; layout default false, item omission inherits layout, explicit true/false overrides it. Tables fit visible rows or wrapped errors; other renderers retain baseline height |
 | `minHeightMode`, `minHeight` | Omission inherits row height; `none` removes the floor; `short`/`standard`/`tall` use 10/18/29 cells; `custom` requires positive finite pixels rounded upward |
 | `maxHeightMode`, `maxHeight` | Omitted/`unlimited` has no cap; `short`/`standard`/`tall` use 10/18/29 cells; `custom` requires positive finite pixels rounded upward. Only custom consumes `maxHeight` |
-| Item `repeat`, `conditionalRendering` | Field errors; deferred to later stages |
+| Item `repeat`, `conditionalRendering` | Selected-value repeats and scoped variable, data, and time-range conditions; detailed below |
 | Unknown settings | Emit `unsupported_autogrid_setting`; `--strict` rejects the warning |
 
 The logical scale is 10 pixels per column and 18 pixels per row, shared with
@@ -133,10 +135,27 @@ data or visibility changes. Changing errors and error recovery reset it; row
 collapse and inactive tabs retain offsets until reactivation. Ordinary and
 unlimited-fit fullscreen keep their existing presentation.
 
-Full AutoGrid compatibility remains incomplete. Stage 3 implements content
-fitting, minimum/maximum bounds, row matching, body scrolling and Table error
-fitting. Later stages add variable options/scopes, repeats and conditional visibility,
-followed by a final architecture and code cleanup review.
+AutoGrid layout semantics are supported for Grafatui's panel renderers and data
+sources. Selected variable lists retain source order and labels; All repeats
+concrete options instead of a query regex. Containing row/tab declarations
+shadow dashboard values, and each repeated panel has its own binding. Surviving
+instances retain data, focus and body scroll when selections change.
+
+Item conditions support all four variable operators, query-data presence and
+range duration with AND/OR and show/hide composition. Pending results are omitted;
+a group without known results remains visible. Invalid regexes return true as in
+Grafana; invalid intervals remain pending. Month/year intervals use fixed 30/365
+day durations; the upstream condition rejects milliseconds and truncates a decimal
+interval count before applying its unit. Hidden data-dependent instances continue
+refreshing while their containing row/tab is active. Variable/time-hidden items
+without a data predicate skip queries. Hidden items reserve no grid cells.
+
+Run [the dynamic example](../examples/dashboards/grafana_v2_autogrid_dynamic.json)
+against Prometheus to repeat `up` tables for the selected instances. Zooming beyond
+one hour hides those tables through the range condition. Repeated rows/tabs and
+their conditional settings, library panels and transformations remain separate
+compatibility work.
+
 Unsupported settings fail during import, including inside inactive tabs and
 collapsed rows.
 

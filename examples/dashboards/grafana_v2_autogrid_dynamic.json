@@ -1,0 +1,201 @@
+{
+  "apiVersion": "dashboard.grafana.app/v2",
+  "kind": "Dashboard",
+  "metadata": {
+    "name": "dynamic-autogrid"
+  },
+  "spec": {
+    "title": "Dynamic AutoGrid",
+    "elements": {
+      "A": {
+        "kind": "Panel",
+        "spec": {
+          "id": 1,
+          "title": "Node $instance",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "refId": "A",
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "spec": {
+                        "expr": "up{instance=\"$instance\"}",
+                        "instant": true,
+                        "legendFormat": "{{instance}} / {{job}}"
+                      }
+                    }
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "table",
+            "version": "13.0.0",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {},
+                "overrides": []
+              },
+              "options": {}
+            }
+          }
+        }
+      },
+      "B": {
+        "kind": "Panel",
+        "spec": {
+          "id": 2,
+          "title": "Active targets",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "refId": "A",
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "spec": {
+                        "expr": "count(up)",
+                        "instant": true
+                      }
+                    }
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "stat",
+            "version": "13.0.0",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {},
+                "overrides": []
+              },
+              "options": {}
+            }
+          }
+        }
+      }
+    },
+    "layout": {
+      "kind": "AutoGridLayout",
+      "spec": {
+        "columnWidthMode": "narrow",
+        "rowHeightMode": "standard",
+        "maxColumnCount": 3,
+        "fitContent": true,
+        "minHeightMode": "none",
+        "maxHeightMode": "custom",
+        "maxHeight": 180,
+        "matchRowHeights": false,
+        "items": [
+          {
+            "kind": "AutoGridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "A"
+              },
+              "repeat": {
+                "mode": "variable",
+                "value": "instance"
+              },
+              "conditionalRendering": {
+                "kind": "ConditionalRenderingGroup",
+                "spec": {
+                  "visibility": "show",
+                  "condition": "and",
+                  "items": [
+                    {
+                      "kind": "ConditionalRenderingVariable",
+                      "spec": {
+                        "variable": "instance",
+                        "operator": "matches",
+                        "value": "(?i).+"
+                      }
+                    },
+                    {
+                      "kind": "ConditionalRenderingData",
+                      "spec": {
+                        "value": true
+                      }
+                    },
+                    {
+                      "kind": "ConditionalRenderingTimeRangeSize",
+                      "spec": {
+                        "value": "1h"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "kind": "AutoGridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "B"
+              },
+              "fitContent": false
+            }
+          }
+        ]
+      }
+    },
+    "variables": [
+      {
+        "kind": "QueryVariable",
+        "spec": {
+          "name": "instance",
+          "query": {
+            "kind": "DataQuery",
+            "group": "prometheus",
+            "version": "v0",
+            "spec": {
+              "query": "label_values(up, instance)"
+            }
+          },
+          "current": {
+            "value": "$__all",
+            "text": "All"
+          },
+          "options": [],
+          "multi": true,
+          "includeAll": true,
+          "sort": "disabled",
+          "regex": ""
+        }
+      }
+    ],
+    "timeSettings": {
+      "from": "now-1h",
+      "to": "now",
+      "autoRefresh": "30s"
+    }
+  },
+  "status": {}
+}

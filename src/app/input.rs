@@ -547,7 +547,7 @@ fn shared_key_action(result: SharedKeyResult) -> InputAction {
     }
 }
 
-fn update_search_results(app: &mut AppState) {
+pub(super) fn update_search_results(app: &mut AppState) {
     if app.search_query.is_empty() {
         app.search_results.clear();
         return;

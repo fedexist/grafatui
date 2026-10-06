@@ -18,10 +18,14 @@ pub(super) fn finish(dashboard: model::Dashboard) -> Result<DashboardImport> {
         diagnostics,
         ..DashboardImport::default()
     };
+    out.variable_state.scopes[0].variables = variables
+        .iter()
+        .filter_map(|v| v.retained.clone())
+        .collect();
     import_variables(&mut out, variables);
     let mut ids = LayoutIds::default();
     out.layout =
-        crate::dashboard::DashboardLayout::new(import_layout_nodes(layout, &mut out, &mut ids)?);
+        crate::dashboard::DashboardLayout::new(import_layout_nodes(layout, &mut out, &mut ids, 0)?);
     Ok(out)
 }
 
@@ -89,7 +93,11 @@ fn value_is_all(value: Option<&serde_json::Value>) -> bool {
     }
 }
 
-fn import_panel(panel: model::Panel, out: &mut DashboardImport) -> Result<Option<usize>> {
+fn import_panel(
+    panel: model::Panel,
+    out: &mut DashboardImport,
+    scope: usize,
+) -> Result<Option<usize>> {
     let panel_type = match panel.kind.as_str() {
         "graph" | "timeseries" => crate::app::PanelType::Graph,
         "stat" => crate::app::PanelType::Stat,
@@ -183,6 +191,7 @@ fn import_panel(panel: model::Panel, out: &mut DashboardImport) -> Result<Option
             _ => crate::app::PanelOptions::None,
         };
         let index = out.queries.len();
+        out.variable_state.panel_scopes.push(scope);
         out.queries.push(QueryPanel {
             title: panel.title,
             exprs,
@@ -216,6 +225,7 @@ fn import_layout_nodes(
     nodes: Vec<model::LayoutNode>,
     out: &mut DashboardImport,
     ids: &mut LayoutIds,
+    scope: usize,
 ) -> Result<Vec<crate::dashboard::DashboardLayoutItem>> {
     let mut items = Vec::new();
     for node in nodes {
@@ -223,7 +233,10 @@ fn import_layout_nodes(
             model::LayoutNode::AutoGrid(group) => {
                 let mut retained_items = Vec::with_capacity(group.items.len());
                 for item in group.items {
-                    if let Some(index) = import_panel(item.panel, out)? {
+                    if let Some(index) = import_panel(item.panel, out, scope)? {
+                        if item.behavior.repeat.is_some() || item.behavior.conditions.is_some() {
+                            out.auto_grid_behaviors.insert(index, item.behavior);
+                        }
                         retained_items.push(crate::dashboard::autogrid::AutoGridItem {
                             index,
                             fit_content: item.fit_content,
@@ -238,14 +251,15 @@ fn import_layout_nodes(
                 ));
             }
             model::LayoutNode::Panel(panel) => {
-                if let Some(index) = import_panel(panel, out)? {
+                if let Some(index) = import_panel(panel, out, scope)? {
                     items.push(crate::dashboard::DashboardLayoutItem::Panel(index));
                 }
             }
             model::LayoutNode::Row(row) => {
                 let id = crate::dashboard::RowId::new(ids.next_row);
                 ids.next_row += 1;
-                let children = import_layout_nodes(row.children, out, ids)?;
+                let child_scope = import_scope(row.variables, scope, out);
+                let children = import_layout_nodes(row.children, out, ids, child_scope)?;
                 items.push(crate::dashboard::DashboardLayoutItem::Row(
                     crate::dashboard::DashboardRow::new(
                         id,
@@ -261,9 +275,10 @@ fn import_layout_nodes(
                 ids.next_tabs += 1;
                 let mut tabs = Vec::with_capacity(group.tabs.len());
                 for tab in group.tabs {
+                    let child_scope = import_scope(tab.variables, scope, out);
                     tabs.push(crate::dashboard::DashboardTab {
                         title: tab.title,
-                        children: import_layout_nodes(tab.children, out, ids)?,
+                        children: import_layout_nodes(tab.children, out, ids, child_scope)?,
                     });
                 }
                 items.push(crate::dashboard::DashboardLayoutItem::Tabs(
@@ -398,4 +413,22 @@ fn parse_refresh_rate_ms(refresh: &str) -> Option<u64> {
     }
     let duration = humantime::parse_duration(refresh).ok()?;
     u64::try_from(duration.as_millis()).ok()
+}
+
+fn import_scope(
+    variables: Vec<model::Variable>,
+    parent: usize,
+    out: &mut DashboardImport,
+) -> usize {
+    if variables.is_empty() {
+        return parent;
+    }
+    let scope = out.variable_state.scopes.len();
+    out.variable_state
+        .scopes
+        .push(crate::dashboard::variables::VariableScope {
+            parent: Some(parent),
+            variables: variables.into_iter().filter_map(|v| v.retained).collect(),
+        });
+    scope
 }
