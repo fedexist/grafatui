@@ -179,6 +179,7 @@ impl RawVar {
     fn normalize(self, index: usize) -> model::Variable {
         let query = self.query_string();
         model::Variable {
+            retained: None,
             name: self.name,
             kind: self.var_type,
             current: self.current.map(|current| model::VariableCurrent {
@@ -251,6 +252,7 @@ fn normalize_classic_row(
 
     (
         model::Row {
+            variables: Vec::new(),
             title: panel.title.unwrap_or_default(),
             collapsed,
             hidden_header: false,

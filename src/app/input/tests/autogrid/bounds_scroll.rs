@@ -182,12 +182,12 @@ fn bounds_scroll_table_local_and_document_windows_keep_headers() {
         assert_eq!(cell.fg, app.theme.title);
         assert!(cell.modifier.contains(ratatui::style::Modifier::BOLD));
     }
-    let w = crate::ui::panel_body_window(20, 3, 14, 3);
-    assert_eq!((w.first, w.length), (17, 3));
-    let w = crate::ui::panel_body_window(20, 0, 17, 3);
-    assert_eq!((w.first, w.length), (17, 3));
-    let w = crate::ui::panel_body_window(20, u64::MAX, u64::MAX, 3);
-    assert_eq!((w.first, w.length), (17, 3));
+    let w = crate::ui::panel_body_offset(20, 3, 14, 3);
+    assert_eq!(w, 17);
+    let w = crate::ui::panel_body_offset(20, 0, 17, 3);
+    assert_eq!(w, 17);
+    let w = crate::ui::panel_body_offset(20, u64::MAX, u64::MAX, 3);
+    assert_eq!(w, 17);
 }
 
 #[test]

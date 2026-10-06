@@ -35,6 +35,8 @@ pub(crate) struct DashboardImport {
     pub(crate) layout: crate::dashboard::DashboardLayout,
     /// Variables extracted from `templating.list`.
     pub(crate) vars: HashMap<String, String>,
+    pub(crate) variable_state: crate::dashboard::variables::VariableState,
+    pub(crate) auto_grid_behaviors: HashMap<usize, crate::dashboard::autogrid::AutoGridBehavior>,
     /// Dynamic query variables extracted from `templating.list`.
     pub(crate) query_vars: Vec<TemplateQueryVar>,
     /// Number of panels that were skipped (unsupported types).
@@ -148,12 +150,44 @@ pub(crate) fn variable_diagnostics(
 ) -> Vec<ImportDiagnostic> {
     let mut known_vars: HashSet<String> = vars.keys().cloned().collect();
     known_vars.extend(dashboard.query_vars.iter().map(|var| var.name.clone()));
+    known_vars.extend(dashboard.variable_state.scope_values(0, vars).into_keys());
 
     let mut diagnostics = Vec::new();
     let mut seen = HashSet::new();
-    for panel in &dashboard.queries {
+    for (index, panel) in dashboard.queries.iter().enumerate() {
+        let mut panel_known = known_vars.clone();
+        let scope = dashboard
+            .variable_state
+            .panel_scopes
+            .get(index)
+            .copied()
+            .unwrap_or(0);
+        panel_known.extend(
+            dashboard
+                .variable_state
+                .scope_values(scope, vars)
+                .into_keys(),
+        );
         for (expr, path) in panel.exprs.iter().zip(panel.expr_paths.iter()) {
-            collect_variable_diagnostics(expr, path, &known_vars, &mut diagnostics, &mut seen);
+            collect_variable_diagnostics(expr, path, &panel_known, &mut diagnostics, &mut seen);
+        }
+    }
+    for (scope, declarations) in dashboard.variable_state.scopes.iter().enumerate() {
+        let names = dashboard
+            .variable_state
+            .scope_values(scope, vars)
+            .into_keys()
+            .collect();
+        for variable in &declarations.variables {
+            if let Some(query) = &variable.query {
+                collect_variable_diagnostics(
+                    &query.query,
+                    &query.query_path,
+                    &names,
+                    &mut diagnostics,
+                    &mut seen,
+                );
+            }
         }
     }
     for query_var in &dashboard.query_vars {
@@ -346,6 +380,7 @@ mod tests {
         let dashboard = model::Dashboard {
             title: "Rows".into(),
             layout: vec![model::LayoutNode::Row(model::Row {
+                variables: Vec::new(),
                 title: "Group".into(),
                 collapsed: false,
                 hidden_header: false,
@@ -711,10 +746,6 @@ mod tests {
             (
                 "conditionalRendering",
                 serde_json::json!({"kind": "ConditionalRenderingGroup", "spec": {}}),
-            ),
-            (
-                "variables",
-                serde_json::json!([{"kind": "TextVariable", "spec": {"name": "x"}}]),
             ),
             ("fillScreen", serde_json::json!(true)),
         ] {

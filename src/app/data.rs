@@ -45,12 +45,22 @@ pub(crate) fn expand_expr(
     );
     s = replace_builtin(&s, "__rate_interval", &interval_param);
 
-    for (k, v) in vars {
-        s = s.replace(&format!("${{{}}}", k), v);
-        s = s.replace(&format!("${}", k), v);
-    }
-
-    s
+    static VARIABLES: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let variables = VARIABLES.get_or_init(|| {
+        regex::Regex::new(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))").unwrap()
+    });
+    variables
+        .replace_all(&s, |captures: &regex::Captures| {
+            let name = captures
+                .get(1)
+                .or_else(|| captures.get(2))
+                .unwrap()
+                .as_str();
+            vars.get(name)
+                .cloned()
+                .unwrap_or_else(|| captures[0].to_string())
+        })
+        .into_owned()
 }
 
 fn replace_builtin(expr: &str, name: &str, value: &str) -> String {
@@ -158,6 +168,19 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
+    #[test]
+    fn scoped_expansion_respects_complete_variable_names() {
+        let vars = HashMap::from([("node".into(), "a".into()), ("node_id".into(), "b".into())]);
+        assert_eq!(
+            expand_expr(
+                "$node_id / ${node_id} / $node / $node_other",
+                Duration::from_secs(300),
+                Duration::from_secs(15),
+                &vars
+            ),
+            "b / b / a / $node_other"
+        );
+    }
     #[test]
     fn test_expand_expr_rate_interval() {
         let vars = HashMap::new();

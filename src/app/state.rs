@@ -303,6 +303,8 @@ pub(crate) struct AppState {
     pub(crate) vars: HashMap<String, String>,
     /// Prometheus-backed template variables imported from Grafana.
     pub(crate) query_vars: Vec<TemplateQueryVar>,
+    pub(crate) variable_state: crate::dashboard::variables::VariableState,
+    pub(crate) dynamic: Option<super::dynamic::DynamicDashboard>,
     /// Count of panels skipped during import.
     pub(crate) skipped_panels: usize,
     /// Recursive row/panel dashboard layout.
@@ -380,6 +382,8 @@ impl AppState {
             debug_bar: false,
             vars: HashMap::new(),
             query_vars: Vec::new(),
+            variable_state: Default::default(),
+            dynamic: None,
             skipped_panels,
             layout,
             selected_item,
@@ -518,7 +522,7 @@ impl AppState {
         let Some(change) = self.layout.set_row_collapsed(row_id, collapsed) else {
             return Ok(());
         };
-        if !change.newly_visible_panels.is_empty() {
+        if !change.newly_visible_panels.is_empty() || self.dynamic.is_some() {
             self.refresh_panel_indices(&change.newly_visible_panels, false)
                 .await;
         }
@@ -534,7 +538,7 @@ impl AppState {
         let Some(change) = self.layout.toggle_row(row_id) else {
             return Ok(());
         };
-        if !change.newly_visible_panels.is_empty() {
+        if !change.newly_visible_panels.is_empty() || self.dynamic.is_some() {
             self.refresh_panel_indices(&change.newly_visible_panels, false)
                 .await;
         }
@@ -548,7 +552,7 @@ impl AppState {
             return Ok(());
         };
         self.selected_item = Some(DashboardItemId::Tabs(id));
-        if !change.newly_visible_panels.is_empty() {
+        if !change.newly_visible_panels.is_empty() || self.dynamic.is_some() {
             self.refresh_panel_indices(&change.newly_visible_panels, false)
                 .await;
         }
@@ -674,28 +678,60 @@ impl AppState {
         }
     }
 
+    pub(crate) async fn refresh_initial(&mut self) -> Result<()> {
+        self.refresh().await?;
+        // Startup has no user selection to preserve; resolve options/conditions first.
+        self.selected_item = self.layout.first_visible();
+        Ok(())
+    }
+
     pub(crate) async fn refresh(&mut self) -> Result<()> {
         let range = self.range;
         let step = self.step;
-        let visible_panel_indices = self.visible_panel_indices();
 
         // Calculate end timestamp: "now" minus time_offset
         let end_ts = chrono::Utc::now().timestamp() - self.time_offset.as_secs() as i64;
         let annotation_context =
             crate::annotations::AnnotationRefreshContext::from_unix_window(end_ts, range);
-        let annotation_refresh = self.annotations.refresh(&annotation_context);
-        let prometheus_refresh = Self::refresh_prometheus_data(
-            &self.prometheus,
-            &self.query_vars,
-            range,
-            step,
-            end_ts,
-            &mut self.vars,
-            &mut self.panels,
-            &visible_panel_indices,
-            true,
+        let mut annotations = std::mem::replace(
+            &mut self.annotations,
+            crate::annotations::AnnotationState::from_path(None),
         );
+        let annotation_refresh = annotations.refresh(&annotation_context);
+        let prometheus_refresh = async {
+            if self.variable_state.has_variables() {
+                let active_scopes = self.active_variable_scopes();
+                crate::app::variables::refresh_scoped_variables(
+                    &self.prometheus,
+                    &mut self.variable_state,
+                    &active_scopes,
+                    range,
+                    step,
+                    end_ts,
+                    &self.vars,
+                )
+                .await;
+            }
+            self.reconcile_dynamic();
+            let visible_panel_indices = self.query_eligible_indices();
+            Self::refresh_prometheus_data(
+                &self.prometheus,
+                &self.query_vars,
+                &self.variable_state,
+                self.dynamic.as_mut(),
+                range,
+                step,
+                end_ts,
+                &mut self.vars,
+                &mut self.panels,
+                &visible_panel_indices,
+                true,
+            )
+            .await;
+        };
         let (_, ()) = tokio::join!(annotation_refresh, prometheus_refresh);
+        self.annotations = annotations;
+        self.evaluate_dynamic_visibility();
 
         self.reconcile_visible_annotation_targets();
 
@@ -724,24 +760,48 @@ impl AppState {
         let range = self.range;
         let step = self.step;
         let end_ts = self.view_end_ts;
+        if self.variable_state.has_variables() {
+            let active_scopes = self.active_variable_scopes();
+            crate::app::variables::refresh_scoped_variables(
+                &self.prometheus,
+                &mut self.variable_state,
+                &active_scopes,
+                range,
+                step,
+                end_ts,
+                &self.vars,
+            )
+            .await;
+        }
+        let mut requested = indices.to_vec();
+        if self.dynamic.is_some() {
+            requested.extend(self.reconcile_dynamic());
+            let eligible = self.query_eligible_indices();
+            requested.retain(|i| eligible.contains(i));
+        }
         Self::refresh_prometheus_data(
             &self.prometheus,
             &self.query_vars,
+            &self.variable_state,
+            self.dynamic.as_mut(),
             range,
             step,
             end_ts,
             &mut self.vars,
             &mut self.panels,
-            indices,
+            &requested,
             refresh_variables,
         )
         .await;
+        self.evaluate_dynamic_visibility();
     }
 
     #[allow(clippy::too_many_arguments)]
     async fn refresh_prometheus_data(
         prometheus: &prom::PromClient,
         query_vars: &[TemplateQueryVar],
+        variable_state: &crate::dashboard::variables::VariableState,
+        mut dynamic: Option<&mut super::dynamic::DynamicDashboard>,
         range: Duration,
         step: Duration,
         end_ts: i64,
@@ -750,23 +810,44 @@ impl AppState {
         indices: &[usize],
         refresh_variables: bool,
     ) {
-        if refresh_variables {
+        if refresh_variables && !variable_state.has_variables() {
             let _ =
                 refresh_query_variables(prometheus, query_vars, range, step, end_ts, vars).await;
         }
 
         // Create a stream of futures for fetching panel data
         let indices = indices.iter().copied().collect::<HashSet<_>>();
-        let mut futures = futures::stream::iter(
-            panels
-                .iter_mut()
-                .enumerate()
-                .filter_map(|(index, panel)| indices.contains(&index).then_some(panel)),
-        )
-        .map(|p| Self::fetch_single_panel_data(prometheus, p, range, step, vars, end_ts))
-        .buffer_unordered(4); // Max 4 concurrent panel refreshes
+        let work = panels
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(index, panel)| indices.contains(&index).then_some((index, panel)))
+            .map(|(index, p)| {
+                let values = dynamic
+                    .as_ref()
+                    .map(|d| d.values_for(index, variable_state, vars))
+                    .unwrap_or_else(|| {
+                        variable_state.scope_values(
+                            variable_state.panel_scopes.get(index).copied().unwrap_or(0),
+                            vars,
+                        )
+                    });
+                (index, p, values)
+            })
+            .collect::<Vec<_>>();
+        let mut futures = futures::stream::iter(work)
+            .map(|(index, p, values)| async move {
+                (
+                    index,
+                    Self::fetch_single_panel_data(prometheus, p, range, step, &values, end_ts)
+                        .await,
+                )
+            })
+            .buffer_unordered(4);
 
-        while let Some((p, results, url, err)) = futures.next().await {
+        while let Some((index, (p, results, url, err, has_data))) = futures.next().await {
+            if let Some(dynamic) = dynamic.as_mut() {
+                dynamic.mark_query_result(index, has_data);
+            }
             p.series = results;
             p.last_samples = p.series.iter().map(|s| s.points.len()).sum();
             if let Some(u) = url {
@@ -777,19 +858,21 @@ impl AppState {
     }
 
     async fn fetch_single_panel_data<'a>(
-        prometheus: &'a prom::PromClient,
+        prometheus: &prom::PromClient,
         p: &'a mut PanelState,
         range: Duration,
         step: Duration,
-        vars: &'a HashMap<String, String>,
+        vars: &HashMap<String, String>,
         end_ts: i64,
     ) -> (
         &'a mut PanelState,
         Vec<SeriesView>,
         Option<String>,
         Option<String>,
+        bool,
     ) {
         let mut panel_results = Vec::new();
+        let mut has_data = false;
         let mut last_url = None;
         let mut error = None;
 
@@ -825,6 +908,7 @@ impl AppState {
             match query_result {
                 Ok(res) => {
                     for s in res {
+                        has_data |= !s.values.is_empty();
                         let latest_val = s.values.last().and_then(|(_, v)| v.parse::<f64>().ok());
                         let legend_base = if let Some(fmt) = legend_fmt {
                             format_legend(fmt, &s.metric)
@@ -868,7 +952,7 @@ impl AppState {
                 }
             }
         }
-        (p, panel_results, last_url, error)
+        (p, panel_results, last_url, error, has_data)
     }
 }
 

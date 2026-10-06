@@ -19,8 +19,50 @@ use crate::grafana::TemplateQueryVar;
 use crate::prom;
 use anyhow::{Result, anyhow};
 use regex::Regex;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
+
+pub(crate) async fn refresh_scoped_variables(
+    prometheus: &prom::PromClient,
+    state: &mut crate::dashboard::variables::VariableState,
+    active_scopes: &HashSet<usize>,
+    range: Duration,
+    step: Duration,
+    end_ts: i64,
+    vars: &HashMap<String, String>,
+) {
+    for scope in 0..state.scopes.len() {
+        if !active_scopes.contains(&scope) {
+            continue;
+        }
+        for index in 0..state.scopes[scope].variables.len() {
+            let variable = &state.scopes[scope].variables[index];
+            if scope == 0 && state.overrides.contains_key(&variable.name) {
+                continue;
+            }
+            let Some(query) = variable.query.clone() else {
+                continue;
+            };
+            let values = state.scope_values(scope, vars);
+            let result =
+                resolve_query_variable_values(prometheus, &query, range, step, end_ts, &values)
+                    .await;
+            let variable = &mut state.scopes[scope].variables[index];
+            match result {
+                Ok(values) => variable.update_options(
+                    values
+                        .into_iter()
+                        .map(|value| crate::dashboard::variables::VariableOption {
+                            text: value.clone(),
+                            value,
+                        })
+                        .collect(),
+                ),
+                Err(error) => variable.last_error = Some(error.to_string()),
+            }
+        }
+    }
+}
 
 enum PrometheusVariableQuery {
     LabelValues {
@@ -39,9 +81,9 @@ pub(crate) async fn refresh_query_variables(
     vars: &mut HashMap<String, String>,
 ) -> Result<()> {
     for query_var in query_vars {
-        let Some(value) =
-            resolve_query_variable(prometheus, query_var, range, step, end_ts, vars).await?
-        else {
+        let Some(value) = first_value(
+            resolve_query_variable_values(prometheus, query_var, range, step, end_ts, vars).await?,
+        ) else {
             continue;
         };
 
@@ -51,14 +93,14 @@ pub(crate) async fn refresh_query_variables(
     Ok(())
 }
 
-async fn resolve_query_variable(
+async fn resolve_query_variable_values(
     prometheus: &prom::PromClient,
     query_var: &TemplateQueryVar,
     range: Duration,
     step: Duration,
     end_ts: i64,
     vars: &HashMap<String, String>,
-) -> Result<Option<String>> {
+) -> Result<Vec<String>> {
     let expanded_query = expand_expr(&query_var.query, range, step, vars);
     let query = parse_prometheus_variable_query(&expanded_query)?;
     let start_ts = end_ts - range.as_secs() as i64;
@@ -79,10 +121,7 @@ async fn resolve_query_variable(
         }
     };
 
-    Ok(first_value(apply_regex(
-        values,
-        query_var.regex.as_deref(),
-    )?))
+    apply_regex(values, query_var.regex.as_deref())
 }
 
 fn parse_prometheus_variable_query(query: &str) -> Result<PrometheusVariableQuery> {
@@ -171,6 +210,81 @@ fn first_value(values: Vec<String>) -> Option<String> {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn scoped_refresh_retains_selection_and_continues_after_error() {
+        use crate::dashboard::variables::{Variable, VariableOption, VariableScope, VariableState};
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = prom::PromClient::new(format!("http://{}", listener.local_addr().unwrap()));
+        let server = tokio::spawn(async move {
+            for body in [
+                r#"{"status":"error","errorType":"bad_data","error":"broken"}"#,
+                r#"{"status":"success","data":["node-a","node-b","node-c"]}"#,
+            ] {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut buf = [0; 4096];
+                let _ = socket.read(&mut buf).await.unwrap();
+                socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body).as_bytes()).await.unwrap();
+            }
+        });
+        let variable = |name: &str| Variable {
+            name: name.into(),
+            values: vec!["node-b".into()],
+            texts: vec!["B".into()],
+            options: vec![VariableOption {
+                value: "node-b".into(),
+                text: "B".into(),
+            }],
+            all: false,
+            all_value: None,
+            repeatable: true,
+            last_error: None,
+            query: Some(TemplateQueryVar {
+                name: name.into(),
+                query: "label_values(instance)".into(),
+                regex: None,
+                query_path: "spec.variables".into(),
+            }),
+        };
+        let mut state = VariableState {
+            scopes: vec![VariableScope {
+                parent: None,
+                variables: vec![variable("broken"), variable("node")],
+            }],
+            ..Default::default()
+        };
+        tokio::time::timeout(
+            Duration::from_secs(3),
+            refresh_scoped_variables(
+                &client,
+                &mut state,
+                &HashSet::from([0]),
+                Duration::from_secs(300),
+                Duration::from_secs(15),
+                1000,
+                &HashMap::new(),
+            ),
+        )
+        .await
+        .unwrap();
+        let broken = state.lookup(0, "broken").unwrap();
+        assert!(broken.last_error.is_some());
+        assert_eq!(broken.values, vec!["node-b"]);
+        let node = state.lookup(0, "node").unwrap();
+        assert_eq!(node.values, vec!["node-b"]);
+        assert_eq!(node.texts, vec!["node-b"]);
+        assert_eq!(
+            node.options
+                .iter()
+                .map(|o| o.value.as_str())
+                .collect::<Vec<_>>(),
+            vec!["node-a", "node-b", "node-c"]
+        );
+        server.await.unwrap();
+    }
     #[test]
     fn test_split_label_values_query() {
         let PrometheusVariableQuery::LabelValues { metric, label } =

@@ -263,3 +263,86 @@ mod content_fit;
 
 #[path = "autogrid/bounds_scroll.rs"]
 mod bounds_scroll;
+
+#[test]
+fn scoped_variables_import_row_and_tab_declarations() {
+    let mut value = auto_grid_resource();
+    let child = value["spec"]["layout"].clone();
+    value["spec"]["layout"] = serde_json::json!({"kind":"RowsLayout","spec":{"rows":[{"kind":"RowsLayoutRow","spec":{
+        "variables":[{"kind":"CustomVariable","spec":{"name":"node","query":"One : node-1, Two : node-2","current":{"value":["node-2","node-1"],"text":["Two","One"]},"multi":true}}],
+        "layout":{"kind":"TabsLayout","spec":{"tabs":[{"kind":"TabsLayoutTab","spec":{"variables":[{"kind":"ConstantVariable","spec":{"name":"region","current":{"value":"west","text":"West"}}}],"layout":child}}]}}
+    }}]}});
+    let imported = parse_grafana_dashboard(&value.to_string()).unwrap();
+    assert_eq!(imported.layout.visible_panel_indices(), vec![0, 1, 2, 3]);
+    let state = &imported.variable_state;
+    assert_eq!(state.panel_scopes, vec![2, 2, 2, 2]);
+    assert_eq!(
+        state.lookup(2, "node").unwrap().values,
+        vec!["node-2", "node-1"]
+    );
+    assert_eq!(state.lookup(2, "node").unwrap().texts, vec!["Two", "One"]);
+    assert_eq!(state.scope_values(2, &imported.vars)["region"], "west");
+    assert!(state.lookup(0, "node").is_none());
+    assert!(state.lookup(1, "region").is_none());
+}
+
+#[test]
+fn scoped_variables_all_uses_concrete_labeled_options() {
+    let mut value = auto_grid_resource();
+    value["spec"]["variables"] = serde_json::json!([{"kind":"CustomVariable","spec":{"name":"node","query":"One : node-1,Two : node-2,East\\, West : node-3","multi":true,"includeAll":true,"allValue":".*custom","current":{"value":"$__all","text":"All"}}}]);
+    let imported = parse_grafana_dashboard(&value.to_string()).unwrap();
+    let state = &imported.variable_state;
+    let options = state.repeat_values(0, "node").unwrap();
+    assert_eq!(
+        options
+            .iter()
+            .map(|o| (o.value.as_str(), o.text.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("node-1", "One"),
+            ("node-2", "Two"),
+            ("node-3", "East, West")
+        ]
+    );
+    assert_eq!(state.scope_values(0, &imported.vars)["node"], ".*custom");
+}
+#[test]
+fn scoped_variables_reject_malformed_option_with_native_path() {
+    let mut value = auto_grid_resource();
+    value["spec"]["variables"] = serde_json::json!([{"kind":"CustomVariable","spec":{"name":"node","options":[{"value":17,"text":"bad"}]}}]);
+    let error = parse_grafana_dashboard(&value.to_string())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("spec.variables[0].spec.options[0].value"),
+        "{error}"
+    );
+}
+
+#[test]
+fn repeat_import_accepts_variable_mode() {
+    let mut value = auto_grid_resource();
+    value["spec"]["layout"]["spec"]["items"][0]["spec"]["repeat"] =
+        serde_json::json!({"mode":"variable","value":"node"});
+    assert!(parse_grafana_dashboard(&value.to_string()).is_ok());
+}
+
+#[test]
+fn conditions_import_accepts_group_and_three_predicate_kinds() {
+    let mut value = auto_grid_resource();
+    value["spec"]["layout"]["spec"]["items"][0]["spec"]["conditionalRendering"] = serde_json::json!({"kind":"ConditionalRenderingGroup","spec":{"visibility":"show","condition":"and","items":[{"kind":"ConditionalRenderingVariable","spec":{"variable":"node","operator":"equals","value":"a"}},{"kind":"ConditionalRenderingData","spec":{"value":true}},{"kind":"ConditionalRenderingTimeRangeSize","spec":{"value":"5m"}}]}});
+    assert!(parse_grafana_dashboard(&value.to_string()).is_ok());
+}
+
+#[test]
+fn conditions_import_reports_unknown_kind_at_native_path() {
+    let mut value = auto_grid_resource();
+    value["spec"]["layout"]["spec"]["items"][0]["spec"]["conditionalRendering"] = serde_json::json!({"kind":"ConditionalRenderingGroup","spec":{"visibility":"show","condition":"or","items":[{"kind":"Unsupported","spec":{}}]}});
+    let error = parse_grafana_dashboard(&value.to_string())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("conditionalRendering.spec.items[0].kind"),
+        "{error}"
+    );
+}
