@@ -50,12 +50,11 @@ pub(super) fn parse_auto_grid_layout(
         require_expected_kind(item, &item_path, "AutoGridLayoutItem")?;
         let item_spec_path = format!("{item_path}.spec");
         let item_spec = require_object_from(item, "spec", &item_spec_path)?;
-        for field in ["repeat", "conditionalRendering"] {
-            ensure!(
-                !item_spec.contains_key(field),
-                "unsupported Grafana V2 AutoGrid setting at {item_spec_path}.{field}"
-            );
-        }
+        ensure!(
+            !item_spec.contains_key("conditionalRendering"),
+            "unsupported Grafana V2 AutoGrid setting at {item_spec_path}.conditionalRendering"
+        );
+        let repeat = parse_repeat(item_spec, &item_spec_path, diagnostics)?;
         let fit_content = item_spec
             .contains_key("fitContent")
             .then(|| optional_bool_from(item_spec, "fitContent", &item_spec_path))
@@ -75,7 +74,11 @@ pub(super) fn parse_auto_grid_layout(
         })?;
         let element_path = format!("spec.elements[{name:?}]");
         if let Some(panel) = parse_panel(element, &element_path, None, diagnostics)? {
-            retained_items.push(model::AutoGridItem { panel, fit_content });
+            retained_items.push(model::AutoGridItem {
+                panel,
+                fit_content,
+                behavior: crate::dashboard::autogrid::AutoGridBehavior { repeat },
+            });
         }
     }
     Ok(vec![model::LayoutNode::AutoGrid(model::AutoGrid {
@@ -245,4 +248,24 @@ fn warn_unknown(
             "unsupported AutoGrid setting ignored",
         ));
     }
+}
+
+fn parse_repeat(
+    spec: &JsonObject,
+    path: &str,
+    diagnostics: &mut Vec<ImportDiagnostic>,
+) -> Result<Option<String>> {
+    if !spec.contains_key("repeat") {
+        return Ok(None);
+    }
+    let path = format!("{path}.repeat");
+    let repeat = require_object_from(spec, "repeat", &path)?;
+    let mode = require_string_from(repeat, "mode", &format!("{path}.mode"))?;
+    ensure!(
+        mode == "variable",
+        "invalid Grafana V2 AutoGrid repeat at {path}.mode: expected `variable`"
+    );
+    let value = require_string_from(repeat, "value", &format!("{path}.value"))?;
+    warn_unknown(repeat, &["mode", "value"], &path, diagnostics);
+    Ok((!value.is_empty()).then(|| value.to_string()))
 }

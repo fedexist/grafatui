@@ -139,7 +139,6 @@ impl VariableState {
         }
         values
     }
-    #[allow(dead_code)] // Consumed by the next AutoGrid repeat stage.
     pub(crate) fn repeat_values(&self, scope: usize, name: &str) -> Option<Vec<VariableOption>> {
         let v = self.lookup(scope, name)?;
         if !v.repeatable {

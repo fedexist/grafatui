@@ -318,3 +318,11 @@ fn scoped_variables_reject_malformed_option_with_native_path() {
         "{error}"
     );
 }
+
+#[test]
+fn repeat_import_accepts_variable_mode() {
+    let mut value = auto_grid_resource();
+    value["spec"]["layout"]["spec"]["items"][0]["spec"]["repeat"] =
+        serde_json::json!({"mode":"variable","value":"node"});
+    assert!(parse_grafana_dashboard(&value.to_string()).is_ok());
+}

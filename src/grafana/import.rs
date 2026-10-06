@@ -234,6 +234,9 @@ fn import_layout_nodes(
                 let mut retained_items = Vec::with_capacity(group.items.len());
                 for item in group.items {
                     if let Some(index) = import_panel(item.panel, out, scope)? {
+                        if item.behavior.repeat.is_some() {
+                            out.auto_grid_behaviors.insert(index, item.behavior);
+                        }
                         retained_items.push(crate::dashboard::autogrid::AutoGridItem {
                             index,
                             fit_content: item.fit_content,
