@@ -419,3 +419,19 @@ fn content_fit_validate_accepts_unbounded_and_finite_maximum() {
         );
     }
 }
+
+#[test]
+fn bounds_scroll_validate_accepts_bounded_example() {
+    let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+        .arg("--grafana-json")
+        .arg(example_dashboard("grafana_v2_autogrid_bounded.json"))
+        .arg("--validate")
+        .arg("--strict")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

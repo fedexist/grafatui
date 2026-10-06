@@ -16,7 +16,7 @@
 
 mod bar_gauge;
 pub(crate) mod content;
-pub(crate) use content::{measure_panel_content, prepare_table_rows, table_row_offset};
+pub(crate) use content::{measure_panel_content, prepare_table_rows};
 mod error_body;
 mod gauge;
 mod graph;
@@ -152,3 +152,5 @@ pub(crate) fn render_panel(
         }
     }
 }
+
+pub(crate) use error_body::error_body_window;

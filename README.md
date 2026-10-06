@@ -94,7 +94,7 @@ grafatui man
 
 Grafana 13 users can import an exact `dashboard.grafana.app/v2` JSON resource
 with recursive `GridLayout`, `RowsLayout`, `TabsLayout`, and `AutoGridLayout`
-containers. AutoGrid supports responsive columns, `fillScreen` row growth, and table content fitting with minimum heights and row matching; see the
+containers. AutoGrid supports responsive columns, `fillScreen` row growth, and table content fitting with minimum/maximum heights, row matching, and panel-body scrolling; see the
 [compatibility matrix](docs/grafana-compatibility.md#static-autogrid-sizing)
 for sizing options and deferred features. Maximum heights, panel-body scrolling, wrapped-error fitting, repeat,
 conditional rendering, nested non-empty layout variables, library panels, and

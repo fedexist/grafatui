@@ -2,7 +2,7 @@ use super::*;
 use crate::dashboard::autogrid::{AutoGridOptions, DashboardAutoGrid, test_items};
 use crate::dashboard::{DashboardItemId, DashboardLayout, DashboardLayoutItem};
 
-fn rows(count: usize) -> Vec<SeriesView> {
+pub(super) fn rows(count: usize) -> Vec<SeriesView> {
     (1..=count)
         .map(|i| SeriesView {
             name: format!("row{i:02}"),
@@ -12,7 +12,7 @@ fn rows(count: usize) -> Vec<SeriesView> {
         })
         .collect()
 }
-fn fitted_app() -> AppState {
+pub(super) fn fitted_app() -> AppState {
     let mut app = test_app(ExportOptions {
         dir: test_export_dir("content-fit"),
         format: ExportFormat::Both,

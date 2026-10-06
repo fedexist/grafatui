@@ -44,13 +44,13 @@ unsupported advanced V2 dashboards. See the
 | Top-level `spec.variables` | 🔶 Partial | Supported variable kinds map to Grafatui variables; unsupported kinds emit diagnostics |
 | `spec.timeSettings.autoRefresh` | ✅ Supported | Used as the dashboard refresh interval |
 | `vizConfig.spec.fieldConfig` | 🔶 Partial | The supported Classic-equivalent field configuration subset applies |
-| `AutoGridLayout` | 🔶 Partial | Ordered panels at root or inside rows/tabs; responsive columns, fillScreen, table content fitting, minima and row matching share TUI, hit-test, scroll, and export geometry |
+| `AutoGridLayout` | 🔶 Partial | Ordered panels at root or inside rows/tabs; responsive columns, fillScreen, table content fitting, minimum/maximum heights and row matching share TUI, hit-test, scroll, and export geometry |
 | Repeated grid items and row repeat | ❌ Not Implemented | Rejected as fatal import errors |
 | Conditional rendering, non-empty nested variables, and library panels | ❌ Not Implemented | Deferred V2 features |
 
 ### Static AutoGrid sizing
 
-Stages 1–3a support `AutoGridLayoutItem` panel references in source order, including
+Stages 1–3 support `AutoGridLayoutItem` panel references in source order, including
 empty groups, collapsed rows, and inactive tabs. Column counts respond to the
 available terminal width. Resizing preserves panel selection and adjusts scroll
 to keep it reachable. SVG/PNG snapshots and recordings use the same layout.
@@ -64,9 +64,9 @@ to keep it reachable. SVG/PNG snapshots and recordings use the same layout.
 | `rowHeight` | Positive finite pixels required for `custom`; rounds upward to cells |
 | `matchRowHeights` | Boolean; default true stretches siblings to their row track; false retains each panel contribution, leaving unused gaps |
 | `fillScreen` | Boolean; default false. True grows rows to fill their containing content viewport, preserving baseline minimum heights |
-| Layout/item `fitContent` | Boolean; layout default false, item omission inherits layout, explicit true/false overrides it. Tables fit visible rows; charts and error overlays retain baseline height |
+| Layout/item `fitContent` | Boolean; layout default false, item omission inherits layout, explicit true/false overrides it. Tables fit visible rows or wrapped errors; other renderers retain baseline height |
 | `minHeightMode`, `minHeight` | Omission inherits row height; `none` removes the floor; `short`/`standard`/`tall` use 10/18/29 cells; `custom` requires positive finite pixels rounded upward |
-| Maximum height bounds | Explicit caps are field errors; `maxHeightMode: unlimited` without `maxHeight` is accepted |
+| `maxHeightMode`, `maxHeight` | Omitted/`unlimited` has no cap; `short`/`standard`/`tall` use 10/18/29 cells; `custom` requires positive finite pixels rounded upward. Only custom consumes `maxHeight` |
 | Item `repeat`, `conditionalRendering` | Field errors; deferred to later stages |
 | Unknown settings | Emit `unsupported_autogrid_setting`; `--strict` rejects the warning |
 
@@ -97,7 +97,7 @@ Table fitting counts only visible series, preserving existing ordering, value
 formatting, threshold colors and single-row cell clipping. A nonempty table needs
 N + 4 cells for N rows, its column header, margin and borders; an empty table
 needs 3. Widths with no body space need only borders. Unsupported renderers
-(graph, unknown, stat, gauge, bar gauge, heatmap) and errors retain the baseline.
+(graph, unknown, stat, gauge, bar gauge, heatmap), including their errors, retain the baseline. Table errors fit their wrapped body lines plus two border cells.
 A missing minimum inherits `rowHeight`; supplied dimensions are validated even
 when their mode does not consume them. Fixed panels still contribute their full
 baseline to prevent overlap beside shorter fitted tables.
@@ -114,10 +114,29 @@ recordings use the same row window and logical 18-pixel spacing.
 Run [the content-fit example](../examples/dashboards/grafana_v2_autogrid_content_fit.json)
 with the same command, substituting its filename.
 
-Full AutoGrid compatibility remains incomplete. Stage 3a implements unbounded
-table fitting, overrides, minima and row matching. Stage 3b will add maximum
-heights, independent panel-body scrolling and wrapped-error fitting. Later
-stages add variable options/scopes, repeats and conditional visibility.
+Maximum heights bound fitting panels, including after row matching and fill
+stretch a track. The minimum wins when it exceeds the maximum. Ordinary panels
+keep their baseline sizing. To use a short cap below the standard row height,
+set `minHeightMode: none`, as in [the bounded example](../examples/dashboards/grafana_v2_autogrid_bounded.json).
+
+Capped fitting tables have independent body offsets. `Ctrl+Up`/`Ctrl+Down`
+scroll one row, `Ctrl+PgUp`/`Ctrl+PgDn` page, and `Ctrl+Home`/`Ctrl+End` reach
+the first/last window. Borders and table headers stay fixed; error bodies use
+the same controls and wrapped lines in TUI, SVG/PNG and recordings. Only the
+selected overflowing body owns unmodified wheel input; headers, borders, gaps,
+other panels and `Shift+wheel` keep dashboard scrolling. Search and annotation
+modals retain their controls.
+
+Fullscreen bypasses the cap and uses its visible body capacity, including when
+a tiny cap cannot fit data. The same offset is clamped on entry/exit, resize,
+data or visibility changes. Changing errors and error recovery reset it; row
+collapse and inactive tabs retain offsets until reactivation. Ordinary and
+unlimited-fit fullscreen keep their existing presentation.
+
+Full AutoGrid compatibility remains incomplete. Stage 3 implements content
+fitting, minimum/maximum bounds, row matching, body scrolling and Table error
+fitting. Later stages add variable options/scopes, repeats and conditional visibility,
+followed by a final architecture and code cleanup review.
 Unsupported settings fail during import, including inside inactive tabs and
 collapsed rows.
 
