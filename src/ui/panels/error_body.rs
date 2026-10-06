@@ -30,7 +30,6 @@ use std::collections::VecDeque;
 
 pub(crate) struct ErrorBodyWindow {
     pub(crate) total_lines: u64,
-    pub(crate) first_line: u64,
     pub(crate) lines: Vec<String>,
 }
 
@@ -42,7 +41,7 @@ pub(crate) fn error_body_window(
 ) -> ErrorBodyWindow {
     let mut total = 0_u64;
     visit_wrapped_lines(text, width, |_| total = total.saturating_add(1));
-    let first = offset.min(total.saturating_sub(u64::from(capacity)));
+    let first = super::content::panel_body_window(total, 0, offset, capacity).first;
     let mut lines = Vec::new();
     if capacity > 0 {
         let mut row = 0_u64;
@@ -55,7 +54,6 @@ pub(crate) fn error_body_window(
     }
     ErrorBodyWindow {
         total_lines: total,
-        first_line: first,
         lines,
     }
 }
@@ -151,10 +149,8 @@ mod tests {
     fn bounds_scroll_error_windows_match_literal_wraps() {
         let window = error_body_window("one two three four", 8, 0, 10);
         assert_eq!(window.total_lines, 3);
-        assert_eq!(window.first_line, 0);
         assert_eq!(window.lines, ["one two", "three", "four"]);
         let end = error_body_window("one two three four", 8, u64::MAX, 2);
-        assert_eq!(end.first_line, 1);
         assert_eq!(end.lines, ["three", "four"]);
         assert_eq!(error_body_window("", 8, 0, 3).lines, [""]);
         assert_eq!(error_body_window("x", 0, 0, 3).total_lines, 0);
@@ -204,17 +200,12 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         let w = error_body_window(&text, 40, u64::MAX, 8);
-        assert_eq!(
-            (w.total_lines, w.first_line, w.lines.len()),
-            (70_000, 69_992, 8)
-        );
+        assert_eq!((w.total_lines, w.lines.len()), (70_000, 8));
+        assert_eq!(w.lines.first().unwrap(), "line69992");
         assert_eq!(w.lines.last().unwrap(), "line69999");
         let text = "a".repeat(70_000);
         let w = error_body_window(&text, 1, u64::MAX, 3);
-        assert_eq!(
-            (w.total_lines, w.first_line, w.lines.len()),
-            (70_000, 69_997, 3)
-        );
+        assert_eq!((w.total_lines, w.lines.len()), (70_000, 3));
         assert_eq!(w.lines, ["a", "a", "a"]);
         let count = error_body_window(&text, 1, 0, 0);
         assert_eq!(count.total_lines, 70_000);

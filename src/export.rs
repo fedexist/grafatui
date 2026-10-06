@@ -520,19 +520,20 @@ fn render_panel(
         rect.left, rect.top, rect.width, rect.height
     )
     .unwrap();
+    let fitted_error_title = (context.content_fit && panel.last_error.is_some())
+        .then(|| format!("{} - ERROR", panel.title));
     write_text(
         out,
         rect.left + 8.0,
         rect.top + 18.0,
-        &panel.title,
+        fitted_error_title.as_deref().unwrap_or(&panel.title),
         &title,
         "start",
         FONT_SIZE,
     );
 
-    let fitted_table =
-        context.content_fit && panel.panel_type == PanelType::Table && panel.last_error.is_none();
-    let inner = if fitted_table {
+    let fitted_body = context.content_fit && panel.panel_type == PanelType::Table;
+    let inner = if fitted_body {
         PlotRect {
             left: rect.left + CELL_WIDTH,
             top: rect.top + CELL_HEIGHT,
@@ -549,6 +550,31 @@ fn render_panel(
     };
 
     if let Some(err) = &panel.last_error {
+        if context.content_fit {
+            let width = (inner.width / CELL_WIDTH) as u16;
+            let capacity = (inner.height / CELL_HEIGHT) as u16;
+            let window = ui::error_body_window(
+                err,
+                width,
+                context
+                    .body_offset
+                    .saturating_add(context.local_body_offset),
+                capacity,
+            );
+            let text = color_hex(theme.text, "#e6e6e6");
+            for (row, line) in window.lines.iter().enumerate() {
+                write_text(
+                    out,
+                    inner.left,
+                    inner.top + 15.0 + row as f64 * CELL_HEIGHT,
+                    line,
+                    &text,
+                    "start",
+                    FONT_SIZE,
+                );
+            }
+            return;
+        }
         write_text(
             out,
             inner.left,
@@ -1129,11 +1155,13 @@ fn render_table_panel(
         ((rect.height - row_height) / row_height).floor().max(1.0) as usize
     };
     let offset = if context.content_fit {
-        ui::table_row_offset(
-            values.len(),
+        ui::panel_body_window(
+            values.len() as u64,
             context.body_offset,
+            context.local_body_offset,
             max_rows.min(u16::MAX as usize) as u16,
         )
+        .first as usize
     } else {
         0
     };
@@ -1905,6 +1933,7 @@ mod tests {
         )
     }
 
+    mod bounds_scroll;
     #[path = "content_fit.rs"]
     mod content_fit;
 

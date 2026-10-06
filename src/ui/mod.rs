@@ -29,9 +29,11 @@ pub(crate) use layout::{
     DashboardRect, DashboardRectKind, clamp_dashboard_scroll, hit_test, scroll_selected_into_view,
     visible_dashboard_rects, visible_panel_rects,
 };
+pub(crate) use panels::prepare_table_rows;
 pub(crate) use panels::{PanelRenderContext, calculate_y_bounds, measure_panel_content};
-pub(crate) use panels::{prepare_table_rows, table_row_offset};
 pub(crate) use tabs::{render_tab_bar, tab_at, tab_bar_geometry, tab_title};
 
 pub(crate) use layout::{panel_body_viewports, panel_render_context};
 pub(crate) use panels::content::{PanelBodyMetrics, panel_body_metrics, panel_body_window};
+
+pub(crate) use panels::error_body_window;

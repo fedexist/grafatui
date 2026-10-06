@@ -24,7 +24,7 @@ containers:
 grafatui --prometheus-url http://localhost:9090 --grafana-json ./dashboard.json
 ```
 
-For V2 dashboards that use AutoGrid maximum heights, repeat, conditional rendering,
+For V2 dashboards that use AutoGrid repeat, conditional rendering,
 nested non-empty layout variables, or library panels, use the Classic export
 fallback: open **Export as code → Advanced options**, set **Model** to
 **Classic**, then download or copy the JSON. V1 Resource and Resource YAML
@@ -69,3 +69,14 @@ docker-compose down -v
 | `Left` / `Right` on a row | Collapse / expand the row |
 | `v` | Inspect values |
 | `/` | Search visible rows and panels |
+
+Try bounded AutoGrid tables with:
+
+```sh
+grafatui --grafana-json examples/dashboards/grafana_v2_autogrid_bounded.json \
+  --prometheus-url http://localhost:9090
+```
+
+Use `Ctrl+Up`/`Ctrl+Down` to scroll a selected capped table, and `Ctrl+Home`/
+`Ctrl+End` to reach its first/last rows. Press `f` for fullscreen when a tiny
+cap leaves no room for data. See [keyboard and mouse controls](keyboard-and-mouse.md).

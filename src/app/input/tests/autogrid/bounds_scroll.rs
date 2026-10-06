@@ -673,3 +673,133 @@ async fn bounds_scroll_modal_inspect_and_fullscreen_precedence() {
         .unwrap();
     assert_eq!(ordinary.selected_item, Some(DashboardItemId::Panel(3)));
 }
+
+#[tokio::test]
+async fn bounds_scroll_terminal_flow_buffers_keep_identity() {
+    let mut app = bounded_app();
+    app.panels[0].series = rows(20);
+    let DashboardLayoutItem::AutoGrid(g) = &mut app.layout.items[0] else {
+        panic!()
+    };
+    g.items[3].fit_content = Some(false);
+    let size = Size::new(100, 24);
+    render(&mut app, size, "bounds-scroll-live-initial");
+    for (code, offset, label) in [
+        (KeyCode::Down, 1, "bounds-scroll-live-down"),
+        (KeyCode::End, 14, "bounds-scroll-live-end"),
+        (KeyCode::Home, 0, "bounds-scroll-live-home"),
+    ] {
+        control(&mut app, size, code).await;
+        assert_eq!(local(&app, 0), offset);
+        assert_eq!(app.vertical_scroll, 0);
+        render(&mut app, size, label);
+    }
+    handle_key(key(KeyCode::Down), size, &mut app)
+        .await
+        .unwrap();
+    assert_eq!(app.selected_item, Some(DashboardItemId::Panel(1)));
+    render(&mut app, size, "bounds-scroll-live-focus");
+    for (n, label) in [
+        (1, "bounds-scroll-live-shrink"),
+        (20, "bounds-scroll-live-grow"),
+    ] {
+        app.panels[1].series = rows(n);
+        reconcile(&mut app, size);
+        assert_eq!(local(&app, 1), 0);
+        assert_eq!(app.selected_item, Some(DashboardItemId::Panel(1)));
+        render(&mut app, size, label);
+    }
+    let size = Size::new(140, 48);
+    crate::ui::scroll_selected_into_view(Rect::new(0, 0, size.width, size.height), &mut app);
+    reconcile(&mut app, size);
+    render(&mut app, size, "bounds-scroll-live-resize");
+    handle_key(key(KeyCode::Up), size, &mut app).await.unwrap();
+    assert_eq!(app.selected_item, Some(DashboardItemId::Panel(0)));
+    render(&mut app, size, "bounds-scroll-live-select");
+    handle_key(key(KeyCode::Char('f')), size, &mut app)
+        .await
+        .unwrap();
+    reconcile(&mut app, size);
+    let b = render(&mut app, size, "bounds-scroll-live-fullscreen");
+    assert!(text(&b).contains("row20"));
+    control(&mut app, size, KeyCode::End).await;
+    assert_eq!(local(&app, 0), 0);
+    render(&mut app, size, "bounds-scroll-live-fullscreen-end-noop");
+    handle_key(key(KeyCode::Char('f')), size, &mut app)
+        .await
+        .unwrap();
+    reconcile(&mut app, size);
+    let b = render(&mut app, size, "bounds-scroll-live-return");
+    assert_eq!(app.mode, AppMode::Normal);
+    assert!(text(&b).contains("row06"));
+    assert!(!text(&b).contains("row07"));
+    assert_eq!(
+        handle_key(key(KeyCode::Char('q')), size, &mut app)
+            .await
+            .unwrap(),
+        InputAction::Quit
+    );
+}
+
+#[tokio::test]
+async fn bounds_scroll_terminal_mouse_buffers_keep_body_and_dashboard_distinct() {
+    let mut app = bounded_app();
+    app.panels[0].series = rows(20);
+    let DashboardLayoutItem::AutoGrid(g) = &mut app.layout.items[0] else {
+        panic!()
+    };
+    g.items[3].fit_content = Some(false);
+    let size = Size::new(100, 24);
+    for (kind, modifiers, y, offset, document, label) in [
+        (
+            MouseEventKind::ScrollDown,
+            KeyModifiers::NONE,
+            7,
+            1,
+            0,
+            "bounds-scroll-mouse-down",
+        ),
+        (
+            MouseEventKind::ScrollDown,
+            KeyModifiers::SHIFT,
+            7,
+            1,
+            1,
+            "bounds-scroll-mouse-shift",
+        ),
+        (
+            MouseEventKind::ScrollDown,
+            KeyModifiers::NONE,
+            5,
+            1,
+            2,
+            "bounds-scroll-mouse-header",
+        ),
+    ] {
+        if modifiers == KeyModifiers::SHIFT {
+            control(&mut app, size, KeyCode::Home).await;
+        }
+        handle_mouse(
+            MouseEvent {
+                kind,
+                column: 2,
+                row: y,
+                modifiers,
+            },
+            size,
+            &mut app,
+        )
+        .await
+        .unwrap();
+        // Home reset before Shift, and dashboard wheel leaves the local offset alone.
+        assert_eq!(local(&app, 0), if document == 0 { offset } else { 0 });
+        assert_eq!(app.vertical_scroll, document);
+        let b = render(&mut app, size, label);
+        if document == 1 {
+            assert!(text(&b).contains("row04"));
+        }
+        if document == 2 {
+            assert!(!text(&b).contains("row04"));
+        }
+    }
+}
