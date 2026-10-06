@@ -8,7 +8,7 @@ use crate::{
         variables::{VariableOption, VariableState},
     },
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct InstanceKey {
@@ -21,15 +21,89 @@ struct Instance {
     key: InstanceKey,
     scope: usize,
     binding: Option<(String, VariableOption)>,
+    query_data: Option<bool>,
 }
 #[derive(Debug)]
 pub(crate) struct DynamicDashboard {
     templates: Vec<PanelState>,
     layout: DashboardLayout,
+    expanded_layout: DashboardLayout,
     behaviors: HashMap<usize, AutoGridBehavior>,
     instances: Vec<Instance>,
 }
 impl DynamicDashboard {
+    pub(crate) fn mark_query_result(&mut self, index: usize, has_data: bool) {
+        if let Some(instance) = self.instances.get_mut(index) {
+            instance.query_data = Some(has_data);
+        }
+    }
+    fn visible(
+        &self,
+        index: usize,
+        state: &VariableState,
+        vars: &HashMap<String, String>,
+        range: std::time::Duration,
+    ) -> bool {
+        let instance = &self.instances[index];
+        let Some(conditions) = self
+            .behaviors
+            .get(&instance.key.template)
+            .and_then(|b| b.conditions.as_ref())
+        else {
+            return true;
+        };
+        conditions.visible(
+            |name| {
+                use crate::dashboard::conditions::ConditionValue;
+                if let Some((bound, value)) = &instance.binding
+                    && bound == name
+                {
+                    return Some(ConditionValue {
+                        values: vec![value.value.clone()],
+                        all: false,
+                    });
+                }
+                let variable = state.lookup(instance.scope, name);
+                if let Some(variable) = variable {
+                    if state.scopes[0]
+                        .variables
+                        .iter()
+                        .any(|root| std::ptr::eq(root, variable))
+                        && let Some(value) = state.overrides.get(name)
+                    {
+                        return Some(ConditionValue {
+                            values: vec![value.clone()],
+                            all: false,
+                        });
+                    }
+                    return Some(ConditionValue {
+                        values: variable.values.clone(),
+                        all: variable.all,
+                    });
+                }
+                vars.get(name).map(|value| ConditionValue {
+                    values: vec![value.clone()],
+                    all: false,
+                })
+            },
+            instance.query_data,
+            range,
+        )
+    }
+    fn eligible(
+        &self,
+        index: usize,
+        state: &VariableState,
+        vars: &HashMap<String, String>,
+        range: std::time::Duration,
+    ) -> bool {
+        let instance = &self.instances[index];
+        self.behaviors
+            .get(&instance.key.template)
+            .and_then(|b| b.conditions.as_ref())
+            .is_some_and(|c| c.has_data_predicate())
+            || self.visible(index, state, vars, range)
+    }
     pub(crate) fn values_for(
         &self,
         index: usize,
@@ -54,14 +128,15 @@ impl AppState {
         self.dynamic = Some(DynamicDashboard {
             templates: self.panels.clone(),
             layout: self.layout.clone(),
+            expanded_layout: self.layout.clone(),
             behaviors,
             instances: Vec::new(),
         });
         self.reconcile_dynamic();
     }
-    pub(crate) fn reconcile_dynamic(&mut self) {
+    pub(crate) fn reconcile_dynamic(&mut self) -> Vec<usize> {
         let Some(mut dynamic) = self.dynamic.take() else {
-            return;
+            return Vec::new();
         };
         // Container IDs remain static; copy their interactive state before rebuilding children.
         fn sync(items: &mut [DashboardLayoutItem], runtime: &DashboardLayout) {
@@ -86,13 +161,19 @@ impl AppState {
             }
         }
         sync(&mut dynamic.layout.items, &self.layout);
+        let old_active: HashSet<_> = dynamic
+            .expanded_layout
+            .visible_panel_indices()
+            .into_iter()
+            .filter_map(|i| dynamic.instances.get(i).map(|i| i.key.clone()))
+            .collect();
         let old_selected = self.selected_item;
         let old_instances = std::mem::take(&mut dynamic.instances);
         let mut old: HashMap<_, _> = old_instances
             .into_iter()
             .zip(std::mem::take(&mut self.panels))
             .enumerate()
-            .map(|(index, (instance, panel))| (instance.key, (index, panel)))
+            .map(|(index, (instance, panel))| (instance.key, (index, panel, instance.query_data)))
             .collect();
         let mut panels = Vec::new();
         let mut remap = HashMap::new();
@@ -105,7 +186,7 @@ impl AppState {
             vars: &HashMap<String, String>,
             range: std::time::Duration,
             step: std::time::Duration,
-            old: &mut HashMap<InstanceKey, (usize, PanelState)>,
+            old: &mut HashMap<InstanceKey, (usize, PanelState, Option<bool>)>,
             panels: &mut Vec<PanelState>,
             remap: &mut HashMap<usize, usize>,
         ) {
@@ -119,7 +200,7 @@ impl AppState {
                 vars: &HashMap<String, String>,
                 range: std::time::Duration,
                 step: std::time::Duration,
-                old: &mut HashMap<InstanceKey, (usize, PanelState)>,
+                old: &mut HashMap<InstanceKey, (usize, PanelState, Option<bool>)>,
                 panels: &mut Vec<PanelState>,
                 remap: &mut HashMap<usize, usize>,
             ) -> usize {
@@ -129,7 +210,9 @@ impl AppState {
                     occurrence,
                 };
                 let index = panels.len();
-                let mut panel = if let Some((old_index, panel)) = old.remove(&key) {
+                let mut query_data = None;
+                let mut panel = if let Some((old_index, panel, data)) = old.remove(&key) {
+                    query_data = data;
                     remap.insert(old_index, index);
                     panel
                 } else {
@@ -154,6 +237,7 @@ impl AppState {
                 }
                 panel.title = expand_expr(&dynamic.templates[template].title, range, step, &texts);
                 dynamic.instances.push(Instance {
+                    query_data,
                     key,
                     scope,
                     binding,
@@ -292,6 +376,12 @@ impl AppState {
             .filter_map(|(old, state)| remap.get(&old).map(|&new| (new, state)))
             .collect();
         self.panels = panels;
+        let newly_active = layout
+            .visible_panel_indices()
+            .into_iter()
+            .filter(|&i| !old_active.contains(&dynamic.instances[i].key))
+            .collect();
+        dynamic.expanded_layout = layout.clone();
         self.layout = layout;
         if self.selected_panel_index().is_none() {
             self.mode = match self.mode {
@@ -301,6 +391,61 @@ impl AppState {
             };
         }
         self.dynamic = Some(dynamic);
+        self.evaluate_dynamic_visibility();
+        newly_active
+    }
+    pub(crate) fn query_eligible_indices(&self) -> Vec<usize> {
+        match &self.dynamic {
+            None => self.visible_panel_indices(),
+            Some(dynamic) => dynamic
+                .expanded_layout
+                .visible_panel_indices()
+                .into_iter()
+                .filter(|&i| dynamic.eligible(i, &self.variable_state, &self.vars, self.range))
+                .collect(),
+        }
+    }
+    pub(crate) fn evaluate_dynamic_visibility(&mut self) {
+        let Some(dynamic) = &self.dynamic else { return };
+        let visible: Vec<_> = (0..self.panels.len())
+            .map(|i| dynamic.visible(i, &self.variable_state, &self.vars, self.range))
+            .collect();
+        self.layout = dynamic.expanded_layout.clone();
+        fn filter(items: &mut [DashboardLayoutItem], visible: &[bool]) {
+            for item in items {
+                match item {
+                    DashboardLayoutItem::AutoGrid(grid) => {
+                        grid.items.retain(|item| visible[item.index])
+                    }
+                    DashboardLayoutItem::Row(row) => filter(&mut row.children, visible),
+                    DashboardLayoutItem::Tabs(group) => {
+                        for tab in &mut group.tabs {
+                            filter(&mut tab.children, visible)
+                        }
+                    }
+                    DashboardLayoutItem::Panel(_) => {}
+                }
+            }
+        }
+        filter(&mut self.layout.items, &visible);
+        if !self
+            .layout
+            .visible_items()
+            .iter()
+            .any(|i| Some(i.id) == self.selected_item)
+        {
+            self.selected_item = self.layout.first_visible();
+        }
+        if self.selected_panel_index().is_none() {
+            self.mode = match self.mode {
+                AppMode::Fullscreen => AppMode::Normal,
+                AppMode::FullscreenInspect => AppMode::Inspect,
+                mode => mode,
+            };
+        }
+        if self.mode == AppMode::Search {
+            super::input::update_search_results(self);
+        }
     }
 }
 #[cfg(test)]

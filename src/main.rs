@@ -249,7 +249,7 @@ async fn main() -> Result<()> {
     state.query_vars = query_vars;
     state.variable_state = variable_state;
     state.configure_dynamic(auto_grid_behaviors);
-    state.refresh().await?;
+    state.refresh_initial().await?;
 
     // Terminal setup
     crossterm::terminal::enable_raw_mode()?;

@@ -326,3 +326,23 @@ fn repeat_import_accepts_variable_mode() {
         serde_json::json!({"mode":"variable","value":"node"});
     assert!(parse_grafana_dashboard(&value.to_string()).is_ok());
 }
+
+#[test]
+fn conditions_import_accepts_group_and_three_predicate_kinds() {
+    let mut value = auto_grid_resource();
+    value["spec"]["layout"]["spec"]["items"][0]["spec"]["conditionalRendering"] = serde_json::json!({"kind":"ConditionalRenderingGroup","spec":{"visibility":"show","condition":"and","items":[{"kind":"ConditionalRenderingVariable","spec":{"variable":"node","operator":"equals","value":"a"}},{"kind":"ConditionalRenderingData","spec":{"value":true}},{"kind":"ConditionalRenderingTimeRangeSize","spec":{"value":"5m"}}]}});
+    assert!(parse_grafana_dashboard(&value.to_string()).is_ok());
+}
+
+#[test]
+fn conditions_import_reports_unknown_kind_at_native_path() {
+    let mut value = auto_grid_resource();
+    value["spec"]["layout"]["spec"]["items"][0]["spec"]["conditionalRendering"] = serde_json::json!({"kind":"ConditionalRenderingGroup","spec":{"visibility":"show","condition":"or","items":[{"kind":"Unsupported","spec":{}}]}});
+    let error = parse_grafana_dashboard(&value.to_string())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("conditionalRendering.spec.items[0].kind"),
+        "{error}"
+    );
+}
