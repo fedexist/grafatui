@@ -19,18 +19,22 @@ use crate::grafana::TemplateQueryVar;
 use crate::prom;
 use anyhow::{Result, anyhow};
 use regex::Regex;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 pub(crate) async fn refresh_scoped_variables(
     prometheus: &prom::PromClient,
     state: &mut crate::dashboard::variables::VariableState,
+    active_scopes: &HashSet<usize>,
     range: Duration,
     step: Duration,
     end_ts: i64,
     vars: &HashMap<String, String>,
 ) {
     for scope in 0..state.scopes.len() {
+        if !active_scopes.contains(&scope) {
+            continue;
+        }
         for index in 0..state.scopes[scope].variables.len() {
             let variable = &state.scopes[scope].variables[index];
             if scope == 0 && state.overrides.contains_key(&variable.name) {
@@ -257,6 +261,7 @@ mod tests {
             refresh_scoped_variables(
                 &client,
                 &mut state,
+                &HashSet::from([0]),
                 Duration::from_secs(300),
                 Duration::from_secs(15),
                 1000,

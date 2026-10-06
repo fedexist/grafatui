@@ -700,9 +700,11 @@ impl AppState {
         let annotation_refresh = annotations.refresh(&annotation_context);
         let prometheus_refresh = async {
             if self.variable_state.has_variables() {
+                let active_scopes = self.active_variable_scopes();
                 crate::app::variables::refresh_scoped_variables(
                     &self.prometheus,
                     &mut self.variable_state,
+                    &active_scopes,
                     range,
                     step,
                     end_ts,
@@ -758,10 +760,12 @@ impl AppState {
         let range = self.range;
         let step = self.step;
         let end_ts = self.view_end_ts;
-        if refresh_variables && self.variable_state.has_variables() {
+        if self.variable_state.has_variables() {
+            let active_scopes = self.active_variable_scopes();
             crate::app::variables::refresh_scoped_variables(
                 &self.prometheus,
                 &mut self.variable_state,
+                &active_scopes,
                 range,
                 step,
                 end_ts,
