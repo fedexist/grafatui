@@ -137,7 +137,8 @@ Full AutoGrid compatibility remains incomplete. Stage 3 implements content
 fitting, minimum/maximum bounds, row matching, body scrolling and Table error
 fitting. Stage 4 retains selected value lists and labeled options, resolves All to
 concrete options, refreshes Prometheus query options, and preserves containing
-row/tab variable scopes. Later stages add repeats and conditional visibility,
+row/tab variable scopes. Stage 5 materializes AutoGrid item repeats from selected
+values, with scoped titles/queries and surviving instance state. Conditional visibility remains pending,
 followed by a final architecture and code cleanup review.
 Unsupported settings fail during import, including inside inactive tabs and
 collapsed rows.

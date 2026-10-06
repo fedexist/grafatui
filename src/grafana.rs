@@ -36,6 +36,7 @@ pub(crate) struct DashboardImport {
     /// Variables extracted from `templating.list`.
     pub(crate) vars: HashMap<String, String>,
     pub(crate) variable_state: crate::dashboard::variables::VariableState,
+    pub(crate) auto_grid_behaviors: HashMap<usize, crate::dashboard::autogrid::AutoGridBehavior>,
     /// Dynamic query variables extracted from `templating.list`.
     pub(crate) query_vars: Vec<TemplateQueryVar>,
     /// Number of panels that were skipped (unsupported types).

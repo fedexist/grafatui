@@ -141,6 +141,7 @@ pub(super) struct ThresholdStep {
 
 #[derive(Debug)]
 pub(super) struct AutoGridItem {
+    pub(super) behavior: crate::dashboard::autogrid::AutoGridBehavior,
     pub(super) panel: Panel,
     pub(super) fit_content: Option<bool>,
 }
