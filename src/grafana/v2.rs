@@ -5,6 +5,7 @@ use serde_json::Value;
 use super::model;
 
 mod autogrid;
+mod variables;
 
 pub(super) const V2_API_VERSION: &str = "dashboard.grafana.app/v2";
 
@@ -51,7 +52,7 @@ pub(super) fn adapt(value: Value) -> Result<model::Dashboard> {
             "invalid Grafana V2 time settings at spec.timeSettings: expected an object"
         ),
     };
-    dashboard.variables = normalize_variables(spec, &mut dashboard.diagnostics)?;
+    dashboard.variables = normalize_variables(spec, "spec", &mut dashboard.diagnostics)?;
     dashboard.layout = parse_layout(layout, elements, "spec.layout", &mut dashboard.diagnostics)?;
     dashboard.skipped_panels += dashboard
         .diagnostics
@@ -111,21 +112,13 @@ fn parse_tabs_layout(
                 "unsupported Grafana V2 {description} at {tab_spec_path}.{field}"
             );
         }
-        let variables_path = format!("{tab_spec_path}.variables");
-        match tab_spec.get("variables") {
-            None => {}
-            Some(Value::Array(variables)) => ensure!(
-                variables.is_empty(),
-                "unsupported Grafana V2 tab variables at {variables_path}"
-            ),
-            Some(_) => {
-                anyhow::bail!("invalid Grafana V2 resource at {variables_path}: expected an array")
-            }
-        }
+        let variables = normalize_variables(tab_spec, &tab_spec_path, diagnostics)?;
+
         let child_path = format!("{tab_spec_path}.layout");
         let child_layout = require_object_from(tab_spec, "layout", &child_path)?;
         let children = parse_layout(child_layout, elements, &child_path, diagnostics)?;
         normalized.push(model::Tab {
+            variables,
             title,
             source_path: tab_path,
             children,
@@ -204,17 +197,7 @@ fn parse_rows_layout(
             );
         }
 
-        let variables_path = format!("{row_spec_path}.variables");
-        match row_spec.get("variables") {
-            None => {}
-            Some(Value::Array(variables)) => ensure!(
-                variables.is_empty(),
-                "unsupported Grafana V2 row variables at {variables_path}"
-            ),
-            Some(_) => {
-                anyhow::bail!("invalid Grafana V2 resource at {variables_path}: expected an array")
-            }
-        }
+        let variables = normalize_variables(row_spec, &row_spec_path, diagnostics)?;
 
         if optional_bool_from(row_spec, "fillScreen", &row_spec_path)? {
             anyhow::bail!("unsupported Grafana V2 full-screen row at {row_spec_path}.fillScreen");
@@ -224,6 +207,7 @@ fn parse_rows_layout(
         let child_layout = require_object_from(row_spec, "layout", &child_path)?;
         let children = parse_layout(child_layout, elements, &child_path, diagnostics)?;
         nodes.push(model::LayoutNode::Row(model::Row {
+            variables,
             title,
             collapsed,
             hidden_header,
@@ -236,33 +220,36 @@ fn parse_rows_layout(
 
 fn normalize_variables(
     dashboard_spec: &JsonObject,
+    parent_path: &str,
     diagnostics: &mut Vec<super::ImportDiagnostic>,
 ) -> Result<Vec<model::Variable>> {
     let variables = match dashboard_spec.get("variables") {
         None => return Ok(Vec::new()),
         Some(Value::Array(variables)) => variables,
         Some(_) => {
-            anyhow::bail!("invalid Grafana V2 variables at spec.variables: expected an array")
+            anyhow::bail!(
+                "invalid Grafana V2 variables at {parent_path}.variables: expected an array"
+            )
         }
     };
 
     let mut normalized = Vec::new();
     for (index, variable) in variables.iter().enumerate() {
-        let path = format!("spec.variables[{index}]");
+        let path = format!("{parent_path}.variables[{index}]");
         let variable = variable
             .as_object()
             .ok_or_else(|| anyhow!("invalid Grafana V2 variable at {path}: expected an object"))?;
         let kind = require_string_from(variable, "kind", &format!("{path}.kind"))?;
         let spec = require_object_from(variable, "spec", &format!("{path}.spec"))?;
         let variable = match kind {
-            "QueryVariable" => normalize_query_variable(spec, index, diagnostics)?,
+            "QueryVariable" => normalize_query_variable(spec, &path, diagnostics)?,
             "TextVariable" | "ConstantVariable" | "DatasourceVariable" | "IntervalVariable"
-            | "CustomVariable" | "GroupByVariable" => Some(normalize_option_variable(spec, index)?),
-            "SwitchVariable" => Some(normalize_switch_variable(spec, index)?),
+            | "CustomVariable" | "GroupByVariable" => Some(normalize_option_variable(spec, &path)?),
+            "SwitchVariable" => Some(normalize_switch_variable(spec, &path)?),
             "AdhocVariable" => {
                 diagnostics.push(super::ImportDiagnostic::new(
                     "unsupported_variable",
-                    path,
+                    &path,
                     "unsupported Grafana V2 variable kind `AdhocVariable` skipped",
                 ));
                 None
@@ -270,13 +257,30 @@ fn normalize_variables(
             other => {
                 diagnostics.push(super::ImportDiagnostic::new(
                     "unsupported_variable",
-                    path,
+                    &path,
                     format!("unsupported Grafana V2 variable kind `{other}` skipped"),
                 ));
                 None
             }
         };
-        if let Some(variable) = variable {
+        if let Some(mut variable) = variable {
+            let query = variable
+                .query
+                .as_ref()
+                .zip(variable.query_path.as_ref())
+                .filter(|_| variable.kind.as_deref() == Some("query"))
+                .map(|(query, path)| super::TemplateQueryVar {
+                    name: variable.name.clone(),
+                    query: query.clone(),
+                    regex: variable.regex.clone(),
+                    query_path: path.clone(),
+                });
+            variable.retained = Some(variables::retain(
+                spec,
+                kind,
+                &format!("{path}.spec"),
+                query,
+            )?);
             normalized.push(variable);
         }
     }
@@ -285,10 +289,10 @@ fn normalize_variables(
 
 fn normalize_query_variable(
     spec: &JsonObject,
-    index: usize,
+    source_path: &str,
     diagnostics: &mut Vec<super::ImportDiagnostic>,
 ) -> Result<Option<model::Variable>> {
-    let source_path = format!("spec.variables[{index}]");
+    let source_path = source_path.to_string();
     let name = require_string_from(spec, "name", &format!("{source_path}.spec.name"))?.to_string();
     let query_path = format!("{source_path}.spec.query");
     let query = require_object_from(spec, "query", &query_path)?;
@@ -329,6 +333,7 @@ fn normalize_query_variable(
         });
 
     Ok(Some(model::Variable {
+        retained: None,
         name,
         kind: is_prometheus.then_some("query".to_string()),
         current: current_from_option(spec),
@@ -340,9 +345,10 @@ fn normalize_query_variable(
     }))
 }
 
-fn normalize_option_variable(spec: &JsonObject, index: usize) -> Result<model::Variable> {
-    let source_path = format!("spec.variables[{index}]");
+fn normalize_option_variable(spec: &JsonObject, source_path: &str) -> Result<model::Variable> {
+    let source_path = source_path.to_string();
     Ok(model::Variable {
+        retained: None,
         name: require_string_from(spec, "name", &format!("{source_path}.spec.name"))?.to_string(),
         kind: None,
         current: current_from_option(spec),
@@ -354,9 +360,10 @@ fn normalize_option_variable(spec: &JsonObject, index: usize) -> Result<model::V
     })
 }
 
-fn normalize_switch_variable(spec: &JsonObject, index: usize) -> Result<model::Variable> {
-    let source_path = format!("spec.variables[{index}]");
+fn normalize_switch_variable(spec: &JsonObject, source_path: &str) -> Result<model::Variable> {
+    let source_path = source_path.to_string();
     Ok(model::Variable {
+        retained: None,
         name: require_string_from(spec, "name", &format!("{source_path}.spec.name"))?.to_string(),
         kind: None,
         current: spec.get("current").and_then(Value::as_str).map(|current| {

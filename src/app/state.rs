@@ -303,6 +303,7 @@ pub(crate) struct AppState {
     pub(crate) vars: HashMap<String, String>,
     /// Prometheus-backed template variables imported from Grafana.
     pub(crate) query_vars: Vec<TemplateQueryVar>,
+    pub(crate) variable_state: crate::dashboard::variables::VariableState,
     /// Count of panels skipped during import.
     pub(crate) skipped_panels: usize,
     /// Recursive row/panel dashboard layout.
@@ -380,6 +381,7 @@ impl AppState {
             debug_bar: false,
             vars: HashMap::new(),
             query_vars: Vec::new(),
+            variable_state: Default::default(),
             skipped_panels,
             layout,
             selected_item,
@@ -684,17 +686,32 @@ impl AppState {
         let annotation_context =
             crate::annotations::AnnotationRefreshContext::from_unix_window(end_ts, range);
         let annotation_refresh = self.annotations.refresh(&annotation_context);
-        let prometheus_refresh = Self::refresh_prometheus_data(
-            &self.prometheus,
-            &self.query_vars,
-            range,
-            step,
-            end_ts,
-            &mut self.vars,
-            &mut self.panels,
-            &visible_panel_indices,
-            true,
-        );
+        let prometheus_refresh = async {
+            if self.variable_state.has_variables() {
+                crate::app::variables::refresh_scoped_variables(
+                    &self.prometheus,
+                    &mut self.variable_state,
+                    range,
+                    step,
+                    end_ts,
+                    &self.vars,
+                )
+                .await;
+            }
+            Self::refresh_prometheus_data(
+                &self.prometheus,
+                &self.query_vars,
+                &self.variable_state,
+                range,
+                step,
+                end_ts,
+                &mut self.vars,
+                &mut self.panels,
+                &visible_panel_indices,
+                true,
+            )
+            .await;
+        };
         let (_, ()) = tokio::join!(annotation_refresh, prometheus_refresh);
 
         self.reconcile_visible_annotation_targets();
@@ -727,6 +744,7 @@ impl AppState {
         Self::refresh_prometheus_data(
             &self.prometheus,
             &self.query_vars,
+            &self.variable_state,
             range,
             step,
             end_ts,
@@ -742,6 +760,7 @@ impl AppState {
     async fn refresh_prometheus_data(
         prometheus: &prom::PromClient,
         query_vars: &[TemplateQueryVar],
+        variable_state: &crate::dashboard::variables::VariableState,
         range: Duration,
         step: Duration,
         end_ts: i64,
@@ -750,7 +769,7 @@ impl AppState {
         indices: &[usize],
         refresh_variables: bool,
     ) {
-        if refresh_variables {
+        if refresh_variables && !variable_state.has_variables() {
             let _ =
                 refresh_query_variables(prometheus, query_vars, range, step, end_ts, vars).await;
         }
@@ -761,9 +780,17 @@ impl AppState {
             panels
                 .iter_mut()
                 .enumerate()
-                .filter_map(|(index, panel)| indices.contains(&index).then_some(panel)),
+                .filter_map(|(index, panel)| indices.contains(&index).then_some((index, panel))),
         )
-        .map(|p| Self::fetch_single_panel_data(prometheus, p, range, step, vars, end_ts))
+        .map(|(index, p)| {
+            let values = variable_state.scope_values(
+                variable_state.panel_scopes.get(index).copied().unwrap_or(0),
+                vars,
+            );
+            async move {
+                Self::fetch_single_panel_data(prometheus, p, range, step, &values, end_ts).await
+            }
+        })
         .buffer_unordered(4); // Max 4 concurrent panel refreshes
 
         while let Some((p, results, url, err)) = futures.next().await {
@@ -777,11 +804,11 @@ impl AppState {
     }
 
     async fn fetch_single_panel_data<'a>(
-        prometheus: &'a prom::PromClient,
+        prometheus: &prom::PromClient,
         p: &'a mut PanelState,
         range: Duration,
         step: Duration,
-        vars: &'a HashMap<String, String>,
+        vars: &HashMap<String, String>,
         end_ts: i64,
     ) -> (
         &'a mut PanelState,

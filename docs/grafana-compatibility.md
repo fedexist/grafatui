@@ -135,7 +135,9 @@ unlimited-fit fullscreen keep their existing presentation.
 
 Full AutoGrid compatibility remains incomplete. Stage 3 implements content
 fitting, minimum/maximum bounds, row matching, body scrolling and Table error
-fitting. Later stages add variable options/scopes, repeats and conditional visibility,
+fitting. Stage 4 retains selected value lists and labeled options, resolves All to
+concrete options, refreshes Prometheus query options, and preserves containing
+row/tab variable scopes. Later stages add repeats and conditional visibility,
 followed by a final architecture and code cleanup review.
 Unsupported settings fail during import, including inside inactive tabs and
 collapsed rows.
