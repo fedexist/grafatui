@@ -5,6 +5,7 @@ use serde_json::Value;
 use super::model;
 
 mod autogrid;
+mod conditions;
 mod variables;
 
 pub(super) const V2_API_VERSION: &str = "dashboard.grafana.app/v2";

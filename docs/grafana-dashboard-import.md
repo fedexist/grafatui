@@ -20,8 +20,9 @@ or `AutoGridLayout`. AutoGrid adapts columns to terminal width and supports
 fixed row heights, `fillScreen` growth, and table content fitting with minimum/maximum heights, row matching, and body scrolling. See [Static AutoGrid sizing](grafana-compatibility.md#static-autogrid-sizing)
 for supported sizing options and the runnable example.
 
-AutoGrid repeat, conditional rendering, nested non-empty layout variables,
-library panels, and Resource YAML remain unsupported; unsupported V2 layouts
+AutoGrid items also support repeats and variable/data/time-range conditions,
+with dashboard and containing row/tab variable scopes. See [the dynamic example](../examples/dashboards/grafana_v2_autogrid_dynamic.json).
+Repeated rows/tabs, row/tab conditions, library panels, and Resource YAML remain unsupported; unsupported V2 layouts
 and fields are fatal import errors. Repeated grid items are also rejected rather
 than silently changing the dashboard.
 
@@ -39,7 +40,7 @@ grafatui --prometheus-url http://localhost:9090 --grafana-json ./node-exporter.j
 ```
 
 Grafana 13 defaults to the V2 Resource model. Its supported grid, row, tab, and AutoGrid
-JSON resources can be imported directly. For dynamic AutoGrid or other deferred
+JSON resources can be imported directly. For deferred
 V2 features, use this Classic export path as the fallback. Grafana documents the available models and export controls in
 [Export a dashboard as code](https://grafana.com/docs/grafana/latest/visualizations/dashboards/share-dashboards-panels/#export-a-dashboard-as-code).
 

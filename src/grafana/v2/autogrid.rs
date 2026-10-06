@@ -50,10 +50,7 @@ pub(super) fn parse_auto_grid_layout(
         require_expected_kind(item, &item_path, "AutoGridLayoutItem")?;
         let item_spec_path = format!("{item_path}.spec");
         let item_spec = require_object_from(item, "spec", &item_spec_path)?;
-        ensure!(
-            !item_spec.contains_key("conditionalRendering"),
-            "unsupported Grafana V2 AutoGrid setting at {item_spec_path}.conditionalRendering"
-        );
+        let conditions = super::conditions::parse(item_spec, &item_spec_path)?;
         let repeat = parse_repeat(item_spec, &item_spec_path, diagnostics)?;
         let fit_content = item_spec
             .contains_key("fitContent")
@@ -77,7 +74,7 @@ pub(super) fn parse_auto_grid_layout(
             retained_items.push(model::AutoGridItem {
                 panel,
                 fit_content,
-                behavior: crate::dashboard::autogrid::AutoGridBehavior { repeat },
+                behavior: crate::dashboard::autogrid::AutoGridBehavior { repeat, conditions },
             });
         }
     }

@@ -1,4 +1,5 @@
 pub(crate) mod autogrid;
+pub(crate) mod conditions;
 pub(crate) mod variables;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
