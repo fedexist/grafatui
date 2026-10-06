@@ -139,6 +139,7 @@ async fn main() -> Result<()> {
 
     let mut vars: HashMap<String, String> = HashMap::new();
     let mut query_vars = Vec::new();
+    let mut variable_state = dashboard::variables::VariableState::default();
     let mut dashboard_refresh_rate_ms = None;
 
     let prom = prom::PromClient::new(prometheus_url);
@@ -151,6 +152,12 @@ async fn main() -> Result<()> {
         dashboard_refresh_rate_ms = d.refresh_rate_ms;
         vars = import_context.vars;
         query_vars = import_context.query_vars;
+        variable_state = d.variable_state;
+        merge_user_vars(
+            &mut variable_state.overrides,
+            config.vars.clone(),
+            &args.var,
+        );
 
         let ps = d
             .queries
@@ -238,6 +245,7 @@ async fn main() -> Result<()> {
     state.autogrid_color = autogrid_color;
     state.vars = vars; // <— pass variables into the app
     state.query_vars = query_vars;
+    state.variable_state = variable_state;
     state.refresh().await?;
 
     // Terminal setup
