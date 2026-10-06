@@ -27,7 +27,7 @@ code. Cherry-pick the original feature commits, not their merge commits, with
 | --- | --- |
 | Real Grafana exports | `e79bbd2` |
 | V2 YAML | `facde3a`, `b30221e` |
-| Prometheus client hardening | `ca6a1d2` |
+| Prometheus client hardening | `ca6a1d2`; retry-classification hunks and tests from `7ef3725` |
 | Adaptive intervals | `6971822`, `b557abe` |
 | Terminal and export cleanup | `33dd30c` |
 | Annotation containment and signals | `9205bef`, `9337c80` |
@@ -43,6 +43,11 @@ fork architecture, abort it and stop for a user checkpoint. Manual porting is
 permitted only after that checkpoint. New code is limited to conflict
 resolution, adaptations required by this specification, and regression tests
 for those adaptations.
+
+The user approved one bounded partial port in advance: do not cherry-pick
+`7ef3725` as a whole because it also introduces deferred last-known-good data,
+warning, and UI behavior. Take only its `StatusError`/`is_retryable` logic and
+HTTP retry tests in the Prometheus-hardening slice, retaining source credit.
 
 Credit Ryan Craig and link the source commits in the resulting PR descriptions
 and release notes. Preserve original authorship for accepted cherry-picks.
@@ -118,8 +123,10 @@ JSON parsing and do not retry it. Error excerpts remain bounded and preserve
 UTF-8 boundaries.
 
 Retry only failures that can reasonably succeed without changing the request:
-non-TLS transport failures, HTTP 429, and HTTP 5xx. Do not retry rejected 4xx
-queries, malformed JSON, oversized responses, or TLS failures. Retain the
+current transport failures, HTTP 429, and HTTP 5xx. Do not retry rejected 4xx
+queries, malformed JSON, or oversized responses. TLS-specific transport
+classification depends on the deferred TLS subsystem and remains out of scope;
+current TLS handshake failures retain transport retry behavior. Retain the
 existing retry count and backoff unless the source commit requires a correction
 for current dependencies. Keep `#![forbid(unsafe_code)]` if it applies without
 exceptions.
@@ -205,8 +212,8 @@ direct-child `kill_on_drop` behavior.
 - Cache length never exceeds 64 complete query windows.
 - Millisecond-distinct steps do not share cache or in-flight work.
 - Bodies above 64 MiB fail before parsing.
-- Retry tests distinguish transport/429/5xx from permanent 4xx, malformed,
-  oversized, and TLS failures.
+- Retry tests distinguish transport/429/5xx from permanent 4xx, malformed, and
+  oversized failures. TLS-specific classification remains deferred.
 
 ### Adaptive intervals
 
