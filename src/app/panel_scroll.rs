@@ -59,18 +59,14 @@ pub(crate) fn reconcile_panel_body_scroll(viewport: Rect, app: &mut AppState) {
     }
 }
 
-/// True means an eligible, nonempty body owns this input, including at its boundary.
-pub(crate) fn scroll_selected_body(
-    viewport: Rect,
-    app: &mut AppState,
-    action: BodyScrollAction,
-) -> bool {
+/// Scroll the selected body when it has capacity; input routing decides ownership.
+pub(crate) fn scroll_selected_body(viewport: Rect, app: &mut AppState, action: BodyScrollAction) {
     reconcile_panel_body_scroll(viewport, app);
     let Some(body) = ui::panel_body_viewports(viewport, app)
         .into_iter()
         .find(|b| Some(b.index) == app.selected_panel_index() && b.metrics.capacity > 0)
     else {
-        return false;
+        return;
     };
     let state = app.panel_body_scroll.get_mut(&body.index).unwrap();
     let maximum = body.metrics.max_local_offset();
@@ -83,5 +79,4 @@ pub(crate) fn scroll_selected_body(
         BodyScrollAction::Home => 0,
         BodyScrollAction::End => maximum,
     };
-    true
 }

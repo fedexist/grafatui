@@ -41,7 +41,7 @@ pub(crate) fn error_body_window(
 ) -> ErrorBodyWindow {
     let mut total = 0_u64;
     visit_wrapped_lines(text, width, |_| total = total.saturating_add(1));
-    let first = super::content::panel_body_window(total, 0, offset, capacity).first;
+    let first = super::content::panel_body_offset(total, 0, offset, capacity);
     let mut lines = Vec::new();
     if capacity > 0 {
         let mut row = 0_u64;

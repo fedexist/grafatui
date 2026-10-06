@@ -13,9 +13,6 @@ fn bounded_app() -> AppState {
     g.options.max_height = Some(10);
     app
 }
-fn image(app: &AppState, viewport: Rect, _label: &str) -> String {
-    render_svg(app, viewport)
-}
 
 #[test]
 fn bounds_scroll_exports_preserve_defaults_and_capture_windows() {
@@ -25,13 +22,13 @@ fn bounds_scroll_exports_preserve_defaults_and_capture_windows() {
         ui::visible_dashboard_rects(viewport, &app)[0].rect,
         Rect::new(1, 4, 98, 10)
     );
-    let svg = image(&app, viewport, "bounds-export-start");
+    let svg = render_svg(&app, viewport);
     for n in 1..=6 {
         assert!(svg.contains(&format!("row{n:02}")));
     }
     assert!(!svg.contains("row07"));
     scroll_selected_body(viewport, &mut app, BodyScrollAction::End);
-    let svg = image(&app, viewport, "bounds-export-end");
+    let svg = render_svg(&app, viewport);
     for n in 15..=20 {
         assert!(svg.contains(&format!("row{n:02}")));
     }
@@ -41,7 +38,7 @@ fn bounds_scroll_exports_preserve_defaults_and_capture_windows() {
     assert!(svg.contains(r#"x="10" y="72" width="980" height="180""#));
     app.mode = AppMode::Fullscreen;
     reconcile_panel_body_scroll(viewport, &mut app);
-    let svg = image(&app, viewport, "bounds-export-fullscreen");
+    let svg = render_svg(&app, viewport);
     assert_eq!(app.panel_body_scroll[&0].offset, 0);
     assert!(svg.contains("row20"));
     assert!(svg.contains("row01"));
@@ -60,7 +57,7 @@ fn bounds_scroll_exports_error_wrap_and_style() {
     let mut app = bounded_app();
     let viewport = Rect::new(0, 0, 12, 24);
     app.panels[0].last_error = Some("one two three four".into());
-    let default_svg = image(&app, viewport, "bounds-export-error-narrow");
+    let default_svg = render_svg(&app, viewport);
     assert!(default_svg.contains("one two"));
     app.theme.text = Color::Rgb(4, 5, 6);
     let svg = render_svg(&app, viewport);
@@ -78,7 +75,7 @@ fn bounds_scroll_exports_error_wrap_and_style() {
     reconcile_panel_body_scroll(viewport, &mut app);
     scroll_selected_body(viewport, &mut app, BodyScrollAction::End);
     app.theme.text = Theme::default().text;
-    let svg = image(&app, viewport, "bounds-export-error-end");
+    let svg = render_svg(&app, viewport);
     assert!(svg.contains("&lt;error12&amp;&gt;"));
     assert!(svg.contains("&lt;error19&amp;&gt;"));
     assert!(!svg.contains("error11"));
@@ -87,7 +84,7 @@ fn bounds_scroll_exports_error_wrap_and_style() {
         panic!()
     };
     g.options.fit_content = false;
-    let svg = image(&app, viewport, "bounds-export-error-ordinary");
+    let svg = render_svg(&app, viewport);
     assert!(svg.contains(r##"fill="#cc3333""##));
     assert!(!svg.contains("A - ERROR"));
 }
