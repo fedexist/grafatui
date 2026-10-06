@@ -10,6 +10,8 @@ pub(crate) struct AutoGridOptions {
     pub(crate) fit_content: bool,
     /// None inherits row_height; Some(0) removes the fit minimum.
     pub(crate) min_height: Option<u32>,
+    /// None leaves fitting panels unbounded.
+    pub(crate) max_height: Option<u32>,
     pub(crate) match_row_heights: bool,
 }
 
@@ -19,6 +21,7 @@ impl Default for AutoGridOptions {
             fill_screen: false,
             fit_content: false,
             min_height: None,
+            max_height: None,
             match_row_heights: true,
             max_columns: 3,
             min_column_width: 448_u32.div_ceil(LOGICAL_CELL_WIDTH_PX),

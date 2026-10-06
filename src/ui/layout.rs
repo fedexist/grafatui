@@ -48,6 +48,7 @@ pub(crate) enum DashboardRectKind {
     Panel {
         index: usize,
         content_fit: bool,
+        body_scroll: bool,
         body_offset: u64,
     },
 }
@@ -251,13 +252,22 @@ pub(crate) fn visible_dashboard_rects(area: Rect, app: &AppState) -> Vec<Dashboa
         return app
             .selected_panel_index()
             .map(|index| {
+                let body_scroll = app
+                    .layout
+                    .auto_grid_settings_for_panel(index)
+                    .is_some_and(|(o, fit)| o.max_height.is_some() && fit.unwrap_or(o.fit_content))
+                    && app
+                        .panels
+                        .get(index)
+                        .is_some_and(|p| p.panel_type == crate::app::PanelType::Table);
                 vec![DashboardRect {
                     id: DashboardItemId::Panel(index),
                     rect: inner_area,
                     disclosure_rect: None,
                     kind: DashboardRectKind::Panel {
                         index,
-                        content_fit: false,
+                        content_fit: body_scroll,
+                        body_scroll,
                         body_offset: 0,
                     },
                 }]
@@ -385,6 +395,7 @@ fn panel_rect(index: usize, rect: Rect) -> DashboardRect {
         kind: DashboardRectKind::Panel {
             index,
             content_fit: false,
+            body_scroll: false,
             body_offset: 0,
         },
     }
@@ -428,9 +439,79 @@ pub(crate) fn hit_test(app: &AppState, area: Rect, x: u16, y: u16) -> Option<Das
     })
 }
 
+/// Read only: document clipping and local offsets remain distinct until rendering.
+pub(crate) fn panel_render_context(
+    app: &AppState,
+    item: &DashboardRect,
+) -> Option<super::panels::PanelRenderContext> {
+    let DashboardRectKind::Panel {
+        index,
+        content_fit,
+        body_scroll,
+        body_offset,
+    } = item.kind
+    else {
+        return None;
+    };
+    Some(super::panels::PanelRenderContext {
+        index,
+        content_fit,
+        body_offset,
+        local_body_offset: if body_scroll {
+            app.panel_body_scroll.get(&index).map_or(0, |s| s.offset)
+        } else {
+            0
+        },
+    })
+}
+
+pub(crate) struct PanelBodyViewport {
+    pub(crate) index: usize,
+    pub(crate) body_rect: Rect,
+    pub(crate) metrics: super::PanelBodyMetrics,
+}
+
+/// Input geometry comes from the same clipped rectangles used by both renderers.
+pub(crate) fn panel_body_viewports(viewport: Rect, app: &AppState) -> Vec<PanelBodyViewport> {
+    visible_dashboard_rects(viewport, app)
+        .into_iter()
+        .filter_map(|item| {
+            let DashboardRectKind::Panel {
+                index,
+                body_scroll: true,
+                body_offset,
+                ..
+            } = item.kind
+            else {
+                return None;
+            };
+            let panel = app.panels.get(index)?;
+            let metrics =
+                super::panel_body_metrics(panel, item.rect.width, item.rect.height, body_offset);
+            let inner = item.rect.inner(Margin::new(1, 1));
+            let header = if panel.last_error.is_some() {
+                0
+            } else {
+                2.min(inner.height)
+            };
+            Some(PanelBodyViewport {
+                index,
+                body_rect: Rect::new(
+                    inner.x,
+                    inner.y.saturating_add(header),
+                    inner.width,
+                    metrics.capacity,
+                ),
+                metrics,
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     mod auto_grid;
+    mod bounds_scroll;
     mod content_fit;
     mod fill_screen;
     use super::*;
@@ -567,7 +648,9 @@ mod tests {
             DashboardRectKind::Panel {
                 index: 0,
                 content_fit: false,
-                body_offset: 0
+                body_scroll: false,
+                body_offset: 0,
+                ..
             }
         ));
         assert_eq!(rects[1].id, DashboardItemId::Panel(0));

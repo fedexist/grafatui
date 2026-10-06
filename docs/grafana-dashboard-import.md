@@ -17,10 +17,10 @@ same Grafatui behavior as Classic JSON.
 
 Rows and tabs may recursively contain `GridLayout`, `RowsLayout`, `TabsLayout`,
 or `AutoGridLayout`. AutoGrid adapts columns to terminal width and supports
-fixed row heights, `fillScreen` growth, and table content fitting with minima and row matching. See [Static AutoGrid sizing](grafana-compatibility.md#static-autogrid-sizing)
+fixed row heights, `fillScreen` growth, and table content fitting with minimum/maximum heights, row matching, and body scrolling. See [Static AutoGrid sizing](grafana-compatibility.md#static-autogrid-sizing)
 for supported sizing options and the runnable example.
 
-AutoGrid maximum heights, repeat, conditional rendering, nested non-empty layout variables,
+AutoGrid repeat, conditional rendering, nested non-empty layout variables,
 library panels, and Resource YAML remain unsupported; unsupported V2 layouts
 and fields are fatal import errors. Repeated grid items are also rejected rather
 than silently changing the dashboard.
