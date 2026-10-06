@@ -67,11 +67,13 @@ pub(super) fn render_table(
     .column_spacing(1);
 
     if context.content_fit {
-        let offset = super::content::table_row_offset(
-            rows_len,
+        let window = super::content::panel_body_window(
+            rows_len as u64,
             context.body_offset,
+            context.local_body_offset,
             area.height.saturating_sub(2),
         );
+        let offset = window.first as usize;
         frame.render_stateful_widget(table, area, &mut TableState::default().with_offset(offset));
     } else {
         frame.render_widget(table, area);

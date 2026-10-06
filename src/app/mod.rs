@@ -17,6 +17,7 @@
 mod data;
 mod event_loop;
 mod input;
+pub(crate) mod panel_scroll;
 mod state;
 mod variables;
 

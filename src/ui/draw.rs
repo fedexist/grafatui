@@ -15,7 +15,7 @@
  */
 
 use super::layout::{DashboardRectKind, centered_rect, visible_dashboard_rects};
-use super::panels::{PanelRenderContext, render_panel};
+use super::panels::render_panel;
 use crate::app::{AppMode, AppState, PanelState};
 use crate::{dashboard::DashboardRow, theme::Theme};
 use humantime::format_duration;
@@ -55,95 +55,61 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
     let area = chunks[1];
     let charts_block = Block::default().borders(Borders::ALL);
     frame.render_widget(charts_block, area);
-    let inner_area = area.inner(Margin {
-        vertical: 1,
-        horizontal: 1,
-    });
-
     let mut selected_rendered_cluster = None;
-    if app.mode == AppMode::Fullscreen || app.mode == AppMode::FullscreenInspect {
-        if let Some((panel_index, p)) = app
-            .selected_panel_index()
-            .and_then(|index| app.panels.get(index).map(|panel| (index, panel)))
-        {
-            selected_rendered_cluster = render_panel(
-                frame,
-                inner_area,
-                PanelRenderContext {
-                    index: panel_index,
-                    ..Default::default()
-                },
-                p,
-                app,
-                true,
-                app.cursor_x,
-            );
-        }
-    } else {
-        for item in visible_dashboard_rects(size, app) {
-            match item.kind {
-                DashboardRectKind::Panel {
-                    index,
-                    content_fit,
-                    body_offset,
-                } => {
-                    if let Some(panel) = app.panels.get(index) {
-                        let is_selected = app.selected_item == Some(item.id);
-                        let rendered_cluster = render_panel(
-                            frame,
-                            item.rect,
-                            PanelRenderContext {
-                                index,
-                                content_fit,
-                                body_offset,
-                            },
-                            panel,
-                            app,
-                            is_selected,
-                            app.cursor_x,
-                        );
-                        if is_selected {
-                            selected_rendered_cluster = rendered_cluster;
-                        }
+    for item in visible_dashboard_rects(size, app) {
+        match item.kind {
+            DashboardRectKind::Panel { index, .. } => {
+                if let Some(panel) = app.panels.get(index) {
+                    let is_selected = app.selected_item == Some(item.id);
+                    let rendered_cluster = render_panel(
+                        frame,
+                        item.rect,
+                        super::panel_render_context(app, &item).unwrap(),
+                        panel,
+                        app,
+                        is_selected,
+                        app.cursor_x,
+                    );
+                    if is_selected {
+                        selected_rendered_cluster = rendered_cluster;
                     }
                 }
-                DashboardRectKind::Row { row_id, depth, .. } => {
-                    if let Some(row) = app.layout.row(row_id) {
-                        render_row_header(
-                            frame,
-                            item.rect,
-                            row,
-                            depth,
-                            app.selected_item == Some(item.id),
-                            &app.theme,
-                        );
-                    }
-                }
-                DashboardRectKind::Tabs { group_id, depth } => {
-                    if let Some(group) = app.layout.tabs(group_id) {
-                        let titles = group
-                            .tabs
-                            .iter()
-                            .map(|tab| tab.title.clone())
-                            .collect::<Vec<_>>();
-                        let geometry =
-                            super::tab_bar_geometry(item.rect, &titles, group.active, depth);
-                        super::render_tab_bar(
-                            frame,
-                            &geometry,
-                            &app.theme,
-                            app.selected_item == Some(item.id),
-                        );
-                    }
-                }
-                DashboardRectKind::TabEmpty { .. } => frame.render_widget(
-                    Line::styled(
-                        "  No supported panels in this tab",
-                        Style::default().fg(app.theme.text),
-                    ),
-                    item.rect,
-                ),
             }
+            DashboardRectKind::Row { row_id, depth, .. } => {
+                if let Some(row) = app.layout.row(row_id) {
+                    render_row_header(
+                        frame,
+                        item.rect,
+                        row,
+                        depth,
+                        app.selected_item == Some(item.id),
+                        &app.theme,
+                    );
+                }
+            }
+            DashboardRectKind::Tabs { group_id, depth } => {
+                if let Some(group) = app.layout.tabs(group_id) {
+                    let titles = group
+                        .tabs
+                        .iter()
+                        .map(|tab| tab.title.clone())
+                        .collect::<Vec<_>>();
+                    let geometry = super::tab_bar_geometry(item.rect, &titles, group.active, depth);
+                    super::render_tab_bar(
+                        frame,
+                        &geometry,
+                        &app.theme,
+                        app.selected_item == Some(item.id),
+                    );
+                }
+            }
+            DashboardRectKind::TabEmpty { .. } => frame.render_widget(
+                Line::styled(
+                    "  No supported panels in this tab",
+                    Style::default().fg(app.theme.text),
+                ),
+                item.rect,
+            ),
         }
     }
     app.rendered_annotation_cluster = selected_rendered_cluster;
@@ -170,8 +136,19 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
     } else {
         "↑/↓ navigate"
     };
+    let body_hint = if app.mode != AppMode::Search
+        && app.annotation_modal.is_none()
+        && super::panel_body_viewports(size, app).iter().any(|b| {
+            Some(b.index) == app.selected_panel_index()
+                && b.metrics.capacity > 0
+                && b.metrics.max_local_offset() > 0
+        }) {
+        "Ctrl+↑/↓ PgUp/PgDn Home/End body | "
+    } else {
+        ""
+    };
     let summary = format!(
-        "Mode: {}{} | Prom: {} | range={} step={:?} refresh={} | grid={} | panels={} (skipped {}) errors={} | keys: {navigation_hint}, r refresh, e export, Ctrl+E record, +/- range, q quit, ? debug:{}",
+        "{body_hint}Mode: {}{} | Prom: {} | range={} step={:?} refresh={} | grid={} | panels={} (skipped {}) errors={} | keys: {navigation_hint}, r refresh, e export, Ctrl+E record, +/- range, q quit, ? debug:{}",
         mode_display,
         if app.recording.is_some() { " REC" } else { "" },
         app.prometheus.base,

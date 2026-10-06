@@ -1,0 +1,254 @@
+{
+  "apiVersion": "dashboard.grafana.app/v2",
+  "kind": "Dashboard",
+  "metadata": {
+    "name": "autogrid-bounded"
+  },
+  "spec": {
+    "title": "AutoGrid bounded tables",
+    "elements": {
+      "A": {
+        "kind": "Panel",
+        "spec": {
+          "id": 1,
+          "title": "A",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "refId": "A",
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "spec": {
+                        "expr": "up",
+                        "instant": true,
+                        "legendFormat": "{{job}} {{instance}}"
+                      }
+                    }
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "table",
+            "version": "13.0.0",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {},
+                "overrides": []
+              },
+              "options": {}
+            }
+          }
+        }
+      },
+      "B": {
+        "kind": "Panel",
+        "spec": {
+          "id": 2,
+          "title": "B",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "refId": "A",
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "spec": {
+                        "expr": "scrape_duration_seconds",
+                        "instant": true,
+                        "legendFormat": "{{job}} {{instance}}"
+                      }
+                    }
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "table",
+            "version": "13.0.0",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {},
+                "overrides": []
+              },
+              "options": {}
+            }
+          }
+        }
+      },
+      "C": {
+        "kind": "Panel",
+        "spec": {
+          "id": 3,
+          "title": "C",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "refId": "A",
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "spec": {
+                        "expr": "up",
+                        "instant": true
+                      }
+                    }
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "stat",
+            "version": "13.0.0",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {},
+                "overrides": []
+              },
+              "options": {}
+            }
+          }
+        }
+      },
+      "D": {
+        "kind": "Panel",
+        "spec": {
+          "id": 4,
+          "title": "D",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "refId": "A",
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "spec": {
+                        "expr": "grafatui_missing_metric",
+                        "instant": true,
+                        "legendFormat": "{{job}} {{instance}}"
+                      }
+                    }
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "table",
+            "version": "13.0.0",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {},
+                "overrides": []
+              },
+              "options": {}
+            }
+          }
+        }
+      }
+    },
+    "layout": {
+      "kind": "AutoGridLayout",
+      "spec": {
+        "columnWidthMode": "standard",
+        "rowHeightMode": "standard",
+        "items": [
+          {
+            "kind": "AutoGridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "A"
+              }
+            }
+          },
+          {
+            "kind": "AutoGridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "B"
+              }
+            }
+          },
+          {
+            "kind": "AutoGridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "C"
+              }
+            }
+          },
+          {
+            "kind": "AutoGridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "D"
+              },
+              "fitContent": false
+            }
+          }
+        ],
+        "maxColumnCount": 3,
+        "fitContent": true,
+        "minHeightMode": "none",
+        "matchRowHeights": false,
+        "fillScreen": false,
+        "maxHeightMode": "short"
+      }
+    },
+    "variables": [],
+    "timeSettings": {
+      "from": "now-1h",
+      "to": "now",
+      "autoRefresh": "30s"
+    }
+  },
+  "status": {}
+}

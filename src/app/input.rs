@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+use super::panel_scroll::{BodyScrollAction, scroll_selected_body};
 use super::state::{AppMode, AppState, YAxisMode};
 use crate::annotations::AnnotationModal;
 use crate::dashboard::DashboardItemId;
@@ -61,6 +62,26 @@ pub(super) async fn handle_key(
     if key.code == KeyCode::Char('a') && key.modifiers.is_empty() && app.mode != AppMode::Search {
         app.annotations.toggle_visibility();
         return Ok(InputAction::Redraw);
+    }
+
+    if app.mode != AppMode::Search && key.modifiers == KeyModifiers::CONTROL {
+        let action = match key.code {
+            KeyCode::Up => Some(BodyScrollAction::Up),
+            KeyCode::Down => Some(BodyScrollAction::Down),
+            KeyCode::PageUp => Some(BodyScrollAction::PageUp),
+            KeyCode::PageDown => Some(BodyScrollAction::PageDown),
+            KeyCode::Home => Some(BodyScrollAction::Home),
+            KeyCode::End => Some(BodyScrollAction::End),
+            _ => None,
+        };
+        if let Some(action) = action {
+            scroll_selected_body(
+                Rect::new(0, 0, terminal_size.width, terminal_size.height),
+                app,
+                action,
+            );
+            return Ok(InputAction::Redraw);
+        }
     }
 
     let action = match app.mode {
@@ -129,6 +150,35 @@ pub(super) async fn handle_mouse(
 ) -> Result<InputAction> {
     if app.annotation_modal.is_some() {
         return Ok(InputAction::Redraw);
+    }
+
+    if app.mode != AppMode::Search
+        && mouse.modifiers.is_empty()
+        && matches!(
+            mouse.kind,
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+        )
+    {
+        let viewport = Rect::new(0, 0, terminal_size.width, terminal_size.height);
+        let owns = ui::panel_body_viewports(viewport, app)
+            .into_iter()
+            .any(|body| {
+                Some(body.index) == app.selected_panel_index()
+                    && body.metrics.capacity > 0
+                    && body.metrics.max_local_offset() > 0
+                    && body
+                        .body_rect
+                        .contains(ratatui::layout::Position::new(mouse.column, mouse.row))
+            });
+        if owns {
+            let action = if mouse.kind == MouseEventKind::ScrollUp {
+                BodyScrollAction::Up
+            } else {
+                BodyScrollAction::Down
+            };
+            scroll_selected_body(viewport, app, action);
+            return Ok(InputAction::Redraw);
+        }
     }
 
     match mouse.kind {

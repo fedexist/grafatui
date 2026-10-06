@@ -15,8 +15,9 @@
  */
 
 mod bar_gauge;
-mod content;
-pub(crate) use content::{measure_panel_content, prepare_table_rows, table_row_offset};
+pub(crate) mod content;
+pub(crate) use content::{measure_panel_content, prepare_table_rows};
+mod error_body;
 mod gauge;
 mod graph;
 mod heatmap;
@@ -42,6 +43,7 @@ pub(crate) struct PanelRenderContext {
     pub(crate) index: usize,
     pub(crate) content_fit: bool,
     pub(crate) body_offset: u64,
+    pub(crate) local_body_offset: u64,
 }
 
 /// Renders a single panel.
@@ -76,6 +78,24 @@ pub(crate) fn render_panel(
                 format!("{} — ERROR", p.title),
                 Style::default().fg(theme.title),
             ));
+        if context.content_fit {
+            frame.render_widget(block.clone(), area);
+            let inner = block.inner(area);
+            let window = error_body::error_body_window(
+                err,
+                inner.width,
+                context
+                    .body_offset
+                    .saturating_add(context.local_body_offset),
+                inner.height,
+            );
+            let lines = window.lines.into_iter().map(Line::from).collect::<Vec<_>>();
+            frame.render_widget(
+                Paragraph::new(lines).style(Style::default().fg(theme.text)),
+                inner,
+            );
+            return None;
+        }
         let para = Paragraph::new(err.clone())
             .block(block)
             .wrap(Wrap { trim: true })
@@ -132,3 +152,5 @@ pub(crate) fn render_panel(
         }
     }
 }
+
+pub(crate) use error_body::error_body_window;

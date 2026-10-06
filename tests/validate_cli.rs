@@ -47,7 +47,7 @@ fn auto_grid_validate_reports_unsupported_and_fractional_settings() {
     for (field, value, expected) in [
         (
             "maxHeightMode",
-            serde_json::json!("short"),
+            serde_json::json!("invalid"),
             "spec.layout.spec.maxHeightMode",
         ),
         (
@@ -381,7 +381,7 @@ fn fill_screen_validate_accepts_true_and_rejects_invalid_inactive() {
 }
 
 #[test]
-fn content_fit_validate_accepts_unbounded_and_rejects_maximum() {
+fn content_fit_validate_accepts_unbounded_and_finite_maximum() {
     let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("examples/dashboards/grafana_v2_autogrid_content_fit.json");
     let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
@@ -412,11 +412,26 @@ fn content_fit_validate_accepts_unbounded_and_rejects_maximum() {
             .output()
             .unwrap();
         fs::remove_file(path).unwrap();
-        assert_eq!(output.status.success(), !maximum);
-        if maximum {
-            assert!(
-                String::from_utf8_lossy(&output.stderr).contains("spec.layout.spec.maxHeightMode")
-            );
-        }
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
+}
+
+#[test]
+fn bounds_scroll_validate_accepts_bounded_example() {
+    let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+        .arg("--grafana-json")
+        .arg(example_dashboard("grafana_v2_autogrid_bounded.json"))
+        .arg("--validate")
+        .arg("--strict")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

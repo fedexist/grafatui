@@ -110,6 +110,36 @@ impl DashboardLayout {
         Self { items }
     }
 
+    pub(crate) fn auto_grid_settings_for_panel(
+        &self,
+        index: usize,
+    ) -> Option<(autogrid::AutoGridOptions, Option<bool>)> {
+        fn find(
+            items: &[DashboardLayoutItem],
+            index: usize,
+        ) -> Option<(autogrid::AutoGridOptions, Option<bool>)> {
+            for item in items {
+                let found = match item {
+                    DashboardLayoutItem::AutoGrid(group) => group
+                        .items
+                        .iter()
+                        .find(|p| p.index == index)
+                        .map(|p| (group.options, p.fit_content)),
+                    DashboardLayoutItem::Row(row) => find(&row.children, index),
+                    DashboardLayoutItem::Tabs(group) => {
+                        group.tabs.iter().find_map(|tab| find(&tab.children, index))
+                    }
+                    DashboardLayoutItem::Panel(_) => None,
+                };
+                if found.is_some() {
+                    return found;
+                }
+            }
+            None
+        }
+        find(&self.items, index)
+    }
+
     pub(crate) fn flat(panel_count: usize) -> Self {
         Self::new((0..panel_count).map(DashboardLayoutItem::Panel).collect())
     }
