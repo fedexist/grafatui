@@ -10,9 +10,8 @@ panels in the terminal.
 | V2 Resource YAML | 🔶 Partial | The same V2 subset, read from a `.yaml` or `.yml` file |
 | V1 Resource JSON | ❌ Unsupported | The `dashboard.grafana.app/v1` resource envelope is not accepted |
 
-`--grafana-json` (alias `--grafana-dashboard`) reads `.json` files as JSON and
-`.yaml`/`.yml` files as YAML. Files with any other extension are parsed as JSON
-first and then as YAML.
+`--grafana-json` reads `.yaml`/`.yml` files as YAML. `.json` files and files
+with any other extension are parsed strictly as JSON.
 
 The supported V2 subset maps inline `Panel` elements, Prometheus `PanelQuery`
 queries, top-level variables, `timeSettings.autoRefresh`, supported field

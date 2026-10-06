@@ -28,7 +28,6 @@ pub(crate) struct Config {
     pub(crate) time_range: Option<String>,
     pub(crate) step: Option<String>,
     pub(crate) theme: Option<String>,
-    #[serde(alias = "grafana_dashboard")]
     pub(crate) grafana_json: Option<PathBuf>,
     pub(crate) annotations_file: Option<PathBuf>,
     #[allow(dead_code)]
@@ -162,10 +161,10 @@ mod tests {
     }
 
     #[test]
-    fn grafana_dashboard_is_an_alias_for_grafana_json() {
+    fn grafana_dashboard_is_not_a_new_config_alias() {
         let config: Config = toml::from_str(r#"grafana_dashboard = "dash.yaml""#).unwrap();
 
-        assert_eq!(config.grafana_json, Some(PathBuf::from("dash.yaml")));
+        assert_eq!(config.grafana_json, None);
     }
 
     #[test]

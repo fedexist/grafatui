@@ -113,8 +113,6 @@ pub(crate) struct GridPos {
 enum DocumentFormat {
     Json,
     Yaml,
-    /// Unknown extension: try JSON first, then YAML.
-    Detect,
 }
 
 impl DocumentFormat {
@@ -125,9 +123,8 @@ impl DocumentFormat {
             .map(str::to_ascii_lowercase)
             .as_deref()
         {
-            Some("json") => Self::Json,
             Some("yaml" | "yml") => Self::Yaml,
-            _ => Self::Detect,
+            _ => Self::Json,
         }
     }
 }
@@ -140,11 +137,15 @@ pub(crate) fn load_grafana_dashboard(path: &std::path::Path) -> Result<Dashboard
 
 #[cfg(test)]
 fn parse_grafana_dashboard(data: &str) -> Result<DashboardImport> {
-    import_document(data, DocumentFormat::Detect)
+    import_document(data, DocumentFormat::Json)
 }
 
 fn import_document(data: &str, format: DocumentFormat) -> Result<DashboardImport> {
-    import::finish(detect_and_adapt(parse_document(data, format)?)?)
+    let value = parse_document(data, format)?;
+    if format == DocumentFormat::Yaml {
+        ensure_v2_yaml_resource(&value)?;
+    }
+    import::finish(detect_and_adapt(value)?)
 }
 
 /// Parses a dashboard document into JSON values.
@@ -157,13 +158,6 @@ fn parse_document(data: &str, format: DocumentFormat) -> Result<Value> {
             serde_json::from_str(data).context("parsing Grafana dashboard JSON")
         }
         DocumentFormat::Yaml => parse_yaml(data),
-        DocumentFormat::Detect => serde_json::from_str(data).or_else(|json_error| {
-            parse_yaml(data).map_err(|yaml_error| {
-                anyhow::anyhow!(
-                    "parsing Grafana dashboard: not valid JSON ({json_error}) or YAML ({yaml_error:#})"
-                )
-            })
-        }),
     }
 }
 
@@ -174,6 +168,22 @@ fn parse_yaml(data: &str) -> Result<Value> {
         "parsing Grafana dashboard YAML: expected a mapping at the document root"
     );
     Ok(value)
+}
+
+fn ensure_v2_yaml_resource(value: &Value) -> Result<()> {
+    match value.get("apiVersion") {
+        Some(Value::String(version)) if version == v2::V2_API_VERSION => Ok(()),
+        Some(Value::String(version)) => anyhow::bail!(
+            "unsupported Grafana YAML resource apiVersion `{version}` at apiVersion; supported YAML resource version is `{}`",
+            v2::V2_API_VERSION
+        ),
+        Some(_) => anyhow::bail!(
+            "invalid Grafana YAML resource apiVersion at apiVersion: expected a string"
+        ),
+        None => anyhow::bail!(
+            "invalid Grafana V2 YAML resource at apiVersion: missing required field `apiVersion`"
+        ),
+    }
 }
 
 fn detect_and_adapt(value: Value) -> Result<model::Dashboard> {
@@ -2020,9 +2030,10 @@ mod tests {
             "../tests/fixtures/grafana/v2_grafana13_export.json"
         ))
         .unwrap();
-        let yaml = parse_grafana_dashboard(include_str!(
-            "../tests/fixtures/grafana/v2_grafana13_export.yaml"
-        ))
+        let yaml = import_document(
+            include_str!("../tests/fixtures/grafana/v2_grafana13_export.yaml"),
+            DocumentFormat::Yaml,
+        )
         .unwrap();
 
         assert_eq!(yaml.title, json.title);
@@ -2032,7 +2043,11 @@ mod tests {
         assert_eq!(yaml.refresh_rate_ms, json.refresh_rate_ms);
         assert_eq!(yaml.diagnostics, json.diagnostics);
         let exprs = |import: &DashboardImport| -> Vec<Vec<String>> {
-            import.queries.iter().map(|query| query.exprs.clone()).collect()
+            import
+                .queries
+                .iter()
+                .map(|query| query.exprs.clone())
+                .collect()
         };
         assert_eq!(exprs(&yaml), exprs(&json));
     }
@@ -2044,8 +2059,8 @@ mod tests {
             ("dash.JSON", DocumentFormat::Json),
             ("dash.yaml", DocumentFormat::Yaml),
             ("dash.yml", DocumentFormat::Yaml),
-            ("dash", DocumentFormat::Detect),
-            ("dash.txt", DocumentFormat::Detect),
+            ("dash", DocumentFormat::Json),
+            ("dash.txt", DocumentFormat::Json),
         ] {
             assert_eq!(
                 DocumentFormat::from_path(std::path::Path::new(path)),
@@ -2057,22 +2072,53 @@ mod tests {
 
     #[test]
     fn json_files_report_json_errors_without_yaml_fallback() {
-        let error = parse_document("apiVersion: dashboard.grafana.app/v2\n", DocumentFormat::Json)
-            .unwrap_err();
+        let error = parse_document(
+            "apiVersion: dashboard.grafana.app/v2\n",
+            DocumentFormat::Json,
+        )
+        .unwrap_err();
         assert!(format!("{error:#}").contains("parsing Grafana dashboard JSON"));
     }
 
     #[test]
-    fn undetectable_documents_report_both_parse_errors() {
-        let error = parse_grafana_dashboard("{ not: [valid").unwrap_err().to_string();
-        assert!(error.contains("not valid JSON"), "{error}");
-        assert!(error.contains("or YAML"), "{error}");
+    fn unknown_extensions_remain_strict_json() {
+        let format = DocumentFormat::from_path(std::path::Path::new("dashboard.txt"));
+        let error = parse_document("apiVersion: dashboard.grafana.app/v2\n", format).unwrap_err();
+        let error = format!("{error:#}");
+        assert!(error.contains("parsing Grafana dashboard JSON"), "{error}");
+        assert!(!error.contains("or YAML"), "{error}");
     }
 
     #[test]
     fn yaml_documents_must_be_mappings() {
         let error = parse_document("- a\n- b\n", DocumentFormat::Yaml).unwrap_err();
         assert!(error.to_string().contains("expected a mapping"), "{error}");
+    }
+
+    #[test]
+    fn yaml_requires_exact_v2_resource() {
+        for (document, expected) in [
+            ("title: Classic dashboard\npanels: []\n", "apiVersion"),
+            (
+                "apiVersion: dashboard.grafana.app/v1\nkind: Dashboard\nspec: {}\n",
+                "dashboard.grafana.app/v1",
+            ),
+        ] {
+            let error = import_document(document, DocumentFormat::Yaml)
+                .expect_err(expected)
+                .to_string();
+            assert!(error.contains(expected), "expected {expected}, got {error}");
+        }
+    }
+
+    #[test]
+    fn yaml_rejects_multiple_documents() {
+        let error = parse_document(
+            "apiVersion: dashboard.grafana.app/v2\nkind: Dashboard\nspec: {}\n---\napiVersion: dashboard.grafana.app/v2\nkind: Dashboard\nspec: {}\n",
+            DocumentFormat::Yaml,
+        )
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("YAML"), "{error:#}");
     }
 
     #[test]
