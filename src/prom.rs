@@ -117,6 +117,69 @@ impl std::fmt::Display for ResponseTooLarge {
 
 impl std::error::Error for ResponseTooLarge {}
 
+/// Prometheus could not be reached, or the connection failed mid-response, as
+/// opposed to Prometheus answering with an error.
+#[derive(Debug)]
+struct TransportError(String);
+
+impl std::fmt::Display for TransportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for TransportError {}
+
+/// Prometheus answered with an error status.
+#[derive(Debug)]
+struct StatusError {
+    status: reqwest::StatusCode,
+    message: String,
+}
+
+impl std::fmt::Display for StatusError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "prometheus {}: {}", self.status, self.message)
+    }
+}
+
+impl std::error::Error for StatusError {}
+
+impl StatusError {
+    /// Uses the `errorType` and `error` of a Prometheus error body, falling
+    /// back to an excerpt of the body for proxies and other servers.
+    fn new(status: reqwest::StatusCode, body: &str) -> Self {
+        #[derive(Deserialize)]
+        struct ErrorBody {
+            #[serde(rename = "errorType")]
+            error_type: Option<String>,
+            error: Option<String>,
+        }
+        let message = match serde_json::from_str::<ErrorBody>(body) {
+            Ok(ErrorBody {
+                error_type,
+                error: Some(error),
+            }) => match error_type {
+                Some(error_type) => format!("{error_type}: {error}"),
+                None => error,
+            },
+            _ => excerpt(body),
+        };
+        Self { status, message }
+    }
+}
+
+/// Whether trying again could succeed: the connection failed, or Prometheus
+/// was overloaded or unavailable. A rejected query fails the same way again.
+fn is_retryable(error: &anyhow::Error) -> bool {
+    if error.is::<TransportError>() {
+        return true;
+    }
+    error.downcast_ref::<StatusError>().is_some_and(|error| {
+        error.status.is_server_error() || error.status == reqwest::StatusCode::TOO_MANY_REQUESTS
+    })
+}
+
 /// The start of a response body, for error messages.
 fn excerpt(text: &str) -> String {
     match text.char_indices().nth(ERROR_EXCERPT_CHARS) {
@@ -247,7 +310,7 @@ impl PromClient {
                     final_res = Ok(series);
                     break;
                 }
-                Err(e) if e.is::<ResponseTooLarge>() => {
+                Err(e) if !is_retryable(&e) => {
                     last_err = e;
                     break;
                 }
@@ -346,7 +409,7 @@ impl PromClient {
             .get(url)
             .send()
             .await
-            .map_err(|e| anyhow!("request failed: {}", e))?;
+            .map_err(|e| TransportError(format!("request failed: {e}")))?;
         let status = resp.status();
         let limit = self.max_response_bytes;
         let too_large = || anyhow::Error::new(ResponseTooLarge(limit));
@@ -360,7 +423,7 @@ impl PromClient {
         while let Some(chunk) = resp
             .chunk()
             .await
-            .map_err(|e| anyhow!("reading text: {}", e))?
+            .map_err(|e| TransportError(format!("reading text: {e}")))?
         {
             if body.len() + chunk.len() > limit {
                 return Err(too_large());
@@ -371,7 +434,7 @@ impl PromClient {
             .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned());
 
         if !status.is_success() {
-            return Err(anyhow!("prometheus {}: {}", status, excerpt(&text)));
+            return Err(StatusError::new(status, &text).into());
         }
 
         Ok(text)
@@ -555,21 +618,50 @@ mod tests {
         )
     }
 
+    /// Answers every request with `response`, counting the requests.
+    async fn counting_server(response: String) -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = Arc::clone(&requests);
+        tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut buffer = [0_u8; 4096];
+                let _ = socket.read(&mut buffer).await;
+                counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let _ = socket.write_all(response.as_bytes()).await;
+            }
+        });
+        (format!("http://{address}"), requests)
+    }
+
+    fn status_response(status: &str, body: &str) -> String {
+        format!(
+            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
     #[tokio::test]
     async fn a_dropped_query_does_not_strand_identical_queries() {
         let (url, _) = server(1, ok_response(EMPTY_MATRIX)).await;
         let client = PromClient::new(url);
         let step = Duration::from_secs(15);
 
-        let abandoned =
-            tokio::time::timeout(Duration::from_millis(200), client.query_range("up", 0, 60, step))
-                .await;
+        let abandoned = tokio::time::timeout(
+            Duration::from_millis(200),
+            client.query_range("up", 0, 60, step),
+        )
+        .await;
         assert!(abandoned.is_err(), "the stalled request should time out");
 
-        let retried =
-            tokio::time::timeout(Duration::from_secs(2), client.query_range("up", 0, 60, step))
-                .await
-                .expect("a later identical query must not wait on the dropped one");
+        let retried = tokio::time::timeout(
+            Duration::from_secs(2),
+            client.query_range("up", 0, 60, step),
+        )
+        .await
+        .expect("a later identical query must not wait on the dropped one");
         assert!(retried.unwrap().is_empty());
         assert!(lock(&client.inflight).is_empty());
     }
@@ -606,6 +698,82 @@ mod tests {
         assert!(lock(&client.inflight).is_empty());
     }
 
+    #[tokio::test]
+    async fn rejected_queries_are_not_retried() {
+        let body = r#"{"status":"error","errorType":"bad_data","error":"parse error at char 4"}"#;
+        let (url, requests) = counting_server(status_response("400 Bad Request", body)).await;
+
+        let error = PromClient::new(url)
+            .query_range("up{", 0, 60, Duration::from_secs(15))
+            .await
+            .unwrap_err();
+
+        assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(
+            error.to_string(),
+            "prometheus 400 Bad Request: bad_data: parse error at char 4"
+        );
+    }
+
+    #[tokio::test]
+    async fn too_many_requests_are_retried() {
+        let body = r#"{"status":"error","errorType":"unavailable","error":"slow down"}"#;
+        let (url, requests) = counting_server(status_response("429 Too Many Requests", body)).await;
+
+        PromClient::new(url)
+            .query_range("up", 0, 60, Duration::from_secs(15))
+            .await
+            .unwrap_err();
+
+        assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test]
+    async fn unavailable_prometheus_is_retried() {
+        let body = r#"{"status":"error","errorType":"unavailable","error":"too many queries"}"#;
+        let (url, requests) =
+            counting_server(status_response("503 Service Unavailable", body)).await;
+
+        PromClient::new(url)
+            .query_range("up", 0, 60, Duration::from_secs(15))
+            .await
+            .unwrap_err();
+
+        assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test]
+    async fn malformed_success_bodies_are_not_retried() {
+        let (url, requests) = counting_server(ok_response("not json")).await;
+
+        PromClient::new(url)
+            .query_range("up", 0, 60, Duration::from_secs(15))
+            .await
+            .unwrap_err();
+
+        assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn non_prometheus_error_bodies_keep_an_excerpt() {
+        let (url, requests) = counting_server(status_response(
+            "502 Bad Gateway",
+            "<html>bad gateway</html>",
+        ))
+        .await;
+
+        let error = PromClient::new(url)
+            .query_range("up", 0, 60, Duration::from_secs(15))
+            .await
+            .unwrap_err();
+
+        assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 4);
+        assert_eq!(
+            error.to_string(),
+            "prometheus 502 Bad Gateway: <html>bad gateway</html>"
+        );
+    }
+
     #[test]
     fn the_query_cache_keeps_only_recent_windows() {
         let mut cache = QueryCache::default();
@@ -627,7 +795,7 @@ mod tests {
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}"
         );
         for response in [ok_response(&body), streamed] {
-            let (url, _) = server(0, response).await;
+            let (url, requests) = counting_server(response).await;
             let mut client = PromClient::new(url);
             client.max_response_bytes = 1024;
 
@@ -637,6 +805,7 @@ mod tests {
                 .unwrap_err();
 
             assert!(error.to_string().contains("byte limit"), "{error}");
+            assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 1);
         }
     }
 
@@ -646,7 +815,10 @@ mod tests {
         let long = "é".repeat(ERROR_EXCERPT_CHARS + 10);
         let shown = excerpt(&long);
         assert!(shown.starts_with(&"é".repeat(ERROR_EXCERPT_CHARS)));
-        assert!(shown.ends_with(&format!("… ({} bytes)", long.len())), "{shown}");
+        assert!(
+            shown.ends_with(&format!("… ({} bytes)", long.len())),
+            "{shown}"
+        );
     }
 
     #[test]
