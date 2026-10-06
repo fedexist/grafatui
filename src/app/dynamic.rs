@@ -141,6 +141,144 @@ fn sync_container_state(items: &mut [DashboardLayoutItem], runtime: &DashboardLa
         }
     }
 }
+
+/// Own one reconciliation pass: consume surviving panels and remap runtime indices.
+struct InstanceBuilder<'a> {
+    dynamic: &'a mut DynamicDashboard,
+    state: &'a VariableState,
+    vars: &'a HashMap<String, String>,
+    range: std::time::Duration,
+    step: std::time::Duration,
+    old: HashMap<InstanceKey, (usize, PanelState, Option<bool>)>,
+    panels: Vec<PanelState>,
+    remap: HashMap<usize, usize>,
+}
+impl InstanceBuilder<'_> {
+    fn add(
+        &mut self,
+        template: usize,
+        binding: Option<(String, VariableOption)>,
+        occurrence: usize,
+    ) -> usize {
+        let key = InstanceKey {
+            template,
+            value: binding.as_ref().map(|(_, v)| v.value.clone()),
+            occurrence,
+        };
+        let index = self.panels.len();
+        let mut query_data = None;
+        let mut panel = if let Some((old_index, panel, data)) = self.old.remove(&key) {
+            query_data = data;
+            self.remap.insert(old_index, index);
+            panel
+        } else {
+            self.dynamic.templates[template].clone()
+        };
+        let scope = self.state.panel_scopes.get(template).copied().unwrap_or(0);
+        let mut texts = self.state.scope_values(scope, self.vars);
+        for (name, text) in &mut texts {
+            if let Some(v) = self.state.lookup(scope, name) {
+                if self.state.scopes[0]
+                    .variables
+                    .iter()
+                    .any(|root| std::ptr::eq(root, v))
+                    && self.state.overrides.contains_key(name)
+                {
+                    continue;
+                }
+                *text = if v.all {
+                    "All".into()
+                } else {
+                    v.texts.join(", ")
+                };
+            }
+        }
+        if let Some((name, value)) = &binding {
+            texts.insert(name.clone(), value.text.clone());
+        }
+        panel.title = expand_expr(
+            &self.dynamic.templates[template].title,
+            self.range,
+            self.step,
+            &texts,
+        );
+        self.dynamic.instances.push(Instance {
+            query_data,
+            key,
+            scope,
+            binding,
+        });
+        self.panels.push(panel);
+        index
+    }
+    fn bindings(&self, template: usize) -> Vec<Option<(String, VariableOption)>> {
+        let Some(name) = self
+            .dynamic
+            .behaviors
+            .get(&template)
+            .and_then(|b| b.repeat.as_ref())
+        else {
+            return vec![None];
+        };
+        let scope = self.state.panel_scopes.get(template).copied().unwrap_or(0);
+        if self
+            .state
+            .lookup(scope, name)
+            .is_some_and(|v| !v.repeatable)
+        {
+            return vec![None];
+        }
+        let mut values = self.state.repeat_values(scope, name).unwrap_or_else(|| {
+            vec![VariableOption {
+                value: String::new(),
+                text: String::new(),
+            }]
+        });
+        if values.is_empty() {
+            values.push(VariableOption {
+                value: String::new(),
+                text: if self.state.lookup(scope, name).is_some_and(|v| v.all) {
+                    "All".into()
+                } else {
+                    "None".into()
+                },
+            });
+        }
+        values
+            .into_iter()
+            .map(|v| Some((name.clone(), v)))
+            .collect()
+    }
+    fn materialize(&mut self, items: &mut [DashboardLayoutItem]) {
+        for item in items {
+            match item {
+                DashboardLayoutItem::Panel(index) => *index = self.add(*index, None, 0),
+                DashboardLayoutItem::AutoGrid(group) => {
+                    for template in std::mem::take(&mut group.items) {
+                        let mut occurrences = HashMap::new();
+                        for binding in self.bindings(template.index) {
+                            let value = binding.as_ref().map(|(_, v)| v.value.clone());
+                            let occurrence = occurrences.entry(value).or_insert(0);
+                            let index = self.add(template.index, binding, *occurrence);
+                            *occurrence += 1;
+                            group.items.push(AutoGridItem {
+                                index,
+                                fit_content: template.fit_content,
+                            });
+                        }
+                    }
+                }
+                DashboardLayoutItem::Row(row) => self.materialize(&mut row.children),
+                DashboardLayoutItem::Tabs(group) => {
+                    for tab in &mut group.tabs {
+                        self.materialize(&mut tab.children);
+                    }
+                }
+            }
+        }
+    }
+}
+
 impl AppState {
     pub(crate) fn active_variable_scopes(&self) -> HashSet<usize> {
         // Conditions hide instances, not their section variables. Use source templates
@@ -195,204 +333,27 @@ impl AppState {
             .collect();
         let old_selected = self.selected_item;
         let old_instances = std::mem::take(&mut dynamic.instances);
-        let mut old: HashMap<_, _> = old_instances
+        let old: HashMap<_, _> = old_instances
             .into_iter()
             .zip(std::mem::take(&mut self.panels))
             .enumerate()
             .map(|(index, (instance, panel))| (instance.key, (index, panel, instance.query_data)))
             .collect();
-        let mut panels = Vec::new();
-        let mut remap = HashMap::new();
         let mut layout = dynamic.layout.clone();
-        #[allow(clippy::too_many_arguments)]
-        fn materialize(
-            items: &mut [DashboardLayoutItem],
-            dynamic: &mut DynamicDashboard,
-            state: &VariableState,
-            vars: &HashMap<String, String>,
-            range: std::time::Duration,
-            step: std::time::Duration,
-            old: &mut HashMap<InstanceKey, (usize, PanelState, Option<bool>)>,
-            panels: &mut Vec<PanelState>,
-            remap: &mut HashMap<usize, usize>,
-        ) {
-            #[allow(clippy::too_many_arguments)]
-            fn add(
-                template: usize,
-                binding: Option<(String, VariableOption)>,
-                occurrence: usize,
-                dynamic: &mut DynamicDashboard,
-                state: &VariableState,
-                vars: &HashMap<String, String>,
-                range: std::time::Duration,
-                step: std::time::Duration,
-                old: &mut HashMap<InstanceKey, (usize, PanelState, Option<bool>)>,
-                panels: &mut Vec<PanelState>,
-                remap: &mut HashMap<usize, usize>,
-            ) -> usize {
-                let key = InstanceKey {
-                    template,
-                    value: binding.as_ref().map(|(_, v)| v.value.clone()),
-                    occurrence,
-                };
-                let index = panels.len();
-                let mut query_data = None;
-                let mut panel = if let Some((old_index, panel, data)) = old.remove(&key) {
-                    query_data = data;
-                    remap.insert(old_index, index);
-                    panel
-                } else {
-                    dynamic.templates[template].clone()
-                };
-                let scope = state.panel_scopes.get(template).copied().unwrap_or(0);
-                let mut texts = state.scope_values(scope, vars);
-                for name in texts.clone().keys() {
-                    if let Some(v) = state.lookup(scope, name) {
-                        if state.scopes[0]
-                            .variables
-                            .iter()
-                            .any(|root| std::ptr::eq(root, v))
-                            && state.overrides.contains_key(name)
-                        {
-                            continue;
-                        }
-                        texts.insert(
-                            name.clone(),
-                            if v.all {
-                                "All".into()
-                            } else {
-                                v.texts.join(", ")
-                            },
-                        );
-                    }
-                }
-                if let Some((name, value)) = &binding {
-                    texts.insert(name.clone(), value.text.clone());
-                }
-                panel.title = expand_expr(&dynamic.templates[template].title, range, step, &texts);
-                dynamic.instances.push(Instance {
-                    query_data,
-                    key,
-                    scope,
-                    binding,
-                });
-                panels.push(panel);
-                index
-            }
-            for item in items {
-                match item {
-                    DashboardLayoutItem::Panel(index) => {
-                        *index = add(
-                            *index, None, 0, dynamic, state, vars, range, step, old, panels, remap,
-                        );
-                    }
-                    DashboardLayoutItem::AutoGrid(group) => {
-                        let templates = std::mem::take(&mut group.items);
-                        for template in templates {
-                            let repeat = dynamic
-                                .behaviors
-                                .get(&template.index)
-                                .and_then(|b| b.repeat.clone());
-                            let scope =
-                                state.panel_scopes.get(template.index).copied().unwrap_or(0);
-                            let bindings: Vec<_> = match repeat {
-                                None => vec![None],
-                                Some(name) => match state.lookup(scope, &name) {
-                                    Some(v) if !v.repeatable => vec![None],
-                                    _ => {
-                                        let mut values = state
-                                            .repeat_values(scope, &name)
-                                            .unwrap_or_else(|| {
-                                                vec![VariableOption {
-                                                    value: String::new(),
-                                                    text: String::new(),
-                                                }]
-                                            });
-                                        if values.is_empty() {
-                                            values.push(VariableOption {
-                                                value: String::new(),
-                                                text: if state
-                                                    .lookup(scope, &name)
-                                                    .is_some_and(|v| v.all)
-                                                {
-                                                    "All".into()
-                                                } else {
-                                                    "None".into()
-                                                },
-                                            });
-                                        }
-                                        values
-                                            .into_iter()
-                                            .map(|v| Some((name.clone(), v)))
-                                            .collect()
-                                    }
-                                },
-                            };
-                            let mut occurrences = HashMap::new();
-                            for binding in bindings {
-                                let value = binding.as_ref().map(|(_, v)| v.value.clone());
-                                let occurrence = occurrences.entry(value).or_insert(0);
-                                let index = add(
-                                    template.index,
-                                    binding,
-                                    *occurrence,
-                                    dynamic,
-                                    state,
-                                    vars,
-                                    range,
-                                    step,
-                                    old,
-                                    panels,
-                                    remap,
-                                );
-                                *occurrence += 1;
-                                group.items.push(AutoGridItem {
-                                    index,
-                                    fit_content: template.fit_content,
-                                });
-                            }
-                        }
-                    }
-                    DashboardLayoutItem::Row(row) => materialize(
-                        &mut row.children,
-                        dynamic,
-                        state,
-                        vars,
-                        range,
-                        step,
-                        old,
-                        panels,
-                        remap,
-                    ),
-                    DashboardLayoutItem::Tabs(group) => {
-                        for tab in &mut group.tabs {
-                            materialize(
-                                &mut tab.children,
-                                dynamic,
-                                state,
-                                vars,
-                                range,
-                                step,
-                                old,
-                                panels,
-                                remap,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-        materialize(
-            &mut layout.items,
-            &mut dynamic,
-            &self.variable_state,
-            &self.vars,
-            self.range,
-            self.step,
-            &mut old,
-            &mut panels,
-            &mut remap,
-        );
+        let (panels, remap) = {
+            let mut builder = InstanceBuilder {
+                dynamic: &mut dynamic,
+                state: &self.variable_state,
+                vars: &self.vars,
+                range: self.range,
+                step: self.step,
+                old,
+                panels: Vec::new(),
+                remap: HashMap::new(),
+            };
+            builder.materialize(&mut layout.items);
+            (builder.panels, builder.remap)
+        };
         let map_item = |item| match item {
             DashboardItemId::Panel(index) => remap.get(&index).copied().map(DashboardItemId::Panel),
             other => Some(other),

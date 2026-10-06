@@ -34,6 +34,6 @@ pub(crate) use panels::{PanelRenderContext, calculate_y_bounds, measure_panel_co
 pub(crate) use tabs::{render_tab_bar, tab_at, tab_bar_geometry, tab_title};
 
 pub(crate) use layout::{panel_body_viewports, panel_render_context};
-pub(crate) use panels::content::{PanelBodyMetrics, panel_body_metrics, panel_body_window};
+pub(crate) use panels::content::{PanelBodyMetrics, panel_body_metrics, panel_body_offset};
 
 pub(crate) use panels::error_body_window;

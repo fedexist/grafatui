@@ -1155,13 +1155,12 @@ fn render_table_panel(
         ((rect.height - row_height) / row_height).floor().max(1.0) as usize
     };
     let offset = if context.content_fit {
-        ui::panel_body_window(
+        ui::panel_body_offset(
             values.len() as u64,
             context.body_offset,
             context.local_body_offset,
             max_rows.min(u16::MAX as usize) as u16,
-        )
-        .first as usize
+        ) as usize
     } else {
         0
     };

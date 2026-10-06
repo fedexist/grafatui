@@ -57,25 +57,15 @@ impl PanelBodyMetrics {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PanelBodyWindow {
-    pub(crate) first: u64,
-    pub(crate) length: u16,
-}
-
-pub(crate) fn panel_body_window(
+pub(crate) fn panel_body_offset(
     total: u64,
     document_offset: u64,
     local_offset: u64,
     capacity: u16,
-) -> PanelBodyWindow {
-    let first = document_offset
+) -> u64 {
+    document_offset
         .saturating_add(local_offset)
-        .min(total.saturating_sub(u64::from(capacity)));
-    PanelBodyWindow {
-        first,
-        length: total.saturating_sub(first).min(u64::from(capacity)) as u16,
-    }
+        .min(total.saturating_sub(u64::from(capacity)))
 }
 
 pub(crate) fn panel_body_metrics(
