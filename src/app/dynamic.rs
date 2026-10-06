@@ -120,7 +120,54 @@ impl DynamicDashboard {
         values
     }
 }
+fn sync_container_state(items: &mut [DashboardLayoutItem], runtime: &DashboardLayout) {
+    for item in items {
+        match item {
+            DashboardLayoutItem::Row(row) => {
+                if let Some(previous) = runtime.row(row.id) {
+                    row.collapsed = previous.collapsed;
+                }
+                sync_container_state(&mut row.children, runtime);
+            }
+            DashboardLayoutItem::Tabs(group) => {
+                if let Some(previous) = runtime.tabs(group.id) {
+                    group.active = previous.active;
+                }
+                for tab in &mut group.tabs {
+                    sync_container_state(&mut tab.children, runtime);
+                }
+            }
+            _ => {}
+        }
+    }
+}
 impl AppState {
+    pub(crate) fn active_variable_scopes(&self) -> HashSet<usize> {
+        // Conditions hide instances, not their section variables. Use source templates
+        // and current container state so an inactive tab cannot issue variable queries.
+        let mut layout = self
+            .dynamic
+            .as_ref()
+            .map_or_else(|| self.layout.clone(), |d| d.layout.clone());
+        sync_container_state(&mut layout.items, &self.layout);
+        let mut scopes = HashSet::from([0]);
+        for panel in layout.visible_panel_indices() {
+            let mut scope = self
+                .variable_state
+                .panel_scopes
+                .get(panel)
+                .copied()
+                .unwrap_or(0);
+            while scopes.insert(scope) {
+                match self.variable_state.scopes.get(scope).and_then(|s| s.parent) {
+                    Some(parent) => scope = parent,
+                    None => break,
+                }
+            }
+        }
+        scopes
+    }
+
     pub(crate) fn configure_dynamic(&mut self, behaviors: HashMap<usize, AutoGridBehavior>) {
         if behaviors.is_empty() {
             return;
@@ -139,28 +186,7 @@ impl AppState {
             return Vec::new();
         };
         // Container IDs remain static; copy their interactive state before rebuilding children.
-        fn sync(items: &mut [DashboardLayoutItem], runtime: &DashboardLayout) {
-            for item in items {
-                match item {
-                    DashboardLayoutItem::Row(row) => {
-                        if let Some(previous) = runtime.row(row.id) {
-                            row.collapsed = previous.collapsed;
-                        }
-                        sync(&mut row.children, runtime);
-                    }
-                    DashboardLayoutItem::Tabs(group) => {
-                        if let Some(previous) = runtime.tabs(group.id) {
-                            group.active = previous.active;
-                        }
-                        for tab in &mut group.tabs {
-                            sync(&mut tab.children, runtime);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        sync(&mut dynamic.layout.items, &self.layout);
+        sync_container_state(&mut dynamic.layout.items, &self.layout);
         let old_active: HashSet<_> = dynamic
             .expanded_layout
             .visible_panel_indices()
@@ -222,6 +248,14 @@ impl AppState {
                 let mut texts = state.scope_values(scope, vars);
                 for name in texts.clone().keys() {
                     if let Some(v) = state.lookup(scope, name) {
+                        if state.scopes[0]
+                            .variables
+                            .iter()
+                            .any(|root| std::ptr::eq(root, v))
+                            && state.overrides.contains_key(name)
+                        {
+                            continue;
+                        }
                         texts.insert(
                             name.clone(),
                             if v.all {

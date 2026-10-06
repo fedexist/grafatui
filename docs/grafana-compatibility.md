@@ -69,7 +69,7 @@ to keep it reachable. SVG/PNG snapshots and recordings use the same layout.
 | Layout/item `fitContent` | Boolean; layout default false, item omission inherits layout, explicit true/false overrides it. Tables fit visible rows or wrapped errors; other renderers retain baseline height |
 | `minHeightMode`, `minHeight` | Omission inherits row height; `none` removes the floor; `short`/`standard`/`tall` use 10/18/29 cells; `custom` requires positive finite pixels rounded upward |
 | `maxHeightMode`, `maxHeight` | Omitted/`unlimited` has no cap; `short`/`standard`/`tall` use 10/18/29 cells; `custom` requires positive finite pixels rounded upward. Only custom consumes `maxHeight` |
-| Item `repeat`, `conditionalRendering` | Field errors; deferred to later stages |
+| Item `repeat`, `conditionalRendering` | Selected-value repeats and scoped variable, data, and time-range conditions; detailed below |
 | Unknown settings | Emit `unsupported_autogrid_setting`; `--strict` rejects the warning |
 
 The logical scale is 10 pixels per column and 18 pixels per row, shared with
