@@ -13,7 +13,7 @@ use std::time::Duration;
 
 fn repeated_app(values: &[&str]) -> AppState {
     let mut panels = default_queries(vec![
-        "up{node=\"$node\",region=\"$region\"}".into(),
+        "up{node=\"$node\",region=\"$region\"}[$__interval]".into(),
         "up".into(),
     ]);
     panels[0].title = "Load $node".into();

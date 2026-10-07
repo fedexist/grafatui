@@ -24,6 +24,7 @@ mod variables;
 
 pub(crate) use data::{
     DEFAULT_SCRAPE_INTERVAL, default_queries, parse_duration, parse_min_interval,
+    resolve_step_policy,
 };
 pub(crate) use event_loop::run_app;
 #[allow(unused_imports)]

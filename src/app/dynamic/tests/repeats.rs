@@ -116,8 +116,8 @@ async fn repeat_queries_use_instance_values_without_leaking_to_dashboard() {
         queries,
         vec![
             "up",
-            "up{node=\"a\",region=\"west\"}",
-            "up{node=\"b\",region=\"west\"}"
+            "up{node=\"a\",region=\"west\"}[15s]",
+            "up{node=\"b\",region=\"west\"}[15s]"
         ]
     );
     assert_eq!(
