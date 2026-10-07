@@ -184,7 +184,9 @@ impl JsonlFileProvider {
 
         let file = tokio::fs::File::open(&self.path).await?;
         let mut bytes = Vec::new();
-        file.take(self.max_bytes + 1).read_to_end(&mut bytes).await?;
+        file.take(self.max_bytes + 1)
+            .read_to_end(&mut bytes)
+            .await?;
         if bytes.len() as u64 > self.max_bytes {
             return Ok(None);
         }
@@ -242,24 +244,22 @@ impl JsonlFileProvider {
                 self.last_seen = Some(fingerprint);
                 ProviderPoll::Failed(self.too_large())
             }
-            SourceFingerprint::Present { len, modified } => {
-                match self.read_limited().await {
-                    Ok(None) => {
-                        self.last_seen = Some(SourceFingerprint::Present { len, modified });
-                        ProviderPoll::Failed(self.too_large())
-                    }
-                    Ok(Some(input)) => {
-                        self.last_seen = Some(SourceFingerprint::Present { len, modified });
-                        match parse_jsonl(&self.path.display().to_string(), &input) {
-                            Ok(snapshot) => ProviderPoll::Loaded(snapshot),
-                            Err(error) => ProviderPoll::Failed(AnnotationProviderError::new(
-                                error.to_string(),
-                            )),
+            SourceFingerprint::Present { len, modified } => match self.read_limited().await {
+                Ok(None) => {
+                    self.last_seen = Some(SourceFingerprint::Present { len, modified });
+                    ProviderPoll::Failed(self.too_large())
+                }
+                Ok(Some(input)) => {
+                    self.last_seen = Some(SourceFingerprint::Present { len, modified });
+                    match parse_jsonl(&self.path.display().to_string(), &input) {
+                        Ok(snapshot) => ProviderPoll::Loaded(snapshot),
+                        Err(error) => {
+                            ProviderPoll::Failed(AnnotationProviderError::new(error.to_string()))
                         }
                     }
-                    Err(error) => ProviderPoll::Failed(self.io_error(error)),
                 }
-            }
+                Err(error) => ProviderPoll::Failed(self.io_error(error)),
+            },
         }
     }
 

@@ -368,7 +368,6 @@ fn append_cleanup(reason: String, cleanup: Result<(), String>) -> String {
     }
 }
 
-
 /// Gives the pipe tasks a moment to finish; dropping `tasks` then aborts any
 /// still running.
 async fn join_or_abort_tasks(mut tasks: ProcessTasks) {
@@ -582,9 +581,11 @@ mod tests {
             Duration::from_secs(30),
         );
 
-        let cancelled =
-            tokio::time::timeout(Duration::from_millis(300), provider.refresh(&fixed_context()))
-                .await;
+        let cancelled = tokio::time::timeout(
+            Duration::from_millis(300),
+            provider.refresh(&fixed_context()),
+        )
+        .await;
 
         assert!(cancelled.is_err(), "the refresh should still be running");
         assert_process_gone(&pid_file).await;
