@@ -56,6 +56,9 @@ struct RawPanel {
     #[serde(rename = "fieldConfig")]
     field_config: Option<RawFieldConfig>,
     options: Option<RawPanelOptions>,
+    interval: Option<String>,
+    #[serde(rename = "maxDataPoints")]
+    max_data_points: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -130,6 +133,7 @@ struct RawTarget {
     legend_format: Option<String>,
     instant: Option<bool>,
     hide: Option<bool>,
+    interval: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -333,6 +337,10 @@ fn normalize_classic_panel(
                 legend_format: target.legend_format,
                 instant: target.instant,
                 hidden: target.hide == Some(true),
+                min_interval: model::MinInterval::new(
+                    target.interval,
+                    format!("{source_path}.targets[{index}].interval"),
+                ),
             })
             .collect(),
         count_as_skipped_if_empty: false,
@@ -351,6 +359,8 @@ fn normalize_classic_panel(
             .is_some()
             .then(|| format!("{source_path}.options.reduceOptions")),
         transformations_path: None,
+        min_interval: model::MinInterval::new(panel.interval, format!("{source_path}.interval")),
+        max_data_points: model::max_data_points(panel.max_data_points.as_ref()),
     })
 }
 

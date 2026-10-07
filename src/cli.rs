@@ -33,11 +33,16 @@ pub(crate) struct Args {
     #[arg(long, value_name = "DURATION")]
     pub(crate) range: Option<String>,
 
-    /// Query step resolution (e.g., 5s, 30s, 1m) (default: 5s)
+    /// Finest query step; longer ranges use a coarser step (e.g., 5s, 30s, 1m) (default: 5s)
     #[arg(long, value_name = "DURATION")]
     pub(crate) step: Option<String>,
 
-    /// Grafana dashboard JSON file to import (e.g., ./dashboard.json)
+    /// Prometheus scrape interval, used for $__rate_interval (e.g., 15s, 1m) (default: 15s)
+    #[arg(long, value_name = "DURATION")]
+    pub(crate) scrape_interval: Option<String>,
+
+    /// Grafana dashboard file to import: Classic JSON, or V2 resource JSON or YAML
+    /// (e.g., ./dashboard.json, ./dashboard.yaml)
     #[arg(long, value_name = "FILE")]
     pub(crate) grafana_json: Option<PathBuf>,
 
@@ -175,6 +180,13 @@ mod tests {
 
         assert!(args.validate);
         assert_eq!(args.grafana_json, Some(PathBuf::from("dashboard.json")));
+    }
+
+    #[test]
+    fn grafana_dashboard_is_not_a_new_cli_alias() {
+        assert!(
+            Args::try_parse_from(["grafatui", "--grafana-dashboard", "dashboard.yaml"]).is_err()
+        );
     }
 
     #[test]

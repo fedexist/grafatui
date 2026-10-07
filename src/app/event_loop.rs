@@ -41,7 +41,13 @@ where
             needs_draw = false;
         }
 
-        let timeout = app.refresh_every.saturating_sub(app.last_refresh.elapsed());
+        // `event::poll` blocks this task, so it is kept short and the loop
+        // yields below; otherwise shutdown signals, which `main` selects on
+        // alongside this loop, would wait for the next refresh.
+        let timeout = app
+            .refresh_every
+            .saturating_sub(app.last_refresh.elapsed())
+            .min(MAX_INPUT_WAIT);
 
         if event::poll(timeout)? {
             let before_refresh = app.last_refresh;
@@ -69,13 +75,15 @@ where
                 }
                 InputAction::ExportCurrent => {
                     let viewport = terminal_viewport(terminal)?;
-                    export::export_current(app, viewport)?;
+                    let exported = export::export_current(app, viewport);
+                    report_export_error(app, "Export", exported);
                     needs_draw = true;
                     capture_recording_after_change(terminal, app)?;
                 }
                 InputAction::ToggleRecording => {
                     let viewport = terminal_viewport(terminal)?;
-                    export::toggle_recording(app, viewport)?;
+                    let toggled = export::toggle_recording(app, viewport);
+                    report_export_error(app, "Recording", toggled);
                     needs_draw = true;
                     capture_recording_after_change(terminal, app)?;
                 }
@@ -93,6 +101,7 @@ where
             needs_draw = true;
             capture_recording_after_change(terminal, app)?;
         }
+        tokio::task::yield_now().await;
     }
 }
 
@@ -108,6 +117,9 @@ fn reconcile_after_refresh(viewport: Rect, app: &mut AppState, before: std::time
     }
     super::panel_scroll::reconcile_panel_body_scroll(viewport, app);
 }
+
+/// Longest the event loop blocks waiting for input before yielding.
+const MAX_INPUT_WAIT: Duration = Duration::from_millis(250);
 
 fn terminal_viewport<B: ratatui::backend::Backend>(terminal: &Terminal<B>) -> Result<Rect>
 where
@@ -129,10 +141,22 @@ where
     }
 
     let viewport = terminal_viewport(terminal)?;
-    export::capture_recording_frame(app, viewport)
+    let captured = export::capture_recording_frame(app, viewport);
+    report_export_error(app, "Recording frame", captured);
+    Ok(())
 }
 
-fn finalize_recording_before_quit(app: &mut AppState) -> Result<()> {
+/// Shows a failed export or recording step in the status line instead of
+/// ending the session, so a full disk or a read-only directory is recoverable.
+fn report_export_error<T>(app: &mut AppState, action: &str, result: Result<T>) {
+    if let Err(error) = result {
+        app.export_status = Some(format!("{action} failed: {error:#}"));
+    }
+}
+
+/// Saves an active recording's manifest. It is a no-op without a recording, so
+/// it is safe to call on every exit path.
+pub(crate) fn finalize_recording_before_quit(app: &mut AppState) -> Result<()> {
     if app.recording.is_some() {
         export::stop_recording(app, RecordingCompletionReason::Quit)?;
     }
@@ -188,6 +212,7 @@ mod tests {
                 autogrid: None,
                 display: crate::ui::DisplayFormat::default(),
                 options: PanelOptions::Graph(GraphOptions::default()),
+                resolution: Default::default(),
             }],
             0,
             Theme::default(),
@@ -431,6 +456,47 @@ mod tests {
             assert!(app.panels[0].last_error.is_none());
         }
         server.await.unwrap();
+    }
+
+    #[test]
+    fn export_failures_are_reported_instead_of_ending_the_session() {
+        // A file where the export directory should be makes every write fail.
+        let blocker = test_export_dir("blocked");
+        fs::write(&blocker, "not a directory").unwrap();
+        let mut app = test_app(ExportOptions {
+            dir: blocker.clone(),
+            format: ExportFormat::Svg,
+            record_max_frames: 10,
+        });
+
+        let exported = export::export_current(&mut app, Rect::new(0, 0, 100, 40));
+        report_export_error(&mut app, "Export", exported);
+        let toggled = export::toggle_recording(&mut app, Rect::new(0, 0, 100, 40));
+        report_export_error(&mut app, "Recording", toggled);
+
+        let status = app.export_status.clone().unwrap();
+        assert!(status.starts_with("Recording failed: "), "{status}");
+        assert!(app.recording.is_none());
+        fs::remove_file(blocker).unwrap();
+    }
+
+    #[test]
+    fn finalizing_saves_an_active_recording_once() {
+        let dir = test_export_dir("finalize");
+        let mut app = test_app(ExportOptions {
+            dir: dir.clone(),
+            format: ExportFormat::Svg,
+            record_max_frames: 10,
+        });
+        export::toggle_recording(&mut app, Rect::new(0, 0, 100, 40)).unwrap();
+        let recording_dir = app.recording.as_ref().unwrap().dir.clone();
+
+        finalize_recording_before_quit(&mut app).unwrap();
+        finalize_recording_before_quit(&mut app).unwrap();
+
+        assert!(app.recording.is_none());
+        assert!(recording_dir.join("manifest.json").is_file());
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

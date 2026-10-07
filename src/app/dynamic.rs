@@ -1,5 +1,5 @@
 //! Materialize AutoGrid templates without tying instance identity to display order.
-use super::data::expand_expr;
+use super::data::{QueryIntervals, expand_expr};
 use crate::{
     app::{AppMode, AppState, PanelState},
     dashboard::{
@@ -148,7 +148,7 @@ struct InstanceBuilder<'a> {
     state: &'a VariableState,
     vars: &'a HashMap<String, String>,
     range: std::time::Duration,
-    step: std::time::Duration,
+    intervals: QueryIntervals,
     old: HashMap<InstanceKey, (usize, PanelState, Option<bool>)>,
     panels: Vec<PanelState>,
     remap: HashMap<usize, usize>,
@@ -199,7 +199,7 @@ impl InstanceBuilder<'_> {
         panel.title = expand_expr(
             &self.dynamic.templates[template].title,
             self.range,
-            self.step,
+            self.intervals,
             &texts,
         );
         self.dynamic.instances.push(Instance {
@@ -346,7 +346,7 @@ impl AppState {
                 state: &self.variable_state,
                 vars: &self.vars,
                 range: self.range,
-                step: self.step,
+                intervals: self.default_intervals(),
                 old,
                 panels: Vec::new(),
                 remap: HashMap::new(),

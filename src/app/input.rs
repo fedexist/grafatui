@@ -42,6 +42,11 @@ pub(super) async fn handle_key(
     terminal_size: Size,
     app: &mut AppState,
 ) -> Result<InputAction> {
+    // Raw mode delivers Ctrl+C as a key rather than SIGINT.
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        return Ok(InputAction::Quit);
+    }
+
     if key.code == KeyCode::Char('e') && key.modifiers.contains(KeyModifiers::CONTROL) {
         return Ok(InputAction::ToggleRecording);
     }
@@ -685,6 +690,7 @@ mod tests {
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
             options: PanelOptions::Graph(GraphOptions::default()),
+            resolution: Default::default(),
         }
     }
 
@@ -1291,6 +1297,26 @@ mod tests {
             .unwrap();
         assert_eq!(action, InputAction::ToggleRecording);
         assert!(app.annotation_modal.is_some());
+    }
+
+    #[tokio::test]
+    async fn ctrl_c_quits_from_every_mode() {
+        for mode in [
+            AppMode::Normal,
+            AppMode::Search,
+            AppMode::Inspect,
+            AppMode::Fullscreen,
+            AppMode::FullscreenInspect,
+        ] {
+            let mut app = test_app();
+            app.mode = mode;
+
+            let action = handle_key(ctrl_key(KeyCode::Char('c')), size(), &mut app)
+                .await
+                .unwrap();
+
+            assert_eq!(action, InputAction::Quit, "{mode:?}");
+        }
     }
 
     #[tokio::test]

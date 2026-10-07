@@ -42,7 +42,7 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
         "{} — range={} step={}  panels={}  {}(r to refresh, +/- range, [] pan, 0 live, q quit)",
         app.title,
         format_duration(app.range),
-        format_duration(app.step),
+        format_duration(app.default_intervals().step),
         normal_panel_count(app),
         if app.is_live() { "" } else { "⏸ PAUSED " }
     );
@@ -153,7 +153,7 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
         if app.recording.is_some() { " REC" } else { "" },
         app.prometheus.base,
         format_duration(app.range),
-        app.step,
+        app.default_intervals().step,
         format_duration(app.refresh_every),
         if app.autogrid_enabled { "on" } else { "off" },
         panel_count_display,
@@ -164,7 +164,14 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
 
     let detail = build_footer_detail(app);
 
-    let footer = Paragraph::new(format!("{}\n{}", summary, detail)).wrap(Wrap { trim: true });
+    // Statuses such as export results come first: the summary alone usually
+    // fills the two footer lines, which would hide them.
+    let text = if detail.is_empty() {
+        summary
+    } else {
+        format!("{detail}\n{summary}")
+    };
+    let footer = Paragraph::new(text).wrap(Wrap { trim: true });
     frame.render_widget(footer, chunks[2]);
 
     // Search Popup
@@ -338,7 +345,6 @@ mod tests {
         theme::Theme,
     };
     use ratatui::{Terminal, backend::TestBackend};
-
     fn test_app() -> AppState {
         AppState::new(
             PromClient::new("http://localhost:9090".to_string()),
@@ -373,6 +379,7 @@ mod tests {
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
             options: crate::app::PanelOptions::None,
+            resolution: Default::default(),
         }
     }
 
@@ -758,6 +765,7 @@ mod tests {
                     autogrid: panel.autogrid,
                     display: panel.display,
                     options: panel.options,
+                    resolution: panel.resolution,
                 }
             })
             .collect();
@@ -949,6 +957,22 @@ mod tests {
                     .fg,
                 app.theme.border
             );
+        }
+    }
+
+    #[test]
+    fn export_status_stays_visible_in_a_narrow_footer() {
+        let mut app = v2_compatibility_app();
+        app.export_status = Some("Export failed: disk full".to_string());
+        let selected = app.selected_item;
+        let mut terminal = Terminal::new(TestBackend::new(52, 12)).unwrap();
+
+        terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+
+        assert!(terminal_text(&terminal).contains("Export failed: disk full"));
+        assert_eq!(app.selected_item, selected);
+        if let Ok(path) = std::env::var("GRAFATUI_EXPORT_STATUS_CAPTURE") {
+            capture_buffer(&terminal, std::path::Path::new(&path));
         }
     }
 

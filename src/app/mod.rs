@@ -22,11 +22,14 @@ pub(crate) mod panel_scroll;
 mod state;
 mod variables;
 
-pub(crate) use data::{default_queries, parse_duration};
-pub(crate) use event_loop::run_app;
+pub(crate) use data::{
+    DEFAULT_SCRAPE_INTERVAL, default_queries, parse_duration, parse_min_interval,
+    resolve_step_policy,
+};
+pub(crate) use event_loop::{finalize_recording_before_quit, run_app};
 #[allow(unused_imports)]
 pub(crate) use state::{
     AppMode, AppState, GraphAxisPlacement, GraphDrawStyle, GraphOptions, GraphPointMode,
-    GraphStackingMode, GridUnit, PanelOptions, PanelState, PanelType, QueryMode, SeriesView,
-    ThresholdMode, ThresholdStep, Thresholds, YAxisMode,
+    GraphStackingMode, GridUnit, PanelOptions, PanelState, PanelType, QueryMode, QueryResolution,
+    SeriesView, ThresholdMode, ThresholdStep, Thresholds, YAxisMode,
 };
