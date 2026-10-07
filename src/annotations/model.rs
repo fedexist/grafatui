@@ -28,9 +28,15 @@ pub(crate) struct AnnotationSnapshot {
     events: Vec<AnnotationEvent>,
 }
 
+/// Most events a snapshot keeps; beyond it the oldest are dropped.
+pub(crate) const MAX_EVENTS: usize = 100_000;
+
 impl AnnotationSnapshot {
     pub(crate) fn new(mut events: Vec<AnnotationEvent>) -> Self {
         events.sort_by_key(|event| event.time);
+        if events.len() > MAX_EVENTS {
+            events.drain(..events.len() - MAX_EVENTS);
+        }
         Self { events }
     }
 

@@ -46,6 +46,60 @@ struct ProcessTasks {
     stderr: JoinHandle<io::Result<Vec<u8>>>,
 }
 
+/// Dropping the handles would detach the pipe tasks, so they are aborted
+/// instead, including when the refresh itself is cancelled.
+impl Drop for ProcessTasks {
+    fn drop(&mut self) {
+        self.stdin.abort();
+        self.stdout.abort();
+        self.stderr.abort();
+    }
+}
+
+/// The provider's process group. The provider runs as the leader of its own
+/// group on Unix, and dropping this kills every process left in the group, so
+/// processes the provider started cannot outlive the refresh, whether it
+/// completes, fails, times out, or is cancelled.
+///
+/// On other platforms only the direct child is killed, by `kill_on_drop`.
+struct ProcessGroup {
+    #[cfg(unix)]
+    leader: Option<nix::unistd::Pid>,
+}
+
+impl ProcessGroup {
+    fn led_by(child: &Child) -> Self {
+        #[cfg(unix)]
+        {
+            Self {
+                leader: child
+                    .id()
+                    .and_then(|id| i32::try_from(id).ok())
+                    .map(nix::unistd::Pid::from_raw),
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = child;
+            Self {}
+        }
+    }
+
+    fn kill(&self) {
+        #[cfg(unix)]
+        if let Some(leader) = self.leader {
+            // Fails harmlessly with ESRCH once the group is empty.
+            let _ = nix::sys::signal::killpg(leader, nix::sys::signal::Signal::SIGKILL);
+        }
+    }
+}
+
+impl Drop for ProcessGroup {
+    fn drop(&mut self) {
+        self.kill();
+    }
+}
+
 impl CommandProvider {
     pub(crate) fn new(config: AnnotationCommandConfig) -> Self {
         Self { config }
@@ -63,14 +117,19 @@ impl CommandProvider {
         context: &AnnotationRefreshContext,
     ) -> Result<AnnotationSnapshot, AnnotationProviderError> {
         let request = encode_request(context).map_err(|error| self.error(error))?;
-        let mut child = Command::new(&self.config.program)
+        let mut command = Command::new(&self.config.program);
+        command
             .args(&self.config.args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .kill_on_drop(true)
+            .kill_on_drop(true);
+        #[cfg(unix)]
+        command.process_group(0);
+        let mut child = command
             .spawn()
             .map_err(|error| self.error(format!("could not start: {error}")))?;
+        let group = ProcessGroup::led_by(&child);
 
         let stdin = child
             .stdin
@@ -98,13 +157,13 @@ impl CommandProvider {
         let outcome = match tokio::time::timeout(self.config.timeout, protocol).await {
             Ok(Ok(outcome)) => outcome,
             Ok(Err(reason)) => {
-                let cleanup = kill_and_reap(&mut child).await;
-                abort_tasks(tasks);
+                let cleanup = kill_and_reap(&mut child, &group).await;
+                drop(tasks);
                 return Err(self.error(append_cleanup(reason, cleanup)));
             }
             Err(_) => {
-                let cleanup = kill_and_reap(&mut child).await;
-                abort_tasks(tasks);
+                let cleanup = kill_and_reap(&mut child, &group).await;
+                drop(tasks);
                 let reason = format!(
                     "timed out after {}",
                     humantime::format_duration(self.config.timeout)
@@ -115,7 +174,7 @@ impl CommandProvider {
 
         match outcome {
             ProtocolOutcome::StdoutLimitExceeded => {
-                let cleanup = kill_and_reap(&mut child).await;
+                let cleanup = kill_and_reap(&mut child, &group).await;
                 join_or_abort_tasks(tasks).await;
                 Err(self.error(append_cleanup(
                     "exceeded 10 MiB stdout limit".to_string(),
@@ -134,8 +193,7 @@ impl CommandProvider {
                 Err(self.error(reason))
             }
             ProtocolOutcome::Complete(collected) => {
-                collected
-                    .stdin
+                request_delivered(collected.stdin)
                     .map_err(|error| self.error(format!("could not write request: {error}")))?;
                 let stdout = collected
                     .stdout
@@ -275,7 +333,21 @@ async fn collect_process(
     }))
 }
 
-async fn kill_and_reap(child: &mut Child) -> Result<(), String> {
+/// The outcome of writing the request to a provider that exited successfully.
+/// A provider may exit without reading the request, closing the pipe before
+/// it was written; its output still stands.
+fn request_delivered(result: io::Result<()>) -> io::Result<()> {
+    match result {
+        Err(error) if error.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        result => result,
+    }
+}
+
+/// Kills the provider's whole process group, then the child, and reaps it.
+/// The group is signalled first, while the unreaped leader still holds the
+/// group id.
+async fn kill_and_reap(child: &mut Child, group: &ProcessGroup) -> Result<(), String> {
+    group.kill();
     let kill_error = child.kill().await.err();
     let wait_error = child.wait().await.err();
     match (kill_error, wait_error) {
@@ -296,22 +368,15 @@ fn append_cleanup(reason: String, cleanup: Result<(), String>) -> String {
     }
 }
 
-fn abort_tasks(tasks: ProcessTasks) {
-    tasks.stdin.abort();
-    tasks.stdout.abort();
-    tasks.stderr.abort();
-}
-
+/// Gives the pipe tasks a moment to finish; dropping `tasks` then aborts any
+/// still running.
 async fn join_or_abort_tasks(mut tasks: ProcessTasks) {
-    let joined = tokio::time::timeout(Duration::from_millis(100), async {
+    let _ = tokio::time::timeout(Duration::from_millis(100), async {
         let _ = (&mut tasks.stdin).await;
         let _ = (&mut tasks.stdout).await;
         let _ = (&mut tasks.stderr).await;
     })
     .await;
-    if joined.is_err() {
-        abort_tasks(tasks);
-    }
 }
 
 impl AnnotationProvider for CommandProvider {
@@ -363,12 +428,14 @@ fn parse_stdout(
 #[cfg(test)]
 mod tests {
     use chrono::{DateTime, Utc};
+    use std::io;
     use std::path::{Path, PathBuf};
     use std::sync::OnceLock;
     use std::time::Duration;
 
     use super::{
         CommandProvider, MAX_STDERR_BYTES, MAX_STDOUT_BYTES, encode_request, parse_stdout,
+        request_delivered,
     };
     use crate::annotations::{
         AnnotationCommandConfig, AnnotationProvider, AnnotationRefreshContext, ProviderPoll,
@@ -422,6 +489,106 @@ mod tests {
                 .unwrap()
                 .with_timezone(&Utc),
         }
+    }
+
+    #[test]
+    fn unread_requests_do_not_fail_successful_providers() {
+        assert!(request_delivered(Ok(())).is_ok());
+        assert!(request_delivered(Err(io::ErrorKind::BrokenPipe.into())).is_ok());
+        assert!(request_delivered(Err(io::ErrorKind::PermissionDenied.into())).is_err());
+    }
+
+    /// A `sh -c` provider that records the pid of a background process it
+    /// starts in a temporary file.
+    #[cfg(unix)]
+    fn shell_provider(script: &str, timeout: Duration) -> (CommandProvider, std::path::PathBuf) {
+        let pid_file = std::env::temp_dir().join(format!(
+            "grafatui-provider-group-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let provider = CommandProvider::new(AnnotationCommandConfig {
+            program: "/bin/sh".to_string(),
+            args: vec![
+                "-c".to_string(),
+                script.replace("PID_FILE", &pid_file.to_string_lossy()),
+            ],
+            timeout,
+        });
+        (provider, pid_file)
+    }
+
+    /// Waits briefly for the process recorded in `pid_file` to disappear.
+    #[cfg(unix)]
+    async fn assert_process_gone(pid_file: &std::path::Path) {
+        let pid: i32 = std::fs::read_to_string(pid_file)
+            .expect("provider records its background pid")
+            .trim()
+            .parse()
+            .unwrap();
+        std::fs::remove_file(pid_file).unwrap();
+        let pid = nix::unistd::Pid::from_raw(pid);
+        for _ in 0..50 {
+            if nix::sys::signal::kill(pid, None) == Err(nix::errno::Errno::ESRCH) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let _ = nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGKILL);
+        panic!("provider background process {pid} outlived the refresh");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn timed_out_providers_take_their_background_processes_with_them() {
+        let (mut provider, pid_file) = shell_provider(
+            "sleep 30 & echo $! > PID_FILE; wait",
+            Duration::from_millis(300),
+        );
+
+        let ProviderPoll::Failed(error) = provider.refresh(&fixed_context()).await else {
+            panic!("expected a timeout");
+        };
+
+        assert!(error.to_string().contains("timed out"), "{error}");
+        assert_process_gone(&pid_file).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn successful_providers_leave_no_background_processes() {
+        let (mut provider, pid_file) = shell_provider(
+            "sleep 30 >/dev/null 2>&1 & echo $! > PID_FILE",
+            Duration::from_secs(5),
+        );
+
+        let ProviderPoll::Loaded(snapshot) = provider.refresh(&fixed_context()).await else {
+            panic!("expected an empty snapshot");
+        };
+
+        assert_eq!(snapshot.len(), 0);
+        assert_process_gone(&pid_file).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancelled_refreshes_kill_the_provider_group() {
+        let (mut provider, pid_file) = shell_provider(
+            "sleep 30 & echo $! > PID_FILE; wait",
+            Duration::from_secs(30),
+        );
+
+        let cancelled = tokio::time::timeout(
+            Duration::from_millis(300),
+            provider.refresh(&fixed_context()),
+        )
+        .await;
+
+        assert!(cancelled.is_err(), "the refresh should still be running");
+        assert_process_gone(&pid_file).await;
     }
 
     #[test]

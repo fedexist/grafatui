@@ -462,6 +462,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn state_retains_last_good_snapshot_after_oversized_replacement() {
+        let path = temp_path("state-oversized-replacement");
+        tokio::fs::write(
+            &path,
+            "{\"time\":\"2026-07-23T14:30:00Z\",\"text\":\"deploy\"}\n",
+        )
+        .await
+        .unwrap();
+        let mut state = AnnotationState::from_path(Some(path.clone()));
+        let context = refresh_context();
+
+        assert!(state.refresh(&context).await);
+        assert_eq!(state.snapshot().unwrap().events()[0].text, "deploy");
+
+        tokio::fs::write(&path, vec![b'x'; super::jsonl::MAX_FILE_BYTES as usize + 1])
+            .await
+            .unwrap();
+        assert!(!state.refresh(&context).await);
+        assert_eq!(state.snapshot().unwrap().events()[0].text, "deploy");
+        assert!(
+            state
+                .footer_status()
+                .unwrap()
+                .contains("using 1 previous event")
+        );
+
+        tokio::fs::remove_file(path).await.unwrap();
+    }
+
+    #[tokio::test]
     async fn disabled_state_has_no_source_work_or_visibility() {
         let mut state = AnnotationState::from_path(None);
         let context = refresh_context();

@@ -197,6 +197,48 @@ fn validate_accepts_supported_v2_resource_json() {
 }
 
 #[test]
+fn validate_accepts_grafana13_server_serialized_exports() {
+    for name in [
+        "v2_grafana13_export.json",
+        "v2_grafana13_external_export.json",
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+            .args(["--validate", "--format", "json", "--grafana-json"])
+            .arg(fixture(name))
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(summary["title"], "Grafatui native V2", "{name}");
+        assert_eq!(summary["panel_count"], 2, "{name}");
+        assert_eq!(summary["diagnostics"][0]["code"], "skipped_panel", "{name}");
+    }
+}
+
+#[test]
+fn validate_accepts_grafana13_yaml_export() {
+    let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+        .args(["--validate", "--format", "json", "--grafana-json"])
+        .arg(fixture("v2_grafana13_export.yaml"))
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summary["title"], "Grafatui native V2");
+    assert_eq!(summary["panel_count"], 2);
+}
+
+#[test]
 fn validate_accepts_live_grafana_v2_compatibility_example() {
     let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
         .args(["--validate", "--format", "json", "--grafana-json"])

@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#![forbid(unsafe_code)]
+
 mod annotations;
 mod app;
 mod config;
@@ -110,11 +112,16 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|| "5m".to_string());
     let range = app::parse_duration(&range_str).context("--range")?;
 
-    let step_str = args
-        .step
-        .or(config.step)
-        .unwrap_or_else(|| "5s".to_string());
-    let step = app::parse_duration(&step_str).context("--step")?;
+    let step_policy =
+        app::resolve_step_policy(args.step.as_deref(), config.step.as_deref()).context("--step")?;
+
+    let scrape_interval = match args.scrape_interval.or(config.scrape_interval) {
+        Some(text) => app::parse_duration(&text).context("--scrape-interval")?,
+        None => app::DEFAULT_SCRAPE_INTERVAL,
+    };
+    if scrape_interval.is_zero() {
+        bail!("--scrape-interval must be greater than zero");
+    }
 
     let export_dir = args
         .export_dir
@@ -187,6 +194,7 @@ async fn main() -> Result<()> {
                 autogrid: q.autogrid,
                 display: q.display,
                 options: q.options,
+                resolution: q.resolution,
             })
             .collect();
         (
@@ -227,7 +235,7 @@ async fn main() -> Result<()> {
     let mut state = app::AppState::new(
         prom,
         range,
-        step,
+        step_policy,
         refresh_every,
         title,
         panels,
@@ -243,24 +251,24 @@ async fn main() -> Result<()> {
     );
     apply_imported_layout(&mut state, imported_layout);
     state.annotations = annotations::AnnotationState::from_source(annotation_source);
+    state.scrape_interval = scrape_interval;
     state.autogrid_enabled = autogrid_enabled;
     state.autogrid_color = autogrid_color;
     state.vars = vars; // <— pass variables into the app
     state.query_vars = query_vars;
     state.variable_state = variable_state;
     state.configure_dynamic(auto_grid_behaviors);
-    state.refresh_initial().await?;
+    // Signals are handled from here on, so stopping during the first refresh,
+    // which may be waiting on an annotation provider, still cleans up.
+    let mut shutdown = ShutdownSignals::register();
+    tokio::select! {
+        res = state.refresh_initial() => res?,
+        () = shutdown.recv() => return Ok(()),
+    }
 
-    // Terminal setup
-    crossterm::terminal::enable_raw_mode()?;
-    let mut stdout = std::io::stdout();
-    execute!(
-        stdout,
-        EnterAlternateScreen,
-        crossterm::event::EnableMouseCapture
-    )?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+    install_terminal_panic_hook();
+    let guard = TerminalGuard::enter()?;
+    let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
 
     let res = tokio::select! {
         res = app::run_app(
@@ -268,19 +276,114 @@ async fn main() -> Result<()> {
             &mut state,
             Duration::from_millis(args.tick_rate),
         ) => res,
-        _ = tokio::signal::ctrl_c() => Ok(()),
+        () = shutdown.recv() => Ok(()),
     };
+    // Save a recording however the session ended; this is a no-op when the
+    // event loop already saved it on quit.
+    let finalized = app::finalize_recording_before_quit(&mut state);
 
-    // Restore terminal
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
+    drop(guard);
+    res.and(finalized)
+}
+
+/// Signals asking Grafatui to stop: SIGINT, and on Unix SIGTERM or SIGHUP (the
+/// terminal closing).
+///
+/// Handlers are installed when this is created, replacing the default action
+/// of killing the process outright. Stopping through `recv` instead drops the
+/// running refresh, so annotation provider processes are killed and the
+/// terminal is restored.
+struct ShutdownSignals {
+    #[cfg(unix)]
+    signals: Vec<tokio::signal::unix::Signal>,
+}
+
+impl ShutdownSignals {
+    fn register() -> Self {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            Self {
+                signals: [
+                    SignalKind::interrupt(),
+                    SignalKind::terminate(),
+                    SignalKind::hangup(),
+                ]
+                .into_iter()
+                .filter_map(|kind| signal(kind).ok())
+                .collect(),
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            Self {}
+        }
+    }
+
+    /// Resolves when any of the signals arrives. Cancel-safe.
+    async fn recv(&mut self) {
+        #[cfg(unix)]
+        {
+            let received = self
+                .signals
+                .iter_mut()
+                .map(|signal| Box::pin(signal.recv()));
+            if received.len() == 0 {
+                return std::future::pending().await;
+            }
+            futures::future::select_all(received).await;
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = tokio::signal::ctrl_c().await;
+        }
+    }
+}
+
+/// Raw mode, the alternate screen, and mouse capture, undone when dropped,
+/// including on early returns and while unwinding from a panic.
+struct TerminalGuard;
+
+impl TerminalGuard {
+    fn enter() -> Result<Self> {
+        crossterm::terminal::enable_raw_mode()?;
+        // From here on, dropping the guard restores the terminal.
+        let guard = Self;
+        execute!(
+            std::io::stdout(),
+            EnterAlternateScreen,
+            crossterm::event::EnableMouseCapture
+        )?;
+        Ok(guard)
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        restore_terminal();
+    }
+}
+
+/// Restores the terminal, continuing past individual failures so one failing
+/// step cannot leave the others undone.
+fn restore_terminal() {
+    let _ = disable_raw_mode();
+    let _ = execute!(
+        std::io::stdout(),
         LeaveAlternateScreen,
-        crossterm::event::DisableMouseCapture
-    )?;
-    terminal.show_cursor()?;
+        crossterm::event::DisableMouseCapture,
+        crossterm::cursor::Show
+    );
+}
 
-    res
+/// Restores the terminal before the default panic message is printed, so the
+/// message lands on the normal screen instead of the alternate one.
+fn install_terminal_panic_hook() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        restore_terminal();
+        previous(info);
+    }));
 }
 
 fn apply_imported_layout(
@@ -494,6 +597,37 @@ fn print_validation_summary(
 mod tests {
     use super::*;
     use crate::dashboard::{DashboardLayout, DashboardLayoutItem, DashboardRow, RowId};
+
+    #[test]
+    #[ignore = "requires a real PTY"]
+    fn terminal_guard_restores_after_application_error() {
+        assert!(!crossterm::terminal::is_raw_mode_enabled().unwrap());
+        let result: Result<()> = (|| {
+            let _guard = TerminalGuard::enter()?;
+            anyhow::bail!("controlled application error")
+        })();
+
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "controlled application error"
+        );
+        assert!(!crossterm::terminal::is_raw_mode_enabled().unwrap());
+    }
+
+    #[test]
+    #[ignore = "requires a real PTY"]
+    fn terminal_guard_restores_during_unwind() {
+        assert!(!crossterm::terminal::is_raw_mode_enabled().unwrap());
+        install_terminal_panic_hook();
+
+        let panic = std::panic::catch_unwind(|| {
+            let _guard = TerminalGuard::enter().unwrap();
+            panic!("controlled terminal panic");
+        });
+
+        assert!(panic.is_err());
+        assert!(!crossterm::terminal::is_raw_mode_enabled().unwrap());
+    }
 
     fn temp_config_path(name: &str) -> std::path::PathBuf {
         let suffix = std::time::SystemTime::now()

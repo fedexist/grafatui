@@ -14,7 +14,9 @@
  * limitations under the License.
  */
 
-use crate::app::data::{downsample, expand_expr, format_legend};
+use crate::app::data::{
+    QueryIntervals, StepPolicy, downsample, expand_expr, format_legend, parse_min_interval,
+};
 use crate::app::variables::refresh_query_variables;
 use crate::dashboard::{DashboardItemId, DashboardLayout, RowId, TabGroupId};
 use crate::export::{ExportOptions, RecordingState};
@@ -25,6 +27,7 @@ use crate::ui::DisplayFormat;
 use anyhow::Result;
 use futures::StreamExt;
 use ratatui::style::Color;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
@@ -65,6 +68,19 @@ pub(crate) struct PanelState {
     pub(crate) display: DisplayFormat,
     /// Renderer-specific presentation options.
     pub(crate) options: PanelOptions,
+    /// Grafana query options that set the range query step.
+    pub(crate) resolution: QueryResolution,
+}
+
+/// Grafana query options that set how finely a panel's range queries sample.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct QueryResolution {
+    /// Panel min interval (Grafana `interval`), which may reference a variable.
+    pub(crate) min_interval: Option<String>,
+    /// Panel `maxDataPoints`.
+    pub(crate) max_data_points: Option<u32>,
+    /// Per-target min step (`targets[].interval`). Parallel to exprs.
+    pub(crate) target_min_intervals: Vec<Option<String>>,
 }
 
 /// Visualization types supported by Grafatui.
@@ -210,6 +226,39 @@ impl PanelState {
             .unwrap_or(QueryMode::Range)
     }
 
+    /// Step and rate interval for the expression at `index`. A target's min
+    /// interval takes precedence over the panel's, and either replaces both the
+    /// dashboard minimum step and the scrape interval, as in Grafana.
+    pub(crate) fn query_intervals(
+        &self,
+        index: usize,
+        range: Duration,
+        step_policy: StepPolicy,
+        scrape_interval: Duration,
+        vars: &HashMap<String, String>,
+    ) -> QueryIntervals {
+        let parse = |text: &str| {
+            let text = super::variables::substitute_variables(text, |name| {
+                vars.get(name).map(|value| Cow::Borrowed(value.as_str()))
+            });
+            parse_min_interval(&text)
+        };
+        let resolution = &self.resolution;
+        let min_interval = resolution
+            .target_min_intervals
+            .get(index)
+            .and_then(Option::as_deref)
+            .and_then(parse)
+            .or_else(|| resolution.min_interval.as_deref().and_then(parse));
+        QueryIntervals::for_policy(
+            range,
+            step_policy,
+            scrape_interval,
+            min_interval,
+            resolution.max_data_points,
+        )
+    }
+
     pub(crate) fn get_color_for_value(&self, val: f64) -> Option<Color> {
         let thresholds = self.thresholds.as_ref()?;
 
@@ -281,8 +330,10 @@ pub(crate) struct AppState {
     pub(crate) annotation_modal: Option<crate::annotations::AnnotationModal>,
     /// Current time range window.
     pub(crate) range: Duration,
-    /// Query step resolution.
-    pub(crate) step: Duration,
+    /// Exact configured step, or automatic range-aware selection.
+    pub(crate) step_policy: StepPolicy,
+    /// Prometheus scrape interval, used for `$__rate_interval`.
+    pub(crate) scrape_interval: Duration,
     /// How often to refresh data.
     pub(crate) refresh_every: Duration,
     /// List of panels.
@@ -344,7 +395,7 @@ impl AppState {
     ///
     /// * `prometheus` - The Prometheus client.
     /// * `range` - The initial time range window.
-    /// * `step` - The query resolution step.
+    /// * `step_policy` - Exact configured step or automatic step selection.
     /// * `refresh_every` - The data refresh interval.
     /// * `title` - The dashboard title.
     /// * `panels` - The list of panels to display.
@@ -354,7 +405,7 @@ impl AppState {
     pub(crate) fn new(
         prometheus: prom::PromClient,
         range: Duration,
-        step: Duration,
+        step_policy: impl Into<StepPolicy>,
         refresh_every: Duration,
         title: String,
         panels: Vec<PanelState>,
@@ -371,7 +422,8 @@ impl AppState {
             rendered_annotation_cluster: None,
             annotation_modal: None,
             range,
-            step,
+            step_policy: step_policy.into(),
+            scrape_interval: crate::app::data::DEFAULT_SCRAPE_INTERVAL,
             refresh_every,
             panels,
             last_refresh: Instant::now() - refresh_every,
@@ -655,7 +707,7 @@ impl AppState {
         let (start_ts, end_ts) = self.time_bounds();
 
         if let Some(current_x) = self.cursor_x {
-            let step_secs = self.step.as_secs_f64();
+            let step_secs = self.default_intervals().step.as_secs_f64();
             let new_x = current_x + (direction as f64 * step_secs);
             self.cursor_x = Some(new_x.max(start_ts).min(end_ts));
         } else {
@@ -685,9 +737,22 @@ impl AppState {
         Ok(())
     }
 
+    /// Intervals for queries without panel query options, such as variables.
+    pub(crate) fn default_intervals(&self) -> QueryIntervals {
+        QueryIntervals::for_policy(
+            self.range,
+            self.step_policy,
+            self.scrape_interval,
+            None,
+            None,
+        )
+    }
+
     pub(crate) async fn refresh(&mut self) -> Result<()> {
         let range = self.range;
-        let step = self.step;
+        let step_policy = self.step_policy;
+        let scrape_interval = self.scrape_interval;
+        let default_intervals = self.default_intervals();
 
         // Calculate end timestamp: "now" minus time_offset
         let end_ts = chrono::Utc::now().timestamp() - self.time_offset.as_secs() as i64;
@@ -706,7 +771,7 @@ impl AppState {
                     &mut self.variable_state,
                     &active_scopes,
                     range,
-                    step,
+                    default_intervals,
                     end_ts,
                     &self.vars,
                 )
@@ -720,7 +785,8 @@ impl AppState {
                 &self.variable_state,
                 self.dynamic.as_mut(),
                 range,
-                step,
+                step_policy,
+                scrape_interval,
                 end_ts,
                 &mut self.vars,
                 &mut self.panels,
@@ -758,7 +824,8 @@ impl AppState {
 
     async fn refresh_panel_indices(&mut self, indices: &[usize], refresh_variables: bool) {
         let range = self.range;
-        let step = self.step;
+        let step_policy = self.step_policy;
+        let scrape_interval = self.scrape_interval;
         let end_ts = self.view_end_ts;
         if self.variable_state.has_variables() {
             let active_scopes = self.active_variable_scopes();
@@ -767,7 +834,7 @@ impl AppState {
                 &mut self.variable_state,
                 &active_scopes,
                 range,
-                step,
+                QueryIntervals::for_policy(range, step_policy, scrape_interval, None, None),
                 end_ts,
                 &self.vars,
             )
@@ -785,7 +852,8 @@ impl AppState {
             &self.variable_state,
             self.dynamic.as_mut(),
             range,
-            step,
+            step_policy,
+            scrape_interval,
             end_ts,
             &mut self.vars,
             &mut self.panels,
@@ -803,7 +871,8 @@ impl AppState {
         variable_state: &crate::dashboard::variables::VariableState,
         mut dynamic: Option<&mut super::dynamic::DynamicDashboard>,
         range: Duration,
-        step: Duration,
+        step_policy: StepPolicy,
+        scrape_interval: Duration,
         end_ts: i64,
         vars: &mut HashMap<String, String>,
         panels: &mut [PanelState],
@@ -811,11 +880,18 @@ impl AppState {
         refresh_variables: bool,
     ) {
         if refresh_variables && !variable_state.has_variables() {
-            let _ =
-                refresh_query_variables(prometheus, query_vars, range, step, end_ts, vars).await;
+            let _ = refresh_query_variables(
+                prometheus,
+                query_vars,
+                range,
+                QueryIntervals::for_policy(range, step_policy, scrape_interval, None, None),
+                end_ts,
+                vars,
+            )
+            .await;
         }
 
-        // Create a stream of futures for fetching panel data
+        // Create a stream of futures for fetching panel data.
         let indices = indices.iter().copied().collect::<HashSet<_>>();
         let work = panels
             .iter_mut()
@@ -838,8 +914,16 @@ impl AppState {
             .map(|(index, p, values)| async move {
                 (
                     index,
-                    Self::fetch_single_panel_data(prometheus, p, range, step, &values, end_ts)
-                        .await,
+                    Self::fetch_single_panel_data(
+                        prometheus,
+                        p,
+                        range,
+                        step_policy,
+                        scrape_interval,
+                        &values,
+                        end_ts,
+                    )
+                    .await,
                 )
             })
             .buffer_unordered(4);
@@ -861,7 +945,8 @@ impl AppState {
         prometheus: &prom::PromClient,
         p: &'a mut PanelState,
         range: Duration,
-        step: Duration,
+        step_policy: StepPolicy,
+        scrape_interval: Duration,
         vars: &HashMap<String, String>,
         end_ts: i64,
     ) -> (
@@ -877,7 +962,9 @@ impl AppState {
         let mut error = None;
 
         for (i, expr) in p.exprs.iter().enumerate() {
-            let expr_expanded = expand_expr(expr, range, step, vars);
+            let intervals = p.query_intervals(i, range, step_policy, scrape_interval, vars);
+            let step = intervals.step;
+            let expr_expanded = expand_expr(expr, range, intervals, vars);
             let legend_fmt = p.legends.get(i).and_then(|x| x.as_ref());
             let query_mode = p.query_mode(i);
 
@@ -1016,6 +1103,7 @@ mod tests {
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
             options: PanelOptions::None,
+            resolution: Default::default(),
         }
     }
 
@@ -1126,6 +1214,45 @@ mod tests {
         app.select_next_item();
 
         assert_eq!(app.selected_item, None);
+    }
+
+    /// Serves Prometheus API requests from `respond` until the test ends,
+    /// recording each request target.
+    async fn mock_prometheus(
+        respond: fn(&str) -> &'static str,
+    ) -> (String, Arc<std::sync::Mutex<Vec<String>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&requests);
+        tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let recorded = Arc::clone(&recorded);
+                tokio::spawn(async move {
+                    let mut request = Vec::new();
+                    let mut chunk = [0_u8; 1024];
+                    while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                        let read = socket.read(&mut chunk).await.unwrap();
+                        if read == 0 {
+                            return;
+                        }
+                        request.extend_from_slice(&chunk[..read]);
+                    }
+                    let request = String::from_utf8_lossy(&request);
+                    let target = request.split_whitespace().nth(1).unwrap_or("").to_string();
+                    let body = respond(&target);
+                    recorded.lock().unwrap().push(target);
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body,
+                    );
+                    socket.write_all(response.as_bytes()).await.unwrap();
+                });
+            }
+        });
+        (format!("http://{address}"), requests)
     }
 
     #[tokio::test]
@@ -1506,10 +1633,114 @@ mod tests {
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
             options: PanelOptions::None,
+            resolution: Default::default(),
         };
 
         assert_eq!(panel.query_mode(0), QueryMode::Instant);
         assert_eq!(panel.query_mode(1), QueryMode::Range);
+    }
+
+    fn range_panel(title: &str, exprs: &[&str]) -> PanelState {
+        let mut panel = test_panel(title, PanelType::Graph);
+        panel.exprs = exprs.iter().map(|expr| expr.to_string()).collect();
+        panel.legends = vec![None; exprs.len()];
+        panel.query_modes = vec![QueryMode::Range; exprs.len()];
+        panel
+    }
+
+    #[test]
+    fn target_min_interval_overrides_panel_minimum_in_automatic_mode() {
+        let mut panel = range_panel("Resolution", &["a", "b", "c"]);
+        panel.resolution = QueryResolution {
+            min_interval: Some(">2m".to_string()),
+            max_data_points: None,
+            target_min_intervals: vec![Some("30s".to_string()), None, Some("$step".to_string())],
+        };
+        let vars = HashMap::from([("step".to_string(), "10m".to_string())]);
+        let range = Duration::from_secs(3600);
+        let step_policy = super::StepPolicy::Automatic {
+            min_step: Duration::from_secs(5),
+        };
+        let scrape = Duration::from_secs(15);
+        let intervals = |index| panel.query_intervals(index, range, step_policy, scrape, &vars);
+
+        // The target's 30s also stands in for the scrape interval.
+        assert_eq!(intervals(0).step, Duration::from_secs(30));
+        assert_eq!(intervals(0).rate_interval, Duration::from_secs(120));
+        assert_eq!(intervals(1).step, Duration::from_secs(120));
+        assert_eq!(intervals(2).step, Duration::from_secs(600));
+
+        // An unresolved variable falls back to the panel minimum.
+        let intervals = panel.query_intervals(2, range, step_policy, scrape, &HashMap::new());
+        assert_eq!(intervals.step, Duration::from_secs(120));
+    }
+
+    #[test]
+    fn explicit_step_overrides_imported_minimums() {
+        let mut panel = range_panel("Resolution", &["a"]);
+        panel.resolution = QueryResolution {
+            min_interval: Some("2m".to_string()),
+            max_data_points: Some(10),
+            target_min_intervals: vec![Some("30s".to_string())],
+        };
+
+        let intervals = panel.query_intervals(
+            0,
+            Duration::from_secs(24 * 3600),
+            super::StepPolicy::Explicit(Duration::from_secs(7)),
+            Duration::from_secs(15),
+            &HashMap::new(),
+        );
+
+        assert_eq!(intervals.step, Duration::from_secs(7));
+    }
+
+    #[tokio::test]
+    async fn refresh_requests_steps_scaled_to_the_range() {
+        let (url, requests) = mock_prometheus(
+            |_| r#"{"status":"success","data":{"resultType":"matrix","result":[]}}"#,
+        )
+        .await;
+        let mut sparse = range_panel("Sparse", &["sparse"]);
+        sparse.resolution.max_data_points = Some(60);
+        let mut tuned = range_panel("Tuned", &["rate(tuned[$__rate_interval])"]);
+        tuned.resolution.target_min_intervals = vec![Some("10m".to_string())];
+        let mut app = AppState::new(
+            prom::PromClient::new(url),
+            Duration::from_secs(24 * 3600),
+            super::StepPolicy::Automatic {
+                min_step: Duration::from_secs(5),
+            },
+            Duration::from_millis(1000),
+            "Test".to_string(),
+            vec![range_panel("Default", &["default"]), sparse, tuned],
+            0,
+            Theme::default(),
+            "dashed".to_string(),
+            ExportOptions::default(),
+        );
+
+        app.refresh().await.unwrap();
+
+        let requests = requests.lock().unwrap().clone();
+        let step_for = |metric: &str| {
+            let request = requests
+                .iter()
+                .map(|request| urlencoding::decode(request).unwrap().into_owned())
+                .find(|request| request.contains(&format!("query={metric}")))
+                .unwrap_or_else(|| panic!("no request for {metric} in {requests:?}"));
+            let step = request.split("step=").nth(1).unwrap().to_string();
+            (request, step)
+        };
+        // 24h / 1000 points = 86.4s, rounded to 1m.
+        assert_eq!(step_for("default").1, "60s");
+        // 24h / 60 points = 24m, rounded to 20m.
+        assert_eq!(step_for("sparse").1, "1200s");
+        // The 10m min interval sets the step and max(10m + 10m, 4 * 10m).
+        let (request, step) = step_for("rate(tuned");
+        assert_eq!(step, "600s");
+        assert!(request.contains("rate(tuned[2400s])"), "{request}");
+        assert_eq!(app.default_intervals().step, Duration::from_secs(60));
     }
 
     #[test]
@@ -1544,6 +1775,7 @@ mod tests {
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
             options: PanelOptions::None,
+            resolution: Default::default(),
         };
 
         assert_eq!(panel.graph_options(), GraphOptions::default());

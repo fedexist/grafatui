@@ -42,6 +42,9 @@ grafatui \
   --annotations-command-arg=.
 ```
 
+Annotation files larger than 16 MiB are rejected with a warning, and at most
+100,000 events, the newest, are kept from either kind of source.
+
 File and command sources are mutually exclusive. A TOML configuration that
 sets both is rejected even if the CLI selects a source. A CLI file or command
 replaces the complete TOML annotation source; it never mixes a CLI program,
@@ -67,7 +70,11 @@ nonzero exit, invalid UTF-8 or JSONL, or oversized stdout keeps the last valid
 snapshot and shows a warning.
 
 The default timeout is 10 seconds. Grafatui accepts at most 10 MiB of stdout
-and captures at most 64 KiB of stderr. Providers inherit Grafatui's current
+and captures at most 64 KiB of stderr. A provider must finish its work before
+it exits: on Linux and macOS it runs in its own process group, and when the
+refresh ends (successfully, with an error or timeout, or because Grafatui
+quits) any processes it started are killed. On Windows only the provider
+process itself is stopped. Providers inherit Grafatui's current
 directory and environment. Put credentials in that environment or use standard
 credential tooling; never place secrets in dashboard JSON or command arguments.
 

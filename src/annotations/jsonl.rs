@@ -157,10 +157,14 @@ enum SourceFingerprint {
     },
 }
 
+/// Largest annotation file read; larger files are rejected with a warning.
+pub(crate) const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
+
 #[derive(Debug)]
 pub(crate) struct JsonlFileProvider {
     path: PathBuf,
     last_seen: Option<SourceFingerprint>,
+    max_bytes: u64,
 }
 
 impl JsonlFileProvider {
@@ -168,7 +172,41 @@ impl JsonlFileProvider {
         Self {
             path,
             last_seen: None,
+            max_bytes: MAX_FILE_BYTES,
         }
+    }
+
+    /// Reads the file, failing once it exceeds `max_bytes`. The limit applies
+    /// to what is read, not the size seen beforehand, so a file growing in the
+    /// meantime is still bounded.
+    async fn read_limited(&self) -> std::io::Result<Option<String>> {
+        use tokio::io::AsyncReadExt;
+
+        let file = tokio::fs::File::open(&self.path).await?;
+        let mut bytes = Vec::new();
+        file.take(self.max_bytes + 1)
+            .read_to_end(&mut bytes)
+            .await?;
+        if bytes.len() as u64 > self.max_bytes {
+            return Ok(None);
+        }
+        String::from_utf8(bytes)
+            .map(Some)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+    }
+
+    fn too_large(&self) -> AnnotationProviderError {
+        AnnotationProviderError::new(
+            AnnotationLoadError {
+                source: self.path.display().to_string(),
+                line: None,
+                reason: format!(
+                    "annotation file exceeds the {} MiB limit",
+                    self.max_bytes / (1024 * 1024)
+                ),
+            }
+            .to_string(),
+        )
     }
 
     async fn poll_file(&mut self) -> ProviderPoll {
@@ -202,20 +240,26 @@ impl JsonlFileProvider {
                     .to_string(),
                 ))
             }
-            SourceFingerprint::Present { len, modified } => {
-                match tokio::fs::read_to_string(&self.path).await {
-                    Ok(input) => {
-                        self.last_seen = Some(SourceFingerprint::Present { len, modified });
-                        match parse_jsonl(&self.path.display().to_string(), &input) {
-                            Ok(snapshot) => ProviderPoll::Loaded(snapshot),
-                            Err(error) => ProviderPoll::Failed(AnnotationProviderError::new(
-                                error.to_string(),
-                            )),
+            SourceFingerprint::Present { len, .. } if len > self.max_bytes => {
+                self.last_seen = Some(fingerprint);
+                ProviderPoll::Failed(self.too_large())
+            }
+            SourceFingerprint::Present { len, modified } => match self.read_limited().await {
+                Ok(None) => {
+                    self.last_seen = Some(SourceFingerprint::Present { len, modified });
+                    ProviderPoll::Failed(self.too_large())
+                }
+                Ok(Some(input)) => {
+                    self.last_seen = Some(SourceFingerprint::Present { len, modified });
+                    match parse_jsonl(&self.path.display().to_string(), &input) {
+                        Ok(snapshot) => ProviderPoll::Loaded(snapshot),
+                        Err(error) => {
+                            ProviderPoll::Failed(AnnotationProviderError::new(error.to_string()))
                         }
                     }
-                    Err(error) => ProviderPoll::Failed(self.io_error(error)),
                 }
-            }
+                Err(error) => ProviderPoll::Failed(self.io_error(error)),
+            },
         }
     }
 
@@ -388,6 +432,42 @@ mod tests {
         );
 
         tokio::fs::remove_file(path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn oversized_files_are_rejected_without_rereading() {
+        let path = temp_path("oversized");
+        std::fs::write(
+            &path,
+            r#"{"time":"2026-07-23T13:00:00Z","text":"too much"}"#,
+        )
+        .unwrap();
+        let mut provider = JsonlFileProvider::new(path.clone());
+        provider.max_bytes = 16;
+
+        let ProviderPoll::Failed(error) = provider.refresh(&refresh_context()).await else {
+            panic!("expected a size warning");
+        };
+        let unchanged = provider.refresh(&refresh_context()).await;
+
+        assert!(error.to_string().contains("limit"), "{error}");
+        assert!(matches!(unchanged, ProviderPoll::Unchanged));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn snapshots_keep_only_the_newest_events() {
+        use crate::annotations::model::{AnnotationSnapshot, MAX_EVENTS};
+
+        let events = (0..MAX_EVENTS + 3)
+            .rev()
+            .map(|second| crate::annotations::test_event_at(second as f64, "event"))
+            .collect();
+
+        let snapshot = AnnotationSnapshot::new(events);
+
+        assert_eq!(snapshot.len(), MAX_EVENTS);
+        assert_eq!(snapshot.events()[0].time.timestamp(), 3);
     }
 
     #[tokio::test]

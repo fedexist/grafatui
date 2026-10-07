@@ -27,6 +27,7 @@ pub(crate) struct Config {
     pub(crate) refresh_rate: Option<u64>,
     pub(crate) time_range: Option<String>,
     pub(crate) step: Option<String>,
+    pub(crate) scrape_interval: Option<String>,
     pub(crate) theme: Option<String>,
     pub(crate) grafana_json: Option<PathBuf>,
     pub(crate) annotations_file: Option<PathBuf>,
@@ -158,6 +159,13 @@ mod tests {
             config.annotations_command.unwrap().timeout,
             Duration::from_millis(750)
         );
+    }
+
+    #[test]
+    fn grafana_dashboard_is_not_a_new_config_alias() {
+        let config: Config = toml::from_str(r#"grafana_dashboard = "dash.yaml""#).unwrap();
+
+        assert_eq!(config.grafana_json, None);
     }
 
     #[test]

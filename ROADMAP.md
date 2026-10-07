@@ -8,7 +8,7 @@ oriented around two priorities:
 2. **User-visible product value** - parity work should make real dashboards
    easier to read, debug, and share.
 
-> **Current version**: 0.1.12 · **Status**: Active development, pre-1.0
+> **Current version**: 0.1.13 · **Status**: Active development, pre-1.0
 
 **Legend**:
 - 🟢 Low complexity · 🟡 Medium complexity · 🔴 High complexity
@@ -149,7 +149,7 @@ This is the main backlog, ordered by Grafana parity domain.
 |---|---|---|---|---|
 | **Hidden targets** | `targets[].hide` | Helper queries do not clutter imported panels | 🟢 | 🔜 |
 | **Instant query defaults** | Panel-specific fallback behavior when `targets[].instant` is omitted | Keeps summary panels fast while preserving range queries for charts | 🟢 | ✅ |
-| **Target interval** | `targets[].interval` / `intervalFactor` | Panel-specific resolution is respected | 🟡 | 📋 |
+| **Target interval** | `targets[].interval` / `intervalFactor` | Panel-specific resolution is respected; `interval` is supported, `intervalFactor` is not | 🟡 | ✅ |
 | **Target ref IDs** | `targets[].refId` | Better diagnostics and future transformation support | 🟢 | 📋 |
 | **Format handling** | `targets[].format` | Tables and heatmaps can choose more appropriate handling | 🟡 | 📋 |
 | **Exemplar awareness** | `targets[].exemplar` | Document ignored behavior or expose limited metadata later | 🔴 | 💡 |
@@ -209,21 +209,23 @@ with a clear import error rather than silently changing the dashboard.
 | **V2 Resource JSON compatibility** | `apiVersion: dashboard.grafana.app/v2` with a `GridLayout` | Imports Grafana 13's default JSON format without requiring a Classic export | 🔴 | ✅ |
 | **Rows layout** | `RowsLayout` and nested row layouts | Preserves dashboard grouping and collapsed sections | 🔴 | ✅ |
 | **Tabs layout** | `TabsLayout` and nested tabs | Preserves tabbed dashboard organization | 🔴 | ✅ |
-| **Auto-grid fundamentals** | Static `AutoGridLayout` | Responsive ordered placement, fixed heights, nested rows/tabs, navigation and exports | 🟡 | 🔶 Stage 1 implemented |
+| **Auto-grid fundamentals** | Static `AutoGridLayout` | Responsive ordered placement, fixed heights, nested rows/tabs, navigation and exports | 🟡 | ✅ Stage 1 implemented |
 | **Auto-grid viewport filling** | `fillScreen` | Minimum-preserving row growth, nested allocation, resize and exports | 🟢 | ✅ Stage 2 implemented |
 | **Auto-grid content fitting** | Table `fitContent`, minima and matching | Unbounded measured tables, item overrides, refresh reconciliation and shared export windows | 🟢 | ✅ Stage 3a implemented |
 | **Auto-grid bounded content** | Maximum heights, body scrolling and error fitting | Completes content sizing and capped content access | 🟢 | ✅ Stage 3b implemented |
-| **Repeat and dynamic layouts** | Layout and element `repeat` settings | Expands panels or groups from variable values | 🔴 | 📋 |
-| **Conditional rendering** | `conditionalRendering` on supported containers | Shows or hides content using v2 conditions | 🔴 | 📋 |
-| **Nested layout variables** | Variables scoped to rows and tabs | Preserves local variable scope in dynamic dashboards | 🔴 | 📋 |
+| **AutoGrid item repeats** | `AutoGridLayoutItem.repeat` | Expands panels from selected variable values with per-instance scope | 🔴 | ✅ |
+| **Repeated rows, tabs, and grids** | Container and fixed-grid repeat settings | Expands structural groups from variable values | 🔴 | 📋 |
+| **AutoGrid item conditions** | `AutoGridLayoutItem.conditionalRendering` | Shows or hides panels using variable, query-data, and time-range conditions | 🔴 | ✅ |
+| **Row/tab conditions** | Container `conditionalRendering` | Shows or hides structural groups using v2 conditions | 🔴 | 📋 |
+| **Nested layout variables** | Variables scoped to rows and tabs | Preserves local variable scope for descendant queries, AutoGrid item repeats, and predicates | 🔴 | 🔶 Partial |
 | **Library panel resolution** | `LibraryPanel` element references | Imports reusable panels by resolving their external definitions | 🔴 | 📋 |
-| **V2 Resource YAML** | YAML representation of the v2 resource | Supports Grafana's alternative as-code export format | 🟡 | 💡 |
+| **V2 Resource YAML** | YAML representation of the v2 resource | Supports Grafana's alternative as-code export format | 🟡 | ✅ |
 
-AutoGrid is developed in separate stages: (1) static fundamentals, (2)
-`fillScreen`, (3) content fitting/bounds/row matching/body scrolling, (4)
-variable options and scopes, (5) repeat, then (6) conditional rendering. Each
-stage has a focused PR and interaction/export coverage. Stages 1–3 do not mark
-full AutoGrid compatibility complete.
+AutoGrid stages 1–3 cover static sizing, `fillScreen`, and content
+fitting/bounds/row matching/body scrolling. Item repeats and item conditions
+use the supported nested variable scopes. Repeated structural containers and
+row/tab conditional rendering remain separate compatibility work, so this does
+not claim full V2 layout compatibility.
 
 ---
 
@@ -256,7 +258,7 @@ expectations.
 | Display names | Imported labels become clearer without changing queries | 🟢 | 📋 |
 | Legend display modes and placement | Dense dashboards need predictable legend behavior | 🟡 | 📋 |
 | Legend calculations | Adds useful table-like summaries without a new panel type | 🟡 | 📋 |
-| Target interval support | Respects panel-specific query resolution | 🟡 | 📋 |
+| Target interval support | Respects panel-specific query resolution | 🟡 | ✅ |
 
 ### v0.4 - Graph & Timeseries Fidelity
 

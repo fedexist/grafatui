@@ -97,6 +97,7 @@ pub(crate) struct QueryPanel {
     pub(crate) autogrid: Option<bool>,
     pub(crate) display: crate::ui::DisplayFormat,
     pub(crate) options: crate::app::PanelOptions,
+    pub(crate) resolution: crate::app::QueryResolution,
 }
 
 /// Grid position extracted from Grafana.
@@ -108,15 +109,82 @@ pub(crate) struct GridPos {
     pub(crate) h: i32,
 }
 
+/// Serialization of a dashboard file, chosen from its extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DocumentFormat {
+    Json,
+    Yaml,
+}
+
+impl DocumentFormat {
+    fn from_path(path: &std::path::Path) -> Self {
+        match path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("yaml" | "yml") => Self::Yaml,
+            _ => Self::Json,
+        }
+    }
+}
+
 pub(crate) fn load_grafana_dashboard(path: &std::path::Path) -> Result<DashboardImport> {
     let data = std::fs::read_to_string(path)
         .with_context(|| format!("reading grafana dashboard: {}", path.display()))?;
-    parse_grafana_dashboard(&data)
+    import_document(&data, DocumentFormat::from_path(path))
 }
 
+#[cfg(test)]
 fn parse_grafana_dashboard(data: &str) -> Result<DashboardImport> {
-    let value = serde_json::from_str(data).context("parsing Grafana dashboard JSON")?;
+    import_document(data, DocumentFormat::Json)
+}
+
+fn import_document(data: &str, format: DocumentFormat) -> Result<DashboardImport> {
+    let value = parse_document(data, format)?;
+    if format == DocumentFormat::Yaml {
+        ensure_v2_yaml_resource(&value)?;
+    }
     import::finish(detect_and_adapt(value)?)
+}
+
+/// Parses a dashboard document into JSON values.
+///
+/// Grafana exports Classic dashboards as JSON and V2 resources as JSON or YAML.
+/// Both formats feed the same importer, so YAML is converted to `serde_json::Value`.
+fn parse_document(data: &str, format: DocumentFormat) -> Result<Value> {
+    match format {
+        DocumentFormat::Json => {
+            serde_json::from_str(data).context("parsing Grafana dashboard JSON")
+        }
+        DocumentFormat::Yaml => parse_yaml(data),
+    }
+}
+
+fn parse_yaml(data: &str) -> Result<Value> {
+    let value: Value = serde_saphyr::from_str(data).context("parsing Grafana dashboard YAML")?;
+    anyhow::ensure!(
+        value.is_object(),
+        "parsing Grafana dashboard YAML: expected a mapping at the document root"
+    );
+    Ok(value)
+}
+
+fn ensure_v2_yaml_resource(value: &Value) -> Result<()> {
+    match value.get("apiVersion") {
+        Some(Value::String(version)) if version == v2::V2_API_VERSION => Ok(()),
+        Some(Value::String(version)) => anyhow::bail!(
+            "unsupported Grafana YAML resource apiVersion `{version}` at apiVersion; supported YAML resource version is `{}`",
+            v2::V2_API_VERSION
+        ),
+        Some(_) => anyhow::bail!(
+            "invalid Grafana YAML resource apiVersion at apiVersion: expected a string"
+        ),
+        None => anyhow::bail!(
+            "invalid Grafana V2 YAML resource at apiVersion: missing required field `apiVersion`"
+        ),
+    }
 }
 
 fn detect_and_adapt(value: Value) -> Result<model::Dashboard> {
@@ -365,6 +433,7 @@ mod tests {
                     legend_format: None,
                     instant: None,
                     hidden: false,
+                    min_interval: None,
                 })
                 .collect(),
             count_as_skipped_if_empty: false,
@@ -372,6 +441,8 @@ mod tests {
             field_defaults: None,
             reduce_options_path: None,
             transformations_path: None,
+            min_interval: None,
+            max_data_points: None,
         })
     }
 
@@ -747,7 +818,6 @@ mod tests {
                 "conditionalRendering",
                 serde_json::json!({"kind": "ConditionalRenderingGroup", "spec": {}}),
             ),
-            ("fillScreen", serde_json::json!(true)),
         ] {
             let error =
                 parse_grafana_dashboard(&v2_row_resource_with_field(field, value).to_string())
@@ -824,7 +894,10 @@ mod tests {
     fn v2_rows_accept_empty_deferred_fields() {
         for (field, value) in [
             ("variables", serde_json::json!([])),
+            ("variables", serde_json::Value::Null),
             ("fillScreen", serde_json::json!(false)),
+            ("fillScreen", serde_json::json!(true)),
+            ("title", serde_json::Value::Null),
         ] {
             let dashboard =
                 parse_grafana_dashboard(&v2_row_resource_with_field(field, value).to_string())
@@ -866,6 +939,52 @@ mod tests {
             let json = minimal_v2_with_layout(layout);
             let error = parse_grafana_dashboard(&json.to_string())
                 .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains(expected_path),
+                "expected {expected_path}, got {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn v2_layout_structural_containers_remain_required() {
+        let mut cases = Vec::new();
+
+        for value in [None, Some(serde_json::Value::Null)] {
+            let mut json = valid_v2_resource();
+            match value {
+                Some(value) => json["spec"]["elements"] = value,
+                None => {
+                    json["spec"].as_object_mut().unwrap().remove("elements");
+                }
+            }
+            cases.push((json, "spec.elements"));
+        }
+
+        for (kind, field, path) in [
+            ("GridLayout", "items", "spec.layout.spec.items"),
+            ("RowsLayout", "rows", "spec.layout.spec.rows"),
+            ("TabsLayout", "tabs", "spec.layout.spec.tabs"),
+        ] {
+            for value in [None, Some(serde_json::Value::Null)] {
+                let mut spec = serde_json::Map::new();
+                if let Some(value) = value {
+                    spec.insert(field.to_string(), value);
+                }
+                cases.push((
+                    minimal_v2_with_layout(serde_json::json!({
+                        "kind": kind,
+                        "spec": spec,
+                    })),
+                    path,
+                ));
+            }
+        }
+
+        for (json, expected_path) in cases {
+            let error = parse_grafana_dashboard(&json.to_string())
+                .expect_err(expected_path)
                 .to_string();
             assert!(
                 error.contains(expected_path),
@@ -1270,22 +1389,99 @@ mod tests {
         assert_eq!(v2.vars.get("region"), classic.vars.get("region"));
     }
 
+    /// Applies a named malformation to `v2_compatibility.json`'s only panel.
+    fn v2_compatibility_with_panel_case(case: &str) -> serde_json::Value {
+        let mut json: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/grafana/v2_compatibility.json"
+        ))
+        .unwrap();
+        let panel = &mut json["spec"]["elements"]["panel-1"]["spec"];
+        match case {
+            "missing_title" => {
+                panel.as_object_mut().unwrap().remove("title");
+            }
+            "wrong_title_type" => panel["title"] = serde_json::json!(1),
+            "missing_transformations" => {
+                panel["data"]["spec"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("transformations");
+            }
+            "wrong_transformations_type" => {
+                panel["data"]["spec"]["transformations"] = serde_json::json!({})
+            }
+            "missing_hidden" => {
+                panel["data"]["spec"]["queries"][0]["spec"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("hidden");
+            }
+            "wrong_hidden_type" => {
+                panel["data"]["spec"]["queries"][0]["spec"]["hidden"] = serde_json::json!("false")
+            }
+            "missing_data_query_group" => {
+                panel["data"]["spec"]["queries"][0]["spec"]["query"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("group");
+            }
+            "wrong_data_query_group_type" => {
+                panel["data"]["spec"]["queries"][0]["spec"]["query"]["group"] = serde_json::json!(1)
+            }
+            "missing_data_query_spec" => {
+                panel["data"]["spec"]["queries"][0]["spec"]["query"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("spec");
+            }
+            "wrong_data_query_spec_type" => {
+                panel["data"]["spec"]["queries"][0]["spec"]["query"]["spec"] = serde_json::json!([])
+            }
+            "missing_viz_group" => {
+                panel["vizConfig"].as_object_mut().unwrap().remove("group");
+            }
+            "wrong_viz_group_type" => panel["vizConfig"]["group"] = serde_json::json!(1),
+            "missing_viz_spec" => {
+                panel["vizConfig"].as_object_mut().unwrap().remove("spec");
+            }
+            "wrong_viz_spec_type" => panel["vizConfig"]["spec"] = serde_json::json!([]),
+            "missing_field_config" => {
+                panel["vizConfig"]["spec"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("fieldConfig");
+            }
+            "wrong_field_config_type" => {
+                panel["vizConfig"]["spec"]["fieldConfig"] = serde_json::json!([])
+            }
+            "missing_defaults" => {
+                panel["vizConfig"]["spec"]["fieldConfig"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("defaults");
+            }
+            "wrong_defaults_type" => {
+                panel["vizConfig"]["spec"]["fieldConfig"]["defaults"] = serde_json::json!([])
+            }
+            "missing_options" => {
+                panel["vizConfig"]["spec"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("options");
+            }
+            "wrong_options_type" => panel["vizConfig"]["spec"]["options"] = serde_json::json!([]),
+            _ => unreachable!(),
+        }
+        json
+    }
+
     #[test]
     fn rejects_malformed_required_v2_panel_fields_at_native_paths() {
         let cases = [
-            ("missing_title", "spec.elements[\"panel-1\"].spec.title"),
             ("wrong_title_type", "spec.elements[\"panel-1\"].spec.title"),
-            (
-                "missing_transformations",
-                "spec.elements[\"panel-1\"].spec.data.spec.transformations",
-            ),
             (
                 "wrong_transformations_type",
                 "spec.elements[\"panel-1\"].spec.data.spec.transformations",
-            ),
-            (
-                "missing_hidden",
-                "spec.elements[\"panel-1\"].spec.data.spec.queries[0].spec.hidden",
             ),
             (
                 "wrong_hidden_type",
@@ -1300,10 +1496,6 @@ mod tests {
                 "spec.elements[\"panel-1\"].spec.data.spec.queries[0].spec.query.group",
             ),
             (
-                "missing_data_query_spec",
-                "spec.elements[\"panel-1\"].spec.data.spec.queries[0].spec.query.spec",
-            ),
-            (
                 "wrong_data_query_spec_type",
                 "spec.elements[\"panel-1\"].spec.data.spec.queries[0].spec.query.spec",
             ),
@@ -1316,32 +1508,16 @@ mod tests {
                 "spec.elements[\"panel-1\"].spec.vizConfig.group",
             ),
             (
-                "missing_viz_spec",
-                "spec.elements[\"panel-1\"].spec.vizConfig.spec",
-            ),
-            (
                 "wrong_viz_spec_type",
                 "spec.elements[\"panel-1\"].spec.vizConfig.spec",
-            ),
-            (
-                "missing_field_config",
-                "spec.elements[\"panel-1\"].spec.vizConfig.spec.fieldConfig",
             ),
             (
                 "wrong_field_config_type",
                 "spec.elements[\"panel-1\"].spec.vizConfig.spec.fieldConfig",
             ),
             (
-                "missing_defaults",
-                "spec.elements[\"panel-1\"].spec.vizConfig.spec.fieldConfig.defaults",
-            ),
-            (
                 "wrong_defaults_type",
                 "spec.elements[\"panel-1\"].spec.vizConfig.spec.fieldConfig.defaults",
-            ),
-            (
-                "missing_options",
-                "spec.elements[\"panel-1\"].spec.vizConfig.spec.options",
             ),
             (
                 "wrong_options_type",
@@ -1350,93 +1526,7 @@ mod tests {
         ];
 
         for (case, expected_path) in cases {
-            let mut json: serde_json::Value = serde_json::from_str(include_str!(
-                "../tests/fixtures/grafana/v2_compatibility.json"
-            ))
-            .unwrap();
-            let panel = &mut json["spec"]["elements"]["panel-1"]["spec"];
-            match case {
-                "missing_title" => {
-                    panel.as_object_mut().unwrap().remove("title");
-                }
-                "wrong_title_type" => panel["title"] = serde_json::json!(1),
-                "missing_transformations" => {
-                    panel["data"]["spec"]
-                        .as_object_mut()
-                        .unwrap()
-                        .remove("transformations");
-                }
-                "wrong_transformations_type" => {
-                    panel["data"]["spec"]["transformations"] = serde_json::json!({})
-                }
-                "missing_hidden" => {
-                    panel["data"]["spec"]["queries"][0]["spec"]
-                        .as_object_mut()
-                        .unwrap()
-                        .remove("hidden");
-                }
-                "wrong_hidden_type" => {
-                    panel["data"]["spec"]["queries"][0]["spec"]["hidden"] =
-                        serde_json::json!("false")
-                }
-                "missing_data_query_group" => {
-                    panel["data"]["spec"]["queries"][0]["spec"]["query"]
-                        .as_object_mut()
-                        .unwrap()
-                        .remove("group");
-                }
-                "wrong_data_query_group_type" => {
-                    panel["data"]["spec"]["queries"][0]["spec"]["query"]["group"] =
-                        serde_json::json!(1)
-                }
-                "missing_data_query_spec" => {
-                    panel["data"]["spec"]["queries"][0]["spec"]["query"]
-                        .as_object_mut()
-                        .unwrap()
-                        .remove("spec");
-                }
-                "wrong_data_query_spec_type" => {
-                    panel["data"]["spec"]["queries"][0]["spec"]["query"]["spec"] =
-                        serde_json::json!([])
-                }
-                "missing_viz_group" => {
-                    panel["vizConfig"].as_object_mut().unwrap().remove("group");
-                }
-                "wrong_viz_group_type" => panel["vizConfig"]["group"] = serde_json::json!(1),
-                "missing_viz_spec" => {
-                    panel["vizConfig"].as_object_mut().unwrap().remove("spec");
-                }
-                "wrong_viz_spec_type" => panel["vizConfig"]["spec"] = serde_json::json!([]),
-                "missing_field_config" => {
-                    panel["vizConfig"]["spec"]
-                        .as_object_mut()
-                        .unwrap()
-                        .remove("fieldConfig");
-                }
-                "wrong_field_config_type" => {
-                    panel["vizConfig"]["spec"]["fieldConfig"] = serde_json::json!([])
-                }
-                "missing_defaults" => {
-                    panel["vizConfig"]["spec"]["fieldConfig"]
-                        .as_object_mut()
-                        .unwrap()
-                        .remove("defaults");
-                }
-                "wrong_defaults_type" => {
-                    panel["vizConfig"]["spec"]["fieldConfig"]["defaults"] = serde_json::json!([])
-                }
-                "missing_options" => {
-                    panel["vizConfig"]["spec"]
-                        .as_object_mut()
-                        .unwrap()
-                        .remove("options");
-                }
-                "wrong_options_type" => {
-                    panel["vizConfig"]["spec"]["options"] = serde_json::json!([])
-                }
-                _ => unreachable!(),
-            };
-
+            let json = v2_compatibility_with_panel_case(case);
             let error = parse_grafana_dashboard(&json.to_string())
                 .expect_err(case)
                 .to_string();
@@ -1448,11 +1538,56 @@ mod tests {
     }
 
     #[test]
-    fn rejects_malformed_required_v2_panel_id_and_links_at_native_paths() {
+    fn v2_panels_default_fields_that_real_exports_omit() {
+        for case in [
+            "missing_title",
+            "missing_transformations",
+            "missing_hidden",
+            "missing_data_query_spec",
+            "missing_viz_spec",
+            "missing_field_config",
+            "missing_defaults",
+            "missing_options",
+        ] {
+            let json = v2_compatibility_with_panel_case(case);
+            let dashboard = parse_grafana_dashboard(&json.to_string())
+                .unwrap_or_else(|error| panic!("{case}: {error:#}"));
+            assert_eq!(dashboard.layout.visible_panel_indices().len(), 1, "{case}");
+        }
+    }
+
+    #[test]
+    fn v2_panels_accept_absent_or_null_id_and_links() {
+        for (field, value) in [
+            ("id", None),
+            ("id", Some(serde_json::Value::Null)),
+            ("links", None),
+            ("links", Some(serde_json::Value::Null)),
+        ] {
+            let mut json: serde_json::Value = serde_json::from_str(include_str!(
+                "../tests/fixtures/grafana/v2_compatibility.json"
+            ))
+            .unwrap();
+            let panel = json["spec"]["elements"]["panel-1"]["spec"]
+                .as_object_mut()
+                .unwrap();
+            match value {
+                Some(value) => {
+                    panel.insert(field.to_string(), value);
+                }
+                None => {
+                    panel.remove(field);
+                }
+            }
+            parse_grafana_dashboard(&json.to_string())
+                .unwrap_or_else(|error| panic!("{field}: {error:#}"));
+        }
+    }
+
+    #[test]
+    fn rejects_malformed_v2_panel_id_and_links_at_native_paths() {
         for (case, expected_path) in [
-            ("missing_id", "spec.elements[\"panel-1\"].spec.id"),
             ("wrong_id_type", "spec.elements[\"panel-1\"].spec.id"),
-            ("missing_links", "spec.elements[\"panel-1\"].spec.links"),
             ("wrong_links_type", "spec.elements[\"panel-1\"].spec.links"),
         ] {
             let mut json: serde_json::Value = serde_json::from_str(include_str!(
@@ -1461,13 +1596,7 @@ mod tests {
             .unwrap();
             let panel = &mut json["spec"]["elements"]["panel-1"]["spec"];
             match case {
-                "missing_id" => {
-                    panel.as_object_mut().unwrap().remove("id");
-                }
                 "wrong_id_type" => panel["id"] = serde_json::json!("1"),
-                "missing_links" => {
-                    panel.as_object_mut().unwrap().remove("links");
-                }
                 "wrong_links_type" => panel["links"] = serde_json::json!({}),
                 _ => unreachable!(),
             }
@@ -1520,7 +1649,91 @@ mod tests {
                 dashboard.diagnostics[0].path,
                 format!("spec.elements[{name:?}]")
             );
+            assert_eq!(
+                dashboard.diagnostics[0]
+                    .message
+                    .contains("Share dashboard with another instance"),
+                kind == "LibraryPanel",
+                "{kind}: {}",
+                dashboard.diagnostics[0].message
+            );
         }
+    }
+
+    #[test]
+    fn v2_prometheus_compatible_datasource_groups_import_as_prometheus() {
+        for group in [
+            "grafana-amazonprometheus-datasource",
+            "grafana-azureprometheus-datasource",
+        ] {
+            let mut json = valid_v2_resource();
+            make_v2_panel_importable(&mut json);
+            let query =
+                &mut json["spec"]["elements"]["panel-1"]["spec"]["data"]["spec"]["queries"][0];
+            query["spec"]["query"]["group"] = group.into();
+
+            let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+
+            assert_eq!(dashboard.queries.len(), 1, "{group}");
+            assert!(dashboard.diagnostics.is_empty(), "{group}");
+        }
+    }
+
+    /// `v2_grafana13_export.json` is a dashboard authored through Grafana 13.2.3's
+    /// `dashboard.grafana.app/v2` API and read back unchanged apart from dropping
+    /// `status`, so it carries the server's real serialization: unset slices are
+    /// `null`, `vizConfig.version` is empty, and the query-less text panel's query
+    /// group has an empty `kind`.
+    #[test]
+    fn v2_grafana13_export_imports_server_serialized_nulls() {
+        let dashboard = parse_grafana_dashboard(include_str!(
+            "../tests/fixtures/grafana/v2_grafana13_export.json"
+        ))
+        .unwrap();
+
+        assert_eq!(dashboard.title, "Grafatui native V2");
+        assert_eq!(dashboard.refresh_rate_ms, Some(30_000));
+        let titles: Vec<_> = dashboard.queries.iter().map(|q| q.title.as_str()).collect();
+        assert_eq!(titles, ["Scrape duration", "Targets up"]);
+        assert_eq!(
+            dashboard.queries[1].query_modes,
+            [crate::app::QueryMode::Instant]
+        );
+        assert_eq!(
+            dashboard.vars.get("job").map(String::as_str),
+            Some("prometheus")
+        );
+        assert_eq!(
+            dashboard.vars.get("quantile").map(String::as_str),
+            Some("0.9")
+        );
+        assert_eq!(dashboard.query_vars.len(), 1);
+        assert_eq!(dashboard.skipped_panels, 1);
+        assert_eq!(dashboard.diagnostics.len(), 1);
+        assert_eq!(dashboard.diagnostics[0].code, "skipped_panel");
+        assert_eq!(dashboard.diagnostics[0].path, "spec.elements[\"panel-3\"]");
+    }
+
+    /// `v2_grafana13_external_export.json` applies Grafana's "Share dashboard with
+    /// another instance" rules to the export above: query datasources are replaced
+    /// by export labels and query variable selections are cleared.
+    #[test]
+    fn v2_grafana13_external_export_resolves_variables_dynamically() {
+        let dashboard = parse_grafana_dashboard(include_str!(
+            "../tests/fixtures/grafana/v2_grafana13_external_export.json"
+        ))
+        .unwrap();
+
+        assert_eq!(dashboard.queries.len(), 2);
+        assert!(!dashboard.vars.contains_key("job"));
+        assert_eq!(
+            dashboard.vars.get("quantile").map(String::as_str),
+            Some("0.9")
+        );
+        assert_eq!(dashboard.query_vars.len(), 1);
+        assert_eq!(dashboard.query_vars[0].name, "job");
+        assert_eq!(dashboard.query_vars[0].query, "label_values(up, job)");
+        assert_eq!(dashboard.diagnostics.len(), 1);
     }
 
     #[test]
@@ -1813,14 +2026,103 @@ mod tests {
         );
     }
 
+    /// `v2_grafana13_export.yaml` is `v2_grafana13_export.json` re-serialized as
+    /// YAML, the other format Grafana's "Export as code" offers for V2 resources.
     #[test]
-    fn rejects_yaml_input() {
-        let error = parse_grafana_dashboard(
-            "apiVersion: dashboard.grafana.app/v2\\nkind: Dashboard\\nspec: {}\\n",
+    fn v2_yaml_resource_imports_like_its_json_equivalent() {
+        let json = parse_grafana_dashboard(include_str!(
+            "../tests/fixtures/grafana/v2_grafana13_export.json"
+        ))
+        .unwrap();
+        let yaml = import_document(
+            include_str!("../tests/fixtures/grafana/v2_grafana13_export.yaml"),
+            DocumentFormat::Yaml,
         )
-        .unwrap_err()
-        .to_string();
-        assert!(error.contains("parsing Grafana dashboard JSON"));
+        .unwrap();
+
+        assert_eq!(yaml.title, json.title);
+        assert_eq!(yaml.layout, json.layout);
+        assert_eq!(yaml.vars, json.vars);
+        assert_eq!(yaml.query_vars, json.query_vars);
+        assert_eq!(yaml.refresh_rate_ms, json.refresh_rate_ms);
+        assert_eq!(yaml.diagnostics, json.diagnostics);
+        let exprs = |import: &DashboardImport| -> Vec<Vec<String>> {
+            import
+                .queries
+                .iter()
+                .map(|query| query.exprs.clone())
+                .collect()
+        };
+        assert_eq!(exprs(&yaml), exprs(&json));
+    }
+
+    #[test]
+    fn document_format_follows_file_extension() {
+        for (path, format) in [
+            ("dash.json", DocumentFormat::Json),
+            ("dash.JSON", DocumentFormat::Json),
+            ("dash.yaml", DocumentFormat::Yaml),
+            ("dash.yml", DocumentFormat::Yaml),
+            ("dash", DocumentFormat::Json),
+            ("dash.txt", DocumentFormat::Json),
+        ] {
+            assert_eq!(
+                DocumentFormat::from_path(std::path::Path::new(path)),
+                format,
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn json_files_report_json_errors_without_yaml_fallback() {
+        let error = parse_document(
+            "apiVersion: dashboard.grafana.app/v2\n",
+            DocumentFormat::Json,
+        )
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("parsing Grafana dashboard JSON"));
+    }
+
+    #[test]
+    fn unknown_extensions_remain_strict_json() {
+        let format = DocumentFormat::from_path(std::path::Path::new("dashboard.txt"));
+        let error = parse_document("apiVersion: dashboard.grafana.app/v2\n", format).unwrap_err();
+        let error = format!("{error:#}");
+        assert!(error.contains("parsing Grafana dashboard JSON"), "{error}");
+        assert!(!error.contains("or YAML"), "{error}");
+    }
+
+    #[test]
+    fn yaml_documents_must_be_mappings() {
+        let error = parse_document("- a\n- b\n", DocumentFormat::Yaml).unwrap_err();
+        assert!(error.to_string().contains("expected a mapping"), "{error}");
+    }
+
+    #[test]
+    fn yaml_requires_exact_v2_resource() {
+        for (document, expected) in [
+            ("title: Classic dashboard\npanels: []\n", "apiVersion"),
+            (
+                "apiVersion: dashboard.grafana.app/v1\nkind: Dashboard\nspec: {}\n",
+                "dashboard.grafana.app/v1",
+            ),
+        ] {
+            let error = import_document(document, DocumentFormat::Yaml)
+                .expect_err(expected)
+                .to_string();
+            assert!(error.contains(expected), "expected {expected}, got {error}");
+        }
+    }
+
+    #[test]
+    fn yaml_rejects_multiple_documents() {
+        let error = parse_document(
+            "apiVersion: dashboard.grafana.app/v2\nkind: Dashboard\nspec: {}\n---\napiVersion: dashboard.grafana.app/v2\nkind: Dashboard\nspec: {}\n",
+            DocumentFormat::Yaml,
+        )
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("YAML"), "{error:#}");
     }
 
     #[test]
@@ -1981,6 +2283,125 @@ mod tests {
         assert_eq!(dashboard.queries[1].display.unit, None);
         assert_eq!(dashboard.queries[1].display.decimals, None);
         assert_eq!(dashboard.queries[1].display.no_value, None);
+    }
+
+    #[test]
+    fn classic_query_options_set_panel_resolution() {
+        let dashboard = parse_grafana_dashboard(
+            r#"{
+                "title": "Resolution",
+                "panels": [
+                    {
+                        "type": "timeseries",
+                        "title": "Tuned",
+                        "interval": ">1m",
+                        "maxDataPoints": 300,
+                        "targets": [
+                            { "expr": "up", "interval": "30s" },
+                            { "expr": "hidden", "hide": true, "interval": "5m" },
+                            { "expr": "node_load1", "interval": "" },
+                            { "expr": "rate(x[5m])", "interval": "$min_step" }
+                        ]
+                    },
+                    {
+                        "type": "timeseries",
+                        "title": "Defaults",
+                        "maxDataPoints": "120",
+                        "targets": [{ "expr": "up" }]
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let tuned = &dashboard.queries[0].resolution;
+        assert_eq!(tuned.min_interval.as_deref(), Some(">1m"));
+        assert_eq!(tuned.max_data_points, Some(300));
+        // Hidden targets are dropped, so intervals stay parallel to exprs.
+        assert_eq!(
+            tuned.target_min_intervals,
+            [Some("30s".to_string()), None, Some("$min_step".to_string())]
+        );
+        let defaults = &dashboard.queries[1].resolution;
+        assert_eq!(defaults.min_interval, None);
+        assert_eq!(defaults.max_data_points, Some(120));
+        assert!(
+            !dashboard
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.path.ends_with("interval"))
+        );
+    }
+
+    #[test]
+    fn invalid_min_intervals_are_dropped_with_a_diagnostic() {
+        let dashboard = parse_grafana_dashboard(
+            r#"{
+                "title": "Resolution",
+                "panels": [{
+                    "type": "timeseries",
+                    "title": "Typo",
+                    "interval": "fast",
+                    "targets": [{ "expr": "up", "interval": "10q" }]
+                }]
+            }"#,
+        )
+        .unwrap();
+
+        let resolution = &dashboard.queries[0].resolution;
+        assert_eq!(resolution.min_interval, None);
+        assert_eq!(resolution.target_min_intervals, [None]);
+        let interval_diagnostics = dashboard
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.path.ends_with("interval"))
+            .collect::<Vec<_>>();
+        assert_eq!(interval_diagnostics.len(), 2);
+        assert!(
+            interval_diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code == "ignored_field")
+        );
+        assert!(interval_diagnostics.iter().any(|diagnostic| {
+            diagnostic.path.ends_with("].interval") && diagnostic.message.contains("`fast`")
+        }));
+        assert!(interval_diagnostics.iter().any(|diagnostic| {
+            diagnostic.path.ends_with("targets[0].interval") && diagnostic.message.contains("`10q`")
+        }));
+    }
+
+    #[test]
+    fn v2_query_options_set_panel_resolution() {
+        let mut json = valid_v2_resource();
+        make_v2_panel_importable(&mut json);
+        let data = &mut json["spec"]["elements"]["panel-1"]["spec"]["data"]["spec"];
+        data["queryOptions"] = serde_json::json!({"interval": "2m", "maxDataPoints": 500});
+        data["queries"][0]["spec"]["query"]["spec"]["interval"] = serde_json::json!("1m");
+
+        let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+
+        let resolution = &dashboard.queries[0].resolution;
+        assert_eq!(resolution.min_interval.as_deref(), Some("2m"));
+        assert_eq!(resolution.max_data_points, Some(500));
+        assert_eq!(resolution.target_min_intervals, [Some("1m".to_string())]);
+    }
+
+    #[test]
+    fn v2_null_query_options_are_empty() {
+        let mut json = valid_v2_resource();
+        make_v2_panel_importable(&mut json);
+        json["spec"]["elements"]["panel-1"]["spec"]["data"]["spec"]["queryOptions"] =
+            serde_json::Value::Null;
+
+        let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+
+        assert_eq!(
+            dashboard.queries[0].resolution,
+            crate::app::QueryResolution {
+                target_min_intervals: vec![None],
+                ..Default::default()
+            }
+        );
     }
 
     #[test]
