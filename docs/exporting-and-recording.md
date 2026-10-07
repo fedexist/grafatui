@@ -33,6 +33,16 @@ grafatui-recording-<timestamp>/
 
 If `--export-format png` or `both` is selected, matching PNG files are written too.
 
+Export and recording failures are shown in the TUI instead of ending the
+session. Files are replaced atomically, so a failed write does not leave a
+partially written export in place.
+
+An active recording is finalized once when Grafatui quits normally, returns an
+application error, receives Ctrl-C, or receives SIGTERM/SIGHUP on Unix. The same
+shutdown path restores the cursor, leaves the alternate screen, disables mouse
+capture, and disables raw mode on normal returns and panic unwinding. Cleanup is
+best effort so one failing terminal operation does not skip the remaining ones.
+
 When external annotations are visible, their panel targeting and applied tag
 filter affect the markers written to SVG/PNG exports and changed-frame
 recordings. Any active inline annotation details remain exportable. Annotation

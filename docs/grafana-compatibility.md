@@ -4,7 +4,7 @@ This document provides a comprehensive feature-parity table between the
 [Grafana dashboard JSON models](https://grafana.com/docs/grafana/latest/visualizations/dashboards/build-dashboards/view-dashboard-json-model/)
 and what Grafatui currently supports.
 
-> **Snapshot**: Grafatui v0.1.12. The roadmap prioritizes Grafana parity first,
+> **Snapshot**: Grafatui v0.1.13. The roadmap prioritizes Grafana parity first,
 > then user-visible product value. See the [roadmap](https://github.com/fedexist/grafatui/blob/main/ROADMAP.md) for milestone
 > slices built from this compatibility ladder.
 
@@ -504,4 +504,4 @@ Grafatui provides several TUI-native capabilities that don't map directly to Gra
 
 ---
 
-*This document was reviewed against the Grafatui source code at v0.1.12. If you notice any inaccuracies, please open an issue or PR.*
+*This document was reviewed against the Grafatui source code at v0.1.13. If you notice any inaccuracies, please open an issue or PR.*
