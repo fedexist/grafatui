@@ -85,6 +85,18 @@ With the defaults, a `5m` or `1h` range queries every `5s`, `24h` every `1m`,
 and `7d` every `10m`. The title bar shows the step for panels without their own
 query options.
 
+## Prometheus Request Limits and Retries
+
+Grafatui reads at most 64 MiB from one Prometheus response and keeps at most 64
+complete range-query windows in its in-memory cache. Identical in-flight range
+queries share one request; cancelling their leader releases waiting callers so
+a later refresh can retry normally.
+
+Transport failures, HTTP `429`, and HTTP `5xx` responses are retried with the
+existing bounded backoff. Rejected HTTP `4xx` queries, malformed responses, and
+responses over the 64 MiB limit are not retried. Error excerpts are bounded and
+remain valid UTF-8.
+
 ## External Annotation Sources
 
 Select one read-only annotation source: `annotations_file` or the nested

@@ -48,6 +48,7 @@ cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheu
 ## Features
 
 - Prometheus range and instant queries with async fetching.
+- Bounded Prometheus responses, retry classification, range-query deduplication, and a bounded result cache.
 - Grafana Classic JSON and V2 Resource JSON/YAML import for graph, timeseries, stat, gauge, bar gauge, table, and heatmap panels, including interactive nested rows and tabs.
 - Template variables, Grafana built-in PromQL variables, legend formatting, thresholds, and grid layout support.
 - Grafana timeseries draw styles for lines, points, bars, area fill, hidden axes, and per-panel grid visibility.
@@ -55,6 +56,7 @@ cargo run -- --grafana-json examples/dashboards/prometheus_demo.json --prometheu
 - SVG/PNG export and changed-frame recording bundles.
 - TOML configuration and built-in themes.
 - Read-only external file or command-backed JSONL point annotations with panel targeting, tag filtering, and navigable cluster details.
+- Best-effort terminal restoration and recording finalization on normal quit, errors, Ctrl-C, and Unix SIGTERM/SIGHUP.
 
 ## Documentation
 
