@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.1.14] - 2026-10-07
+
+### ⛰️  Features
+
+- Accept Grafana V2 resource YAML ([19012f3](https://github.com/fedexist/grafatui/commit/19012f354b4dbcc2cb36cc4faa720579ecfdbc54))
+
+### 🐛 Bug Fixes
+
+- Harden Grafana V2 import against real exports ([6ad75a7](https://github.com/fedexist/grafatui/commit/6ad75a7f9ba1da984179aa30282740504b284d98))
+- Keep YAML import compatibility boundary ([a4bde2d](https://github.com/fedexist/grafatui/commit/a4bde2d7212bece7582b0cb0b1215f04178e2c50))
+- Harden the Prometheus client against leaks and cancellation ([94717a8](https://github.com/fedexist/grafatui/commit/94717a82ffd2077f00c2f53d9a8a7136fcf1f765))
+- Avoid retrying permanent Prometheus failures ([cd99c80](https://github.com/fedexist/grafatui/commit/cd99c8076446846f795dcbde51f9d21bc6d1d705))
+- **query:** Scale the range query step with the time range ([a407343](https://github.com/fedexist/grafatui/commit/a407343d331b26e74601edfb3eb9dbc3369f3b85))
+- Preserve explicit query step semantics ([b81aed5](https://github.com/fedexist/grafatui/commit/b81aed5bec181ccc630dfc2e7b03d7894b7e0f58))
+- **query:** Key in-flight range queries by millisecond step ([34244a5](https://github.com/fedexist/grafatui/commit/34244a5a66d1d910ad9f74229bbdbec375a66854))
+- Restore the terminal and survive export failures ([a289c00](https://github.com/fedexist/grafatui/commit/a289c0004b2e56adbd69e6d15780fb90e3b2668d))
+- Contain annotation command processes and bound file sources ([a1bdbe7](https://github.com/fedexist/grafatui/commit/a1bdbe75293474ac451f3d8194ddd2475199237c))
+- Shut down cleanly on SIGTERM and SIGHUP ([c97942f](https://github.com/fedexist/grafatui/commit/c97942f48c93898f63f703b9efb3266f8a585d0b))
+
+### 📚 Documentation
+
+- Design focused fork hardening for v0.1.14 ([7b0dcc4](https://github.com/fedexist/grafatui/commit/7b0dcc4fd665c8f65784039847852c784885ecc3))
+- Bound Prometheus retry hardening scope ([245336b](https://github.com/fedexist/grafatui/commit/245336b2d11b36f4dcd08e2e5d53240dc84715e9))
+- Plan focused fork hardening for v0.1.14 ([3a891a9](https://github.com/fedexist/grafatui/commit/3a891a9f56a3dbb112b5367fab998eeca403af47))
+- Note V2 YAML support in the quick start ([86c5e6f](https://github.com/fedexist/grafatui/commit/86c5e6f5efaa77cd941d701ba1353103ccd1cc0b))
+- Prepare focused hardening release ([e6e910f](https://github.com/fedexist/grafatui/commit/e6e910ff4853775bb1da05654021a16cdd4c8e23))
+
+### 🎨 Styling
+
+- Format annotation hardening ([5cc5ba8](https://github.com/fedexist/grafatui/commit/5cc5ba811fc917f130b9a72d46e47f6b57802a6e))
+
+### 🧪 Testing
+
+- Retain annotations after oversized replacement ([155de65](https://github.com/fedexist/grafatui/commit/155de6503219301c5cfd6e9501f66a53a103d689))
+
+
 ## [0.1.13] - 2026-10-06
 
 ### ⛰️  Features
