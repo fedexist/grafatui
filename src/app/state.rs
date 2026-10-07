@@ -15,7 +15,7 @@
  */
 
 use crate::app::data::{
-    QueryIntervals, downsample, expand_expr, format_legend, parse_min_interval,
+    QueryIntervals, StepPolicy, downsample, expand_expr, format_legend, parse_min_interval,
 };
 use crate::app::variables::refresh_query_variables;
 use crate::dashboard::{DashboardItemId, DashboardLayout, RowId, TabGroupId};
@@ -233,7 +233,7 @@ impl PanelState {
         &self,
         index: usize,
         range: Duration,
-        min_step: Duration,
+        step_policy: StepPolicy,
         scrape_interval: Duration,
         vars: &HashMap<String, String>,
     ) -> QueryIntervals {
@@ -250,10 +250,11 @@ impl PanelState {
             .and_then(Option::as_deref)
             .and_then(parse)
             .or_else(|| resolution.min_interval.as_deref().and_then(parse));
-        QueryIntervals::new(
+        QueryIntervals::for_policy(
             range,
-            min_interval.unwrap_or(min_step),
-            min_interval.unwrap_or(scrape_interval),
+            step_policy,
+            scrape_interval,
+            min_interval,
             resolution.max_data_points,
         )
     }
@@ -329,8 +330,8 @@ pub(crate) struct AppState {
     pub(crate) annotation_modal: Option<crate::annotations::AnnotationModal>,
     /// Current time range window.
     pub(crate) range: Duration,
-    /// Finest range query step; long ranges use a coarser one.
-    pub(crate) min_step: Duration,
+    /// Exact configured step, or automatic range-aware selection.
+    pub(crate) step_policy: StepPolicy,
     /// Prometheus scrape interval, used for `$__rate_interval`.
     pub(crate) scrape_interval: Duration,
     /// How often to refresh data.
@@ -394,7 +395,7 @@ impl AppState {
     ///
     /// * `prometheus` - The Prometheus client.
     /// * `range` - The initial time range window.
-    /// * `min_step` - The finest range query step.
+    /// * `step_policy` - Exact configured step or automatic step selection.
     /// * `refresh_every` - The data refresh interval.
     /// * `title` - The dashboard title.
     /// * `panels` - The list of panels to display.
@@ -404,7 +405,7 @@ impl AppState {
     pub(crate) fn new(
         prometheus: prom::PromClient,
         range: Duration,
-        min_step: Duration,
+        step_policy: impl Into<StepPolicy>,
         refresh_every: Duration,
         title: String,
         panels: Vec<PanelState>,
@@ -421,7 +422,7 @@ impl AppState {
             rendered_annotation_cluster: None,
             annotation_modal: None,
             range,
-            min_step,
+            step_policy: step_policy.into(),
             scrape_interval: crate::app::data::DEFAULT_SCRAPE_INTERVAL,
             refresh_every,
             panels,
@@ -738,12 +739,18 @@ impl AppState {
 
     /// Intervals for queries without panel query options, such as variables.
     pub(crate) fn default_intervals(&self) -> QueryIntervals {
-        QueryIntervals::new(self.range, self.min_step, self.scrape_interval, None)
+        QueryIntervals::for_policy(
+            self.range,
+            self.step_policy,
+            self.scrape_interval,
+            None,
+            None,
+        )
     }
 
     pub(crate) async fn refresh(&mut self) -> Result<()> {
         let range = self.range;
-        let min_step = self.min_step;
+        let step_policy = self.step_policy;
         let scrape_interval = self.scrape_interval;
         let default_intervals = self.default_intervals();
 
@@ -778,7 +785,7 @@ impl AppState {
                 &self.variable_state,
                 self.dynamic.as_mut(),
                 range,
-                min_step,
+                step_policy,
                 scrape_interval,
                 end_ts,
                 &mut self.vars,
@@ -817,7 +824,7 @@ impl AppState {
 
     async fn refresh_panel_indices(&mut self, indices: &[usize], refresh_variables: bool) {
         let range = self.range;
-        let min_step = self.min_step;
+        let step_policy = self.step_policy;
         let scrape_interval = self.scrape_interval;
         let end_ts = self.view_end_ts;
         if self.variable_state.has_variables() {
@@ -827,7 +834,7 @@ impl AppState {
                 &mut self.variable_state,
                 &active_scopes,
                 range,
-                QueryIntervals::new(range, min_step, scrape_interval, None),
+                QueryIntervals::for_policy(range, step_policy, scrape_interval, None, None),
                 end_ts,
                 &self.vars,
             )
@@ -845,7 +852,7 @@ impl AppState {
             &self.variable_state,
             self.dynamic.as_mut(),
             range,
-            min_step,
+            step_policy,
             scrape_interval,
             end_ts,
             &mut self.vars,
@@ -864,7 +871,7 @@ impl AppState {
         variable_state: &crate::dashboard::variables::VariableState,
         mut dynamic: Option<&mut super::dynamic::DynamicDashboard>,
         range: Duration,
-        min_step: Duration,
+        step_policy: StepPolicy,
         scrape_interval: Duration,
         end_ts: i64,
         vars: &mut HashMap<String, String>,
@@ -877,7 +884,7 @@ impl AppState {
                 prometheus,
                 query_vars,
                 range,
-                QueryIntervals::new(range, min_step, scrape_interval, None),
+                QueryIntervals::for_policy(range, step_policy, scrape_interval, None, None),
                 end_ts,
                 vars,
             )
@@ -911,7 +918,7 @@ impl AppState {
                         prometheus,
                         p,
                         range,
-                        min_step,
+                        step_policy,
                         scrape_interval,
                         &values,
                         end_ts,
@@ -938,7 +945,7 @@ impl AppState {
         prometheus: &prom::PromClient,
         p: &'a mut PanelState,
         range: Duration,
-        min_step: Duration,
+        step_policy: StepPolicy,
         scrape_interval: Duration,
         vars: &HashMap<String, String>,
         end_ts: i64,
@@ -955,7 +962,7 @@ impl AppState {
         let mut error = None;
 
         for (i, expr) in p.exprs.iter().enumerate() {
-            let intervals = p.query_intervals(i, range, min_step, scrape_interval, vars);
+            let intervals = p.query_intervals(i, range, step_policy, scrape_interval, vars);
             let step = intervals.step;
             let expr_expanded = expand_expr(expr, range, intervals, vars);
             let legend_fmt = p.legends.get(i).and_then(|x| x.as_ref());
@@ -1642,7 +1649,7 @@ mod tests {
     }
 
     #[test]
-    fn target_min_interval_overrides_the_panel_and_dashboard_minimums() {
+    fn target_min_interval_overrides_panel_minimum_in_automatic_mode() {
         let mut panel = range_panel("Resolution", &["a", "b", "c"]);
         panel.resolution = QueryResolution {
             min_interval: Some(">2m".to_string()),
@@ -1651,9 +1658,11 @@ mod tests {
         };
         let vars = HashMap::from([("step".to_string(), "10m".to_string())]);
         let range = Duration::from_secs(3600);
-        let min_step = Duration::from_secs(5);
+        let step_policy = super::StepPolicy::Automatic {
+            min_step: Duration::from_secs(5),
+        };
         let scrape = Duration::from_secs(15);
-        let intervals = |index| panel.query_intervals(index, range, min_step, scrape, &vars);
+        let intervals = |index| panel.query_intervals(index, range, step_policy, scrape, &vars);
 
         // The target's 30s also stands in for the scrape interval.
         assert_eq!(intervals(0).step, Duration::from_secs(30));
@@ -1662,8 +1671,28 @@ mod tests {
         assert_eq!(intervals(2).step, Duration::from_secs(600));
 
         // An unresolved variable falls back to the panel minimum.
-        let intervals = panel.query_intervals(2, range, min_step, scrape, &HashMap::new());
+        let intervals = panel.query_intervals(2, range, step_policy, scrape, &HashMap::new());
         assert_eq!(intervals.step, Duration::from_secs(120));
+    }
+
+    #[test]
+    fn explicit_step_overrides_imported_minimums() {
+        let mut panel = range_panel("Resolution", &["a"]);
+        panel.resolution = QueryResolution {
+            min_interval: Some("2m".to_string()),
+            max_data_points: Some(10),
+            target_min_intervals: vec![Some("30s".to_string())],
+        };
+
+        let intervals = panel.query_intervals(
+            0,
+            Duration::from_secs(24 * 3600),
+            super::StepPolicy::Explicit(Duration::from_secs(7)),
+            Duration::from_secs(15),
+            &HashMap::new(),
+        );
+
+        assert_eq!(intervals.step, Duration::from_secs(7));
     }
 
     #[tokio::test]
@@ -1679,7 +1708,9 @@ mod tests {
         let mut app = AppState::new(
             prom::PromClient::new(url),
             Duration::from_secs(24 * 3600),
-            Duration::from_secs(5),
+            super::StepPolicy::Automatic {
+                min_step: Duration::from_secs(5),
+            },
             Duration::from_millis(1000),
             "Test".to_string(),
             vec![range_panel("Default", &["default"]), sparse, tuned],

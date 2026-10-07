@@ -286,7 +286,7 @@ V2 dashboard outside this grid, rows, tabs, and AutoGrid subset.
 |---|---|---|
 | `$__rate_interval` | ✅ Supported | `max($__interval + scrape interval, 4 × scrape interval)`, as in Grafana; the scrape interval is the query's min interval or `--scrape-interval` (default 15s) |
 | `$__rate_interval_ms` | ✅ Supported | Millisecond form of `$__rate_interval` |
-| `$__interval` | ✅ Supported | The query's step: the range divided by `maxDataPoints` (default 1000), rounded as Grafana does, no finer than the min interval or `--step`, and within Prometheus's 11,000-point limit |
+| `$__interval` | ✅ Supported | The exact configured `step`/`--step`, or, when absent, the range divided by `maxDataPoints` (default 1000), rounded as Grafana does, no finer than the imported/default min interval, and within Prometheus's 11,000-point limit |
 | `$__interval_ms` | ✅ Supported | Millisecond form of `$__interval` |
 | `$__range` | ✅ Supported | Current dashboard time range |
 | `$__range_s` | ✅ Supported | Current dashboard time range in seconds |

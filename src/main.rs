@@ -112,11 +112,8 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|| "5m".to_string());
     let range = app::parse_duration(&range_str).context("--range")?;
 
-    let step_str = args
-        .step
-        .or(config.step)
-        .unwrap_or_else(|| "5s".to_string());
-    let step = app::parse_duration(&step_str).context("--step")?;
+    let step_policy =
+        app::resolve_step_policy(args.step.as_deref(), config.step.as_deref()).context("--step")?;
 
     let scrape_interval = match args.scrape_interval.or(config.scrape_interval) {
         Some(text) => app::parse_duration(&text).context("--scrape-interval")?,
@@ -238,7 +235,7 @@ async fn main() -> Result<()> {
     let mut state = app::AppState::new(
         prom,
         range,
-        step,
+        step_policy,
         refresh_every,
         title,
         panels,

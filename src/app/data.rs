@@ -22,6 +22,33 @@ use std::time::Duration;
 
 /// Grafana's default Prometheus scrape interval, used for `$__rate_interval`.
 pub(crate) const DEFAULT_SCRAPE_INTERVAL: Duration = Duration::from_secs(15);
+pub(crate) const DEFAULT_MIN_STEP: Duration = Duration::from_secs(5);
+
+/// How Grafatui chooses the range-query step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StepPolicy {
+    /// A CLI/configured step is an exact user request.
+    Explicit(Duration),
+    /// With no configured step, scale from this compatibility minimum.
+    Automatic { min_step: Duration },
+}
+
+impl From<Duration> for StepPolicy {
+    fn from(step: Duration) -> Self {
+        Self::Explicit(step)
+    }
+}
+
+pub(crate) fn resolve_step_policy(cli: Option<&str>, config: Option<&str>) -> Result<StepPolicy> {
+    let Some(text) = cli.or(config) else {
+        return Ok(StepPolicy::Automatic {
+            min_step: DEFAULT_MIN_STEP,
+        });
+    };
+    let step = humantime::parse_duration(text)?;
+    anyhow::ensure!(!step.is_zero(), "step must be greater than zero");
+    Ok(StepPolicy::Explicit(step))
+}
 
 /// Points a range query asks for when its panel sets no `maxDataPoints`; about
 /// the pixel width Grafana uses for a typical panel.
@@ -41,6 +68,30 @@ pub(crate) struct QueryIntervals {
 }
 
 impl QueryIntervals {
+    pub(crate) fn for_policy(
+        range: Duration,
+        policy: StepPolicy,
+        scrape_interval: Duration,
+        min_interval: Option<Duration>,
+        max_data_points: Option<u32>,
+    ) -> Self {
+        match policy {
+            StepPolicy::Explicit(step) => Self::exact(step, scrape_interval),
+            StepPolicy::Automatic { min_step } => {
+                let query_scrape_interval = min_interval.unwrap_or(scrape_interval);
+                let min_interval = min_interval.unwrap_or(min_step);
+                Self::new(range, min_interval, query_scrape_interval, max_data_points)
+            }
+        }
+    }
+
+    fn exact(step: Duration, scrape_interval: Duration) -> Self {
+        Self {
+            step,
+            rate_interval: (step + scrape_interval).max(scrape_interval * 4),
+        }
+    }
+
     /// Divides `range` by `max_data_points` (default 1000), rounds the result
     /// to a Grafana-style interval, and keeps it no finer than `min_interval`.
     /// The step is coarsened further when Prometheus's 11,000-point limit
@@ -253,6 +304,52 @@ mod tests {
 
     fn intervals(range: Duration, min_step: Duration) -> QueryIntervals {
         QueryIntervals::new(range, min_step, DEFAULT_SCRAPE_INTERVAL, None)
+    }
+
+    #[test]
+    fn resolve_step_policy_prefers_cli_then_config() {
+        assert_eq!(
+            resolve_step_policy(Some("17s"), Some("23s")).unwrap(),
+            StepPolicy::Explicit(17 * SECOND)
+        );
+        assert_eq!(
+            resolve_step_policy(None, Some("23s")).unwrap(),
+            StepPolicy::Explicit(23 * SECOND)
+        );
+    }
+
+    #[test]
+    fn resolve_step_policy_is_automatic_when_absent() {
+        assert_eq!(
+            resolve_step_policy(None, None).unwrap(),
+            StepPolicy::Automatic {
+                min_step: 5 * SECOND
+            }
+        );
+    }
+
+    #[test]
+    fn explicit_step_is_not_coarsened_past_point_limit() {
+        let intervals = QueryIntervals::for_policy(
+            7 * DAY,
+            StepPolicy::Explicit(5 * SECOND),
+            DEFAULT_SCRAPE_INTERVAL,
+            Some(MINUTE),
+            Some(10),
+        );
+        assert_eq!(intervals.step, 5 * SECOND);
+    }
+
+    #[test]
+    fn automatic_step_stays_within_point_limit() {
+        let intervals = QueryIntervals::for_policy(
+            7 * DAY,
+            StepPolicy::Automatic { min_step: SECOND },
+            DEFAULT_SCRAPE_INTERVAL,
+            None,
+            Some(u32::MAX),
+        );
+        assert!((7 * DAY).as_secs() / intervals.step.as_secs() <= PROMETHEUS_MAX_POINTS);
     }
 
     #[test]
