@@ -8,7 +8,7 @@ oriented around two priorities:
 2. **User-visible product value** - parity work should make real dashboards
    easier to read, debug, and share.
 
-> **Current version**: 0.1.13 · **Status**: Active development, pre-1.0
+> **Current version**: 0.1.14 · **Status**: Active development, pre-1.0
 
 **Legend**:
 - 🟢 Low complexity · 🟡 Medium complexity · 🔴 High complexity
@@ -30,6 +30,7 @@ These features are shipped and available today:
 | Variables | **PromQL built-ins** | `$__interval`, `$__interval_ms`, `$__range`, `$__range_s`, `$__range_ms`, `$__rate_interval` |
 | Queries | **Multiple targets per panel** | Multiple PromQL expressions render as separate series |
 | Queries | **Instant target queries** | Honors `targets[].instant` and defaults summary table/gauge panels to Prometheus instant queries |
+| Queries | **Last-good query state** | Retains failed-query series, merges partial successes, and surfaces Prometheus warnings without hiding usable data |
 | Queries | **Legend formatting** | `{{label}}` syntax from Grafana |
 | UI | **8 color themes** | default, dracula, monokai, solarized dark/light, gruvbox, tokyo-night, catppuccin |
 | UI | **Time controls** | Zoom in/out, pan left/right, live mode toggle |
