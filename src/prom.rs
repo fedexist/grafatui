@@ -29,7 +29,7 @@ const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 /// Longest excerpt of a response body included in an error message.
 const ERROR_EXCERPT_CHARS: usize = 512;
 
-type QueryWaiter = tokio::sync::oneshot::Sender<Result<Vec<Series>, String>>;
+type QueryWaiter = tokio::sync::oneshot::Sender<Result<QueryResult, String>>;
 type InflightQueries = Arc<Mutex<HashMap<CacheKey, Vec<QueryWaiter>>>>;
 
 /// A range query's identity: expression, start, end, and step.
@@ -38,17 +38,17 @@ type CacheKey = (String, i64, i64, Duration);
 /// Recent range query results, evicting the oldest beyond `CACHE_CAPACITY`.
 #[derive(Debug, Default)]
 struct QueryCache {
-    entries: HashMap<CacheKey, Vec<Series>>,
+    entries: HashMap<CacheKey, QueryResult>,
     order: VecDeque<CacheKey>,
 }
 
 impl QueryCache {
-    fn get(&self, key: &CacheKey) -> Option<Vec<Series>> {
+    fn get(&self, key: &CacheKey) -> Option<QueryResult> {
         self.entries.get(key).cloned()
     }
 
-    fn insert(&mut self, key: CacheKey, series: Vec<Series>) {
-        if self.entries.insert(key.clone(), series).is_none() {
+    fn insert(&mut self, key: CacheKey, result: QueryResult) {
+        if self.entries.insert(key.clone(), result).is_none() {
             self.order.push_back(key);
         }
         while self.order.len() > CACHE_CAPACITY {
@@ -88,10 +88,10 @@ impl InflightGuard {
     }
 
     /// Sends the leader's result to every waiting caller and releases the claim.
-    fn publish(self, result: &Result<Vec<Series>>) {
+    fn publish(self, result: &Result<QueryResult>) {
         for waiter in self.take_waiters() {
             let _ = waiter.send(match result {
-                Ok(series) => Ok(series.clone()),
+                Ok(result) => Ok(result.clone()),
                 Err(error) => Err(error.to_string()),
             });
         }
@@ -188,6 +188,13 @@ fn excerpt(text: &str) -> String {
     }
 }
 
+/// A query's data and the diagnostics Prometheus returned with it.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct QueryResult {
+    pub(crate) series: Vec<Series>,
+    pub(crate) warnings: Vec<String>,
+}
+
 /// A simple Prometheus HTTP client.
 #[derive(Debug, Clone)]
 pub(crate) struct PromClient {
@@ -265,10 +272,10 @@ impl PromClient {
         start: i64,
         end: i64,
         step: Duration,
-    ) -> Result<Vec<Series>> {
+    ) -> Result<QueryResult> {
         let cache_key = (expr.to_string(), start, end, step);
-        if let Some(series) = lock(&self.cache).get(&cache_key) {
-            return Ok(series);
+        if let Some(result) = lock(&self.cache).get(&cache_key) {
+            return Ok(result);
         }
 
         let inflight_key = cache_key.clone();
@@ -309,9 +316,9 @@ impl PromClient {
             }
 
             match self.perform_request(&url).await {
-                Ok(series) => {
-                    lock(&self.cache).insert(cache_key, series.clone());
-                    final_res = Ok(series);
+                Ok(result) => {
+                    lock(&self.cache).insert(cache_key, result.clone());
+                    final_res = Ok(result);
                     break;
                 }
                 Err(e) if !is_retryable(&e) => {
@@ -330,7 +337,7 @@ impl PromClient {
         final_res
     }
 
-    async fn perform_request(&self, url: &str) -> Result<Vec<Series>> {
+    async fn perform_request(&self, url: &str) -> Result<QueryResult> {
         let text = self.get_text(url).await?;
 
         let body: PromResponse<QueryRangeData> = serde_json::from_str(&text)
@@ -344,7 +351,10 @@ impl PromClient {
             ));
         }
 
-        Ok(body.data.result)
+        Ok(QueryResult {
+            warnings: body.notices(),
+            series: body.data.result,
+        })
     }
 
     pub(crate) async fn label_values(&self, label: &str) -> Result<Vec<String>> {
@@ -392,11 +402,14 @@ impl PromClient {
         Ok(body.data.result_strings())
     }
 
-    pub(crate) async fn query_instant_series(&self, expr: &str, time: i64) -> Result<Vec<Series>> {
+    pub(crate) async fn query_instant_series(&self, expr: &str, time: i64) -> Result<QueryResult> {
         let url = self.build_query_url(expr, time);
         let body: PromResponse<QueryInstantData> = self.get_json(&url).await?;
         ensure_success(&body.status)?;
-        Ok(body.data.into_series(time))
+        Ok(QueryResult {
+            warnings: body.notices(),
+            series: body.data.into_series(time),
+        })
     }
 
     async fn get_json<T: DeserializeOwned>(&self, url: &str) -> Result<T> {
@@ -457,6 +470,16 @@ fn ensure_success(status: &str) -> Result<()> {
 struct PromResponse<T> {
     status: String,
     data: T,
+    #[serde(default)]
+    warnings: Vec<String>,
+    #[serde(default)]
+    infos: Vec<String>,
+}
+
+impl<T> PromResponse<T> {
+    fn notices(&self) -> Vec<String> {
+        self.warnings.iter().chain(&self.infos).cloned().collect()
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -666,7 +689,7 @@ mod tests {
         )
         .await
         .expect("a later identical query must not wait on the dropped one");
-        assert!(retried.unwrap().is_empty());
+        assert!(retried.unwrap().series.is_empty());
         assert!(lock(&client.inflight).is_empty());
     }
 
@@ -759,6 +782,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn query_results_include_prometheus_warnings_and_infos() {
+        let body = r#"{"status":"success","data":{"resultType":"matrix","result":[]},"warnings":["partial response"],"infos":["metric might not be a counter"]}"#;
+        let (url, requests) = counting_server(ok_response(body)).await;
+
+        let result = PromClient::new(url)
+            .query_range("up", 0, 60, Duration::from_secs(15))
+            .await
+            .unwrap();
+
+        assert!(result.series.is_empty());
+        assert_eq!(
+            result.warnings,
+            ["partial response", "metric might not be a counter"]
+        );
+        assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        let instant = r#"{"status":"success","data":{"resultType":"vector","result":[]},"warnings":["instant partial"]}"#;
+        let (url, requests) = counting_server(ok_response(instant)).await;
+        let result = PromClient::new(url)
+            .query_instant_series("up", 60)
+            .await
+            .unwrap();
+
+        assert!(result.series.is_empty());
+        assert_eq!(result.warnings, ["instant partial"]);
+        assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
     async fn non_prometheus_error_bodies_keep_an_excerpt() {
         let (url, requests) = counting_server(status_response(
             "502 Bad Gateway",
@@ -783,7 +835,10 @@ mod tests {
         let mut cache = QueryCache::default();
         let step = Duration::from_secs(15);
         for end in 0..1000 {
-            cache.insert(("up".to_string(), end - 60, end, step), Vec::new());
+            cache.insert(
+                ("up".to_string(), end - 60, end, step),
+                QueryResult::default(),
+            );
         }
 
         assert_eq!(cache.len(), CACHE_CAPACITY);

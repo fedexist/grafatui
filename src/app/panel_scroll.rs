@@ -11,9 +11,20 @@ pub(crate) struct PanelBodyScroll {
     pub(crate) offset: u64,
 }
 
-use super::AppState;
+use super::{AppState, PanelState};
 use crate::ui;
 use ratatui::layout::Rect;
+
+fn body_identity(panel: &PanelState) -> PanelBodyIdentity {
+    if panel.series.is_empty() {
+        panel
+            .last_error
+            .clone()
+            .map_or(PanelBodyIdentity::Table, PanelBodyIdentity::Error)
+    } else {
+        PanelBodyIdentity::Table
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum BodyScrollAction {
@@ -31,26 +42,16 @@ pub(crate) fn reconcile_panel_body_scroll(viewport: Rect, app: &mut AppState) {
         .retain(|index, _| *index < app.panels.len());
     for body in ui::panel_body_viewports(viewport, app) {
         let panel = &app.panels[body.index];
+        let current = body_identity(panel);
         let state = app
             .panel_body_scroll
             .entry(body.index)
             .or_insert_with(|| PanelBodyScroll {
-                identity: panel
-                    .last_error
-                    .clone()
-                    .map_or(PanelBodyIdentity::Table, PanelBodyIdentity::Error),
+                identity: current.clone(),
                 offset: 0,
             });
-        let same = match (&state.identity, &panel.last_error) {
-            (PanelBodyIdentity::Table, None) => true,
-            (PanelBodyIdentity::Error(previous), Some(current)) => previous == current,
-            _ => false,
-        };
-        if !same {
-            state.identity = panel
-                .last_error
-                .clone()
-                .map_or(PanelBodyIdentity::Table, PanelBodyIdentity::Error);
+        if state.identity != current {
+            state.identity = current;
             state.offset = 0;
         }
         if body.metrics.capacity > 0 {

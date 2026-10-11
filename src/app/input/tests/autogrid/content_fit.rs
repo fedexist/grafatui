@@ -9,6 +9,7 @@ fn content_fit_measurement_matches_table_body() {
     for (n, h) in [(0, 3), (1, 5), (3, 7), (20, 24)] {
         p.series = (1..=n)
             .map(|i| SeriesView {
+                query_index: 0,
                 name: format!("row{i:02}"),
                 value: Some(i as f64),
                 points: vec![],
@@ -30,6 +31,7 @@ fn content_fit_measurement_matches_table_body() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].name, "row02");
     assert_eq!(rows[0].value, "missing");
+    p.series.clear();
     for err in ["first\nsecond", "averylongwordwithnospaces", "Unicode 水é"] {
         p.last_error = Some(err.into());
         assert_eq!(
@@ -100,6 +102,7 @@ fn content_fit_measurement_real_buffers_keep_rows_and_errors() {
         app.panels[0].panel_type = PanelType::Table;
         app.panels[0].series = (1..=n)
             .map(|i| SeriesView {
+                query_index: 0,
                 name: format!("row{i:02}"),
                 value: Some(i as f64),
                 points: vec![],
@@ -135,6 +138,7 @@ fn content_fit_measurement_real_buffers_keep_rows_and_errors() {
     }
     let mut app = auto_grid_test_app();
     app.panels[0].panel_type = PanelType::Table;
+    app.panels[0].series.clear();
     app.panels[0].last_error = Some("first line\nsecond line Unicode 水é".into());
     assert_eq!(measure_panel_content(&app.panels[0], 40), Some(4));
     let buffer = content_fit_render(
@@ -171,6 +175,7 @@ pub(super) fn content_fit_app() -> AppState {
 fn content_rows(n: usize) -> Vec<SeriesView> {
     (1..=n)
         .map(|i| SeriesView {
+            query_index: 0,
             name: format!("row{i:02}"),
             value: Some(i as f64),
             points: vec![],
@@ -398,6 +403,11 @@ async fn content_fit_gap_click_errors_shrink_and_tiny_buffers() {
     .unwrap();
     assert_eq!(app.selected_item, Some(DashboardItemId::Panel(0)));
     for error in [Some("first line\nsecond 水é".to_owned()), None] {
+        app.panels[1].series = if error.is_some() {
+            vec![]
+        } else {
+            content_rows(20)
+        };
         app.panels[1].last_error = error.clone();
         let item = crate::ui::visible_dashboard_rects(Rect::new(0, 0, 100, 48), &app)
             .into_iter()
@@ -610,6 +620,7 @@ fn bounds_scroll_measurement_fits_table_errors_only() {
     let mut app = auto_grid_test_app();
     let p = &mut app.panels[0];
     p.panel_type = PanelType::Table;
+    p.series.clear();
     p.last_error = Some("one two three four".into());
     assert_eq!(measure_panel_content(p, 10), Some(5));
     assert_eq!(measure_panel_content(p, 20), Some(3));

@@ -489,7 +489,7 @@ pub(crate) fn panel_body_viewports(viewport: Rect, app: &AppState) -> Vec<PanelB
             let metrics =
                 super::panel_body_metrics(panel, item.rect.width, item.rect.height, body_offset);
             let inner = item.rect.inner(Margin::new(1, 1));
-            let header = if panel.last_error.is_some() {
+            let header = if panel.last_error.is_some() && panel.series.is_empty() {
                 0
             } else {
                 2.min(inner.height)
@@ -555,6 +555,7 @@ mod tests {
             query_modes: vec![],
             series: vec![],
             last_error: None,
+            notices: Default::default(),
             last_url: None,
             last_samples: 0,
             grid,

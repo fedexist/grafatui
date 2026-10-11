@@ -30,7 +30,9 @@ pub(crate) use layout::{
     visible_dashboard_rects, visible_panel_rects,
 };
 pub(crate) use panels::prepare_table_rows;
-pub(crate) use panels::{PanelRenderContext, calculate_y_bounds, measure_panel_content};
+pub(crate) use panels::{
+    NoticeLevel, PanelRenderContext, calculate_y_bounds, data_notice, measure_panel_content,
+};
 pub(crate) use tabs::{render_tab_bar, tab_at, tab_bar_geometry, tab_title};
 
 pub(crate) use layout::{panel_body_viewports, panel_render_context};

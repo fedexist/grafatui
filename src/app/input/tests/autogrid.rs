@@ -12,6 +12,7 @@ fn auto_grid_test_app() -> AppState {
             let mut panel = test_panel(title);
             panel.panel_type = PanelType::Stat;
             panel.series = vec![SeriesView {
+                query_index: 0,
                 name: title.into(),
                 value: Some((index + 1) as f64),
                 points: vec![],

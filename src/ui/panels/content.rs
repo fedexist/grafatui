@@ -9,7 +9,9 @@ pub(crate) fn measure_panel_content(panel: &PanelState, outer_width: u16) -> Opt
     if outer_width.saturating_sub(2) == 0 {
         return Some(2);
     }
-    if let Some(error) = &panel.last_error {
+    if let Some(error) = &panel.last_error
+        && panel.series.is_empty()
+    {
         return Some(
             super::error_body::error_body_window(error, outer_width - 2, 0, 0)
                 .total_lines
@@ -75,7 +77,9 @@ pub(crate) fn panel_body_metrics(
     document_offset: u64,
 ) -> PanelBodyMetrics {
     let inner_width = outer_width.saturating_sub(2);
-    let (total, capacity) = if let Some(error) = &panel.last_error {
+    let (total, capacity) = if let Some(error) = &panel.last_error
+        && panel.series.is_empty()
+    {
         (
             super::error_body::error_body_window(error, inner_width, 0, 0).total_lines,
             outer_height.saturating_sub(2),
@@ -90,5 +94,33 @@ pub(crate) fn panel_body_metrics(
         total,
         capacity: if inner_width == 0 { 0 } else { capacity },
         document_offset,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::SeriesView;
+
+    #[test]
+    fn retained_table_data_keeps_row_measurements_when_latest_query_failed() {
+        let mut panel = crate::app::default_queries(vec!["up".to_string()]).remove(0);
+        panel.panel_type = PanelType::Table;
+        panel.last_error = Some("query failed".to_string());
+        panel.notices.stale_queries = 1;
+        panel.series = (0..3)
+            .map(|index| SeriesView {
+                query_index: 0,
+                name: format!("row{index}"),
+                value: Some(index as f64),
+                points: vec![],
+                visible: true,
+            })
+            .collect();
+
+        assert_eq!(measure_panel_content(&panel, 40), Some(7));
+        let metrics = panel_body_metrics(&panel, 40, 12, 0);
+        assert_eq!(metrics.total, 3);
+        assert_eq!(metrics.capacity, 8);
     }
 }

@@ -12,6 +12,7 @@ fn bounded_app() -> AppState {
 fn rows(n: usize) -> Vec<SeriesView> {
     (1..=n)
         .map(|n| SeriesView {
+            query_index: 0,
             name: format!("row{n:02}"),
             value: Some(n as f64),
             points: vec![],
@@ -134,6 +135,7 @@ fn bounds_scroll_geometry_real_buffers_keep_caps_and_gaps() {
 #[test]
 fn bounds_scroll_error_document_window_reaches_lower_lines() {
     let mut app = single_table();
+    app.panels[0].series.clear();
     app.panels[0].last_error = Some(
         (0..8)
             .map(|n| format!("line{n:02}"))
@@ -191,8 +193,36 @@ fn bounds_scroll_table_local_and_document_windows_keep_headers() {
 }
 
 #[test]
+fn bounds_scroll_retained_table_data_keeps_table_scroll_identity() {
+    let mut app = single_table();
+    let viewport = Rect::new(0, 0, 100, 40);
+    app.panels[0].last_error = Some("query failed".into());
+    app.panels[0].notices.stale_queries = 1;
+
+    crate::app::panel_scroll::reconcile_panel_body_scroll(viewport, &mut app);
+    assert!(matches!(
+        app.panel_body_scroll[&0].identity,
+        crate::app::panel_scroll::PanelBodyIdentity::Table
+    ));
+
+    crate::app::panel_scroll::scroll_selected_body(
+        viewport,
+        &mut app,
+        crate::app::panel_scroll::BodyScrollAction::End,
+    );
+    let rendered = text(&render(
+        &mut app,
+        Size::new(100, 40),
+        "bounds-scroll-retained-table",
+    ));
+    assert!(rendered.contains("row20"));
+    assert!(!rendered.contains("ERROR"));
+}
+
+#[test]
 fn bounds_scroll_fitted_errors_render_wide_windows_and_tiny_caps() {
     let mut app = single_table();
+    app.panels[0].series.clear();
     app.panels[0].last_error = Some(
         (0..70_000)
             .map(|n| format!("line{n:05}"))
@@ -206,6 +236,7 @@ fn bounds_scroll_fitted_errors_render_wide_windows_and_tiny_caps() {
     assert!(txt.contains("line69999"));
     assert!(!txt.contains("line00000"));
     app.panels[0].last_error = None;
+    app.panels[0].series = rows(20);
     for cap in [1, 2, 3, 4] {
         let DashboardLayoutItem::AutoGrid(g) = &mut app.layout.items[0] else {
             panic!()
@@ -253,6 +284,7 @@ fn bounds_scroll_table_partial_windows_and_fitted_error_wrap_buffers() {
     }
     app.vertical_scroll = 0;
     app.panel_body_scroll.clear();
+    app.panels[0].series.clear();
     app.panels[0].last_error = Some("one two three four".into());
     let b = render(&mut app, Size::new(12, 24), "bounds-scroll-error-narrow");
     let txt = text(&b);
@@ -445,6 +477,7 @@ fn bounds_scroll_reconciles_content_and_visibility() {
         .map(|n| format!("error{n:02}"))
         .collect::<Vec<_>>()
         .join("\n");
+    app.panels[0].series.clear();
     app.panels[0].last_error = Some(error.clone());
     reconcile(&mut app, size);
     assert_eq!(local(&app, 0), 0);
@@ -458,6 +491,7 @@ fn bounds_scroll_reconciles_content_and_visibility() {
     assert_eq!(local(&app, 0), 0);
     render(&mut app, size, "bounds-scroll-error-changed");
     app.panels[0].last_error = None;
+    app.panels[0].series = rows(20);
     reconcile(&mut app, size);
     assert_eq!(local(&app, 0), 0);
     render(&mut app, size, "bounds-scroll-error-recovery");
@@ -467,6 +501,7 @@ fn bounds_scroll_reconciles_content_and_visibility() {
     reconcile(&mut app, size);
     assert_eq!(local(&app, 0), 14);
     render(&mut app, size, "bounds-scroll-resize-clamp");
+    app.panels[0].series.clear();
     app.panels[0].last_error = Some("abcdefghij".repeat(20));
     reconcile(&mut app, Size::new(12, 24));
     set_offset(&mut app, 17);
@@ -481,6 +516,7 @@ fn bounds_scroll_reconciles_content_and_visibility() {
     assert_eq!(local(&app, 0), 0);
     render(&mut app, size, "bounds-scroll-width-clamp");
     app.panels[0].last_error = None;
+    app.panels[0].series = rows(20);
     set_offset(&mut app, 14);
     let DashboardLayoutItem::AutoGrid(g) = &mut app.layout.items[0] else {
         panic!()
