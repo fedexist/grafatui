@@ -132,6 +132,7 @@ mod tests {
             query_modes: vec![],
             series: vec![],
             last_error: None,
+            notices: Default::default(),
             last_url: None,
             last_samples: 0,
             grid: None,
@@ -151,6 +152,7 @@ mod tests {
     fn test_calculate_y_bounds_basic() {
         let mut p = create_test_panel();
         p.series.push(SeriesView {
+            query_index: 0,
             name: "test".to_string(),
             value: None,
             points: vec![(0.0, 10.0), (1.0, 20.0)],
@@ -166,6 +168,7 @@ mod tests {
     fn test_calculate_y_bounds_nan() {
         let mut p = create_test_panel();
         p.series.push(SeriesView {
+            query_index: 0,
             name: "test".to_string(),
             value: None,
             points: vec![(0.0, 10.0), (1.0, f64::NAN), (2.0, 20.0)],
@@ -181,6 +184,7 @@ mod tests {
     fn test_calculate_y_bounds_infinity() {
         let mut p = create_test_panel();
         p.series.push(SeriesView {
+            query_index: 0,
             name: "test".to_string(),
             value: None,
             points: vec![(0.0, 10.0), (1.0, f64::INFINITY), (2.0, 20.0)],
@@ -197,6 +201,7 @@ mod tests {
         let mut p = create_test_panel();
         p.y_axis_mode = YAxisMode::ZeroBased;
         p.series.push(SeriesView {
+            query_index: 0,
             name: "test".to_string(),
             value: None,
             points: vec![(0.0, 10.0), (1.0, 20.0)],
@@ -215,6 +220,7 @@ mod tests {
         let mut p = create_test_panel();
         p.min = Some(0.0);
         p.series.push(SeriesView {
+            query_index: 0,
             name: "requests".to_string(),
             value: None,
             points: vec![(0.0, 4.5), (1.0, 11_200.0)],
@@ -232,6 +238,7 @@ mod tests {
         let mut p = create_test_panel();
         p.min = Some(0.0);
         p.series.push(SeriesView {
+            query_index: 0,
             name: "latency".to_string(),
             value: None,
             points: vec![(0.0, 0.5), (1.0, 1.0)],

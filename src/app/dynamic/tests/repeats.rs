@@ -13,6 +13,7 @@ fn repeat_reorder_preserves_duplicate_identity_focus_data_and_body_offset() {
     );
     app.selected_item = Some(DashboardItemId::Panel(1));
     app.panels[1].series = vec![SeriesView {
+        query_index: 0,
         name: "kept".into(),
         value: Some(9.0),
         points: vec![(1000., 9.)],
@@ -135,6 +136,7 @@ async fn repeat_buffers_follow_reconciliation_and_resize() {
     for (index, panel) in app.panels.iter_mut().take(2).enumerate() {
         panel.series = (1..=20)
             .map(|n| SeriesView {
+                query_index: 0,
                 name: format!("{}-row{n:02}", if index == 0 { "a" } else { "b" }),
                 value: Some(n as f64),
                 points: vec![],

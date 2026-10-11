@@ -520,14 +520,23 @@ fn render_panel(
         rect.left, rect.top, rect.width, rect.height
     )
     .unwrap();
-    let fitted_error_title = (context.content_fit && panel.last_error.is_some())
-        .then(|| format!("{} - ERROR", panel.title));
+    let blocking_error = panel.last_error.is_some() && panel.series.is_empty();
+    let fitted_error_title =
+        (context.content_fit && blocking_error).then(|| format!("{} - ERROR", panel.title));
+    let notice = ui::data_notice(panel);
+    let displayed_title = notice
+        .map(|(notice, _)| format!("{} {notice}", panel.title))
+        .unwrap_or_else(|| panel.title.clone());
+    let title_color = notice.map_or(title.as_str(), |(_, level)| match level {
+        ui::NoticeLevel::Error => "#ff5555",
+        ui::NoticeLevel::Warning => "#d6c343",
+    });
     write_text(
         out,
         rect.left + 8.0,
         rect.top + 18.0,
-        fitted_error_title.as_deref().unwrap_or(&panel.title),
-        &title,
+        fitted_error_title.as_deref().unwrap_or(&displayed_title),
+        title_color,
         "start",
         FONT_SIZE,
     );
@@ -549,7 +558,9 @@ fn render_panel(
         }
     };
 
-    if let Some(err) = &panel.last_error {
+    if let Some(err) = &panel.last_error
+        && blocking_error
+    {
         if context.content_fit {
             let width = (inner.width / CELL_WIDTH) as u16;
             let capacity = (inner.height / CELL_HEIGHT) as u16;
@@ -1914,12 +1925,14 @@ mod tests {
             legends: vec![],
             query_modes: vec![],
             series: vec![SeriesView {
+                query_index: 0,
                 name: "usage & total".to_string(),
                 value: Some(10.0),
                 points: vec![(start, 0.0), (start + 50.0, 50.0), (start + 100.0, 100.0)],
                 visible: true,
             }],
             last_error: None,
+            notices: Default::default(),
             last_url: None,
             last_samples: 3,
             grid: None,
@@ -1933,6 +1946,24 @@ mod tests {
             options: PanelOptions::Graph(GraphOptions::default()),
             resolution: Default::default(),
         }
+    }
+
+    #[test]
+    fn stale_panel_export_keeps_data_and_marks_the_title() {
+        let mut app = test_app_with_panel_type(PanelType::Graph);
+        app.panels[0].exprs = vec!["up".to_string()];
+        app.panels[0].series[0].query_index = 0;
+        app.panels[0].last_error = Some("query_range failed for `up`: bad expression".to_string());
+        app.panels[0].notices.stale_queries = 1;
+
+        let svg = render_svg(&app, Rect::new(0, 0, 100, 40));
+
+        assert!(
+            svg.contains("CPU &lt;main&gt; ⚠ stale: queries failed"),
+            "{svg}"
+        );
+        assert!(svg.contains("usage &amp; total"), "{svg}");
+        assert!(!svg.contains("query_range failed"), "{svg}");
     }
 
     fn test_export_dir(name: &str) -> PathBuf {
@@ -2851,6 +2882,7 @@ mod tests {
         };
         table_app.panels[0].series[0].value = Some(0.42);
         table_app.panels[0].series.push(SeriesView {
+            query_index: 0,
             name: "missing".to_string(),
             value: None,
             points: vec![],
