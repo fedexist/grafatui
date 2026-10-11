@@ -178,6 +178,7 @@ async fn main() -> Result<()> {
                 query_modes: q.query_modes,
                 series: vec![],
                 last_error: None,
+                notices: Default::default(),
                 last_url: None,
                 last_samples: 0,
                 grid: q.grid.map(|g| app::GridUnit {

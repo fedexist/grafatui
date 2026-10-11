@@ -292,6 +292,10 @@ pub(crate) fn render_row_header(
 fn build_footer_detail(app: &AppState) -> String {
     let mut parts = Vec::new();
 
+    if let Some(notice) = selected_panel_notice(app) {
+        parts.push(notice);
+    }
+
     if matches!(app.mode, AppMode::Inspect | AppMode::FullscreenInspect)
         && let Some(cx) = app.cursor_x
     {
@@ -335,6 +339,29 @@ fn build_footer_detail(app: &AppState) -> String {
     parts.join(" | ")
 }
 
+fn selected_panel_notice(app: &AppState) -> Option<String> {
+    let panel = app.panels.get(app.selected_panel_index()?)?;
+    let mut messages = Vec::new();
+    if !panel.series.is_empty()
+        && let Some(error) = &panel.last_error
+    {
+        messages.extend(error.lines().map(ToString::to_string));
+    }
+    messages.extend(
+        panel
+            .notices
+            .warnings
+            .iter()
+            .map(|warning| format!("warning: {warning}")),
+    );
+    let first = messages.first()?;
+    let more = match messages.len() {
+        0 | 1 => String::new(),
+        count => format!(" (+{} more)", count - 1),
+    };
+    Some(format!("{}: {first}{more}", panel.title))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -368,6 +395,7 @@ mod tests {
             query_modes: vec![],
             series: vec![],
             last_error: None,
+            notices: Default::default(),
             last_url: None,
             last_samples: 0,
             grid: None,
@@ -381,6 +409,101 @@ mod tests {
             options: crate::app::PanelOptions::None,
             resolution: Default::default(),
         }
+    }
+
+    fn graph_panel_with_data(title: &str) -> PanelState {
+        let mut panel = graph_panel(title);
+        panel.exprs = vec!["up".to_string()];
+        panel.series = vec![SeriesView {
+            query_index: 0,
+            name: "api".to_string(),
+            value: Some(2.0),
+            points: vec![(1_700_000_000.0, 1.0), (1_700_000_060.0, 2.0)],
+            visible: true,
+        }];
+        panel.last_samples = 2;
+        panel
+    }
+
+    #[test]
+    fn stale_panel_keeps_chart_and_explains_failure() {
+        let mut app = test_app();
+        let mut panel = graph_panel_with_data("Requests");
+        panel.last_error = Some("query_range failed for `up`: bad expression".to_string());
+        panel.notices.stale_queries = 1;
+        app.panels = vec![panel];
+        app.apply_layout(crate::dashboard::DashboardLayout::flat(1));
+        app.view_end_ts = 1_700_000_060;
+        assert_eq!(app.panels[0].notices.stale_queries, 1);
+        assert!(app.panels[0].last_error.is_some());
+        assert_eq!(app.panels[0].series.len(), 1);
+
+        let text = last_good_contract_capture(&mut app, 120, 40, "stale-total");
+
+        assert!(text.contains("Requests ⚠ stale: queries failed"), "{text}");
+        assert!(text.contains("api"), "{text}");
+        assert!(!text.contains("ERROR"), "{text}");
+        assert!(
+            text.contains("Requests: query_range failed for `up`: bad expression"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn warning_panel_keeps_chart_and_explains_warning() {
+        let mut app = test_app();
+        let mut panel = graph_panel_with_data("Requests");
+        panel.notices.warnings = vec![
+            "partial response".to_string(),
+            "metric might not be a counter".to_string(),
+        ];
+        app.panels = vec![panel];
+        app.apply_layout(crate::dashboard::DashboardLayout::flat(1));
+        app.view_end_ts = 1_700_000_060;
+        assert_eq!(app.panels[0].notices.warnings.len(), 2);
+        assert!(app.panels[0].last_error.is_none());
+
+        let text = last_good_contract_capture(&mut app, 100, 30, "warning");
+
+        assert!(text.contains("Requests ⚠ warning"), "{text}");
+        assert!(text.contains("api"), "{text}");
+        assert!(
+            text.contains("Requests: warning: partial response (+1 more)"),
+            "{text}"
+        );
+
+        app.panels[0].notices = Default::default();
+        let recovered = last_good_contract_capture(&mut app, 100, 30, "warning-cleared");
+        assert!(!recovered.contains("⚠ warning"), "{recovered}");
+        assert!(!recovered.contains("partial response"), "{recovered}");
+    }
+
+    #[test]
+    fn partial_panel_marks_only_the_failed_query_as_stale() {
+        let mut app = test_app();
+        let mut panel = graph_panel_with_data("Requests");
+        panel.exprs.push("errors".to_string());
+        panel.series.push(SeriesView {
+            query_index: 1,
+            name: "errors".to_string(),
+            value: Some(1.0),
+            points: vec![(1_700_000_000.0, 1.0), (1_700_000_060.0, 1.0)],
+            visible: true,
+        });
+        panel.last_error = Some("query_range failed for `errors`: bad expression".to_string());
+        panel.notices.stale_queries = 1;
+        app.panels = vec![panel];
+        app.apply_layout(crate::dashboard::DashboardLayout::flat(1));
+        app.view_end_ts = 1_700_000_060;
+        assert_eq!(app.panels[0].notices.stale_queries, 1);
+        assert_eq!(app.panels[0].series.len(), 2);
+
+        let text = last_good_contract_capture(&mut app, 120, 40, "stale-partial");
+
+        assert!(text.contains("Requests ⚠ partial: stale query"), "{text}");
+        assert!(text.contains("api"), "{text}");
+        assert!(text.contains("errors"), "{text}");
+        assert!(!text.contains("ERROR"), "{text}");
     }
 
     fn nested_row_app() -> AppState {
@@ -607,6 +730,25 @@ mod tests {
         terminal_text(&terminal)
     }
 
+    fn last_good_contract_capture(
+        app: &mut AppState,
+        width: u16,
+        height: u16,
+        name: &str,
+    ) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| draw_ui(frame, app)).unwrap();
+        if let Ok(root) = std::env::var("GRAFATUI_LAST_GOOD_CAPTURE_DIR") {
+            let directory = std::path::PathBuf::from(root).join(name);
+            std::fs::create_dir_all(&directory).unwrap();
+            capture_buffer(
+                &terminal,
+                &directory.join(format!("{name}-{width}x{height}.json")),
+            );
+        }
+        terminal_text(&terminal)
+    }
+
     fn capture_buffer(terminal: &Terminal<TestBackend>, path: &std::path::Path) {
         let buffer = terminal.backend().buffer();
         let cells = (0..buffer.area.height)
@@ -721,6 +863,7 @@ mod tests {
             .map(|panel| {
                 let series = match panel.panel_type {
                     PanelType::Graph => vec![SeriesView {
+                        query_index: 0,
                         name: "200".to_string(),
                         value: Some(4.0),
                         points: vec![
@@ -731,6 +874,7 @@ mod tests {
                         visible: true,
                     }],
                     PanelType::Stat => vec![SeriesView {
+                        query_index: 0,
                         name: "Memory".to_string(),
                         value: Some(128.0),
                         points: vec![
@@ -749,6 +893,7 @@ mod tests {
                     query_modes: panel.query_modes,
                     series,
                     last_error: None,
+                    notices: Default::default(),
                     last_url: None,
                     last_samples: 3,
                     grid: panel.grid.map(|grid| GridUnit {

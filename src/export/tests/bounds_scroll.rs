@@ -56,6 +56,7 @@ fn bounds_scroll_exports_preserve_defaults_and_capture_windows() {
 fn bounds_scroll_exports_error_wrap_and_style() {
     let mut app = bounded_app();
     let viewport = Rect::new(0, 0, 12, 24);
+    app.panels[0].series.clear();
     app.panels[0].last_error = Some("one two three four".into());
     let default_svg = render_svg(&app, viewport);
     assert!(default_svg.contains("one two"));
@@ -108,6 +109,7 @@ fn bounds_scroll_recording_tracks_body_noops_and_content_changes() {
     reconcile_panel_body_scroll(viewport, &mut app);
     capture_recording_frame(&mut app, viewport).unwrap();
     assert_eq!(app.recording.as_ref().unwrap().frame_count, 4);
+    app.panels[0].series.clear();
     app.panels[0].last_error = Some("one two three four".into());
     reconcile_panel_body_scroll(viewport, &mut app);
     capture_recording_frame(&mut app, viewport).unwrap();

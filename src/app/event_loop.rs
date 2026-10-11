@@ -195,12 +195,14 @@ mod tests {
                 legends: vec![],
                 query_modes: vec![],
                 series: vec![SeriesView {
+                    query_index: 0,
                     name: "usage".to_string(),
                     value: Some(1.0),
                     points: vec![(now - 100.0, 0.0), (now, 1.0)],
                     visible: true,
                 }],
                 last_error: None,
+                notices: Default::default(),
                 last_url: None,
                 last_samples: 2,
                 grid: None,
@@ -237,6 +239,7 @@ mod tests {
                 };
                 p.series = (0..[3, 20, 1, 0][i])
                     .map(|j| SeriesView {
+                        query_index: 0,
                         name: format!("row{:02}", j + 1),
                         value: Some((j + 1) as f64),
                         points: vec![],

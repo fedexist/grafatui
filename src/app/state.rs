@@ -46,6 +46,8 @@ pub(crate) struct PanelState {
     pub(crate) series: Vec<SeriesView>,
     /// Last error message, if any.
     pub(crate) last_error: Option<String>,
+    /// Freshness and Prometheus diagnostics for the displayed data.
+    pub(crate) notices: DataNotices,
     /// Last query URL used (for debugging).
     pub(crate) last_url: Option<String>,
     /// Total number of samples in the current view.
@@ -70,6 +72,14 @@ pub(crate) struct PanelState {
     pub(crate) options: PanelOptions,
     /// Grafana query options that set the range query step.
     pub(crate) resolution: QueryResolution,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct DataNotices {
+    /// Queries whose previous series remain because their latest fetch failed.
+    pub(crate) stale_queries: usize,
+    /// Warnings and infos returned with the latest successful query results.
+    pub(crate) warnings: Vec<String>,
 }
 
 /// Grafana query options that set how finely a panel's range queries sample.
@@ -173,6 +183,8 @@ pub(crate) enum YAxisMode {
 /// Represents a single time-series line in a chart.
 #[derive(Debug, Clone)]
 pub(crate) struct SeriesView {
+    /// Index of the panel query that produced this series.
+    pub(crate) query_index: usize,
     /// Stable name of the series (used for coloring).
     pub(crate) name: String,
     /// Latest value of the series (used for display).
@@ -928,16 +940,52 @@ impl AppState {
             })
             .buffer_unordered(4);
 
-        while let Some((index, (p, results, url, err, has_data))) = futures.next().await {
+        while let Some((index, (p, results, succeeded, url, errors, warnings))) =
+            futures.next().await
+        {
+            let hidden = p
+                .series
+                .iter()
+                .filter(|series| !series.visible)
+                .map(|series| series.name.clone())
+                .collect::<HashSet<_>>();
+            let stale_queries = p
+                .series
+                .iter()
+                .filter(|series| {
+                    series.query_index < p.exprs.len() && !succeeded.contains(&series.query_index)
+                })
+                .map(|series| series.query_index)
+                .collect::<HashSet<_>>()
+                .len();
+            let mut merged = results;
+            merged.extend(
+                p.series
+                    .iter()
+                    .filter(|series| {
+                        series.query_index < p.exprs.len()
+                            && !succeeded.contains(&series.query_index)
+                    })
+                    .cloned(),
+            );
+            merged.sort_by_key(|series| series.query_index);
+            for series in &mut merged {
+                series.visible = !hidden.contains(&series.name);
+            }
+            let has_data = merged.iter().any(|series| !series.points.is_empty());
             if let Some(dynamic) = dynamic.as_mut() {
                 dynamic.mark_query_result(index, has_data);
             }
-            p.series = results;
+            p.series = merged;
             p.last_samples = p.series.iter().map(|s| s.points.len()).sum();
             if let Some(u) = url {
                 p.last_url = Some(u);
             }
-            p.last_error = err;
+            p.last_error = (!errors.is_empty()).then(|| errors.join("\n"));
+            p.notices = DataNotices {
+                stale_queries,
+                warnings,
+            };
         }
     }
 
@@ -952,14 +1000,16 @@ impl AppState {
     ) -> (
         &'a mut PanelState,
         Vec<SeriesView>,
+        HashSet<usize>,
         Option<String>,
-        Option<String>,
-        bool,
+        Vec<String>,
+        Vec<String>,
     ) {
         let mut panel_results = Vec::new();
-        let mut has_data = false;
+        let mut succeeded = HashSet::new();
         let mut last_url = None;
-        let mut error = None;
+        let mut errors = Vec::new();
+        let mut warnings = Vec::new();
 
         for (i, expr) in p.exprs.iter().enumerate() {
             let intervals = p.query_intervals(i, range, step_policy, scrape_interval, vars);
@@ -993,9 +1043,14 @@ impl AppState {
             };
 
             match query_result {
-                Ok(res) => {
-                    for s in res {
-                        has_data |= !s.values.is_empty();
+                Ok(result) => {
+                    succeeded.insert(i);
+                    for warning in result.warnings {
+                        if !warnings.contains(&warning) {
+                            warnings.push(warning);
+                        }
+                    }
+                    for s in result.series {
                         let latest_val = s.values.last().and_then(|(_, v)| v.parse::<f64>().ok());
                         let legend_base = if let Some(fmt) = legend_fmt {
                             format_legend(fmt, &s.metric)
@@ -1020,6 +1075,7 @@ impl AppState {
                             }
                         }
                         panel_results.push(SeriesView {
+                            query_index: i,
                             name: legend_base,
                             value: latest_val,
                             points: downsample(pts, 200),
@@ -1032,14 +1088,14 @@ impl AppState {
                         QueryMode::Range => "query_range",
                         QueryMode::Instant => "query",
                     };
-                    error = Some(format!(
+                    errors.push(format!(
                         "{} failed for `{}`: {}",
                         query_name, expr_expanded, e
                     ));
                 }
             }
         }
-        (p, panel_results, last_url, error, has_data)
+        (p, panel_results, succeeded, last_url, errors, warnings)
     }
 }
 
@@ -1092,6 +1148,7 @@ mod tests {
             query_modes: vec![],
             series: vec![],
             last_error: None,
+            notices: Default::default(),
             last_url: None,
             last_samples: 0,
             grid: None,
@@ -1253,6 +1310,195 @@ mod tests {
             }
         });
         (format!("http://{address}"), requests)
+    }
+
+    fn successful_matrix(_: &str) -> &'static str {
+        r#"{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"job":"api"},"values":[[1700000000,"1"],[1700000060,"2"]]}]}}"#
+    }
+
+    fn rejected_query(_: &str) -> &'static str {
+        r#"{"status":"error","errorType":"bad_data","error":"bad expression"}"#
+    }
+
+    fn initial_two_query_results(target: &str) -> &'static str {
+        if target.contains("query=first") {
+            r#"{"status":"success","data":{"resultType":"matrix","result":[{"metric":{},"values":[[1700000000,"1"]]}]}}"#
+        } else {
+            r#"{"status":"success","data":{"resultType":"matrix","result":[{"metric":{},"values":[[1700000000,"2"]]}]}}"#
+        }
+    }
+
+    fn partial_two_query_results(target: &str) -> &'static str {
+        if target.contains("query=first") {
+            r#"{"status":"success","data":{"resultType":"matrix","result":[{"metric":{},"values":[[1700000060,"10"]]}]}}"#
+        } else {
+            rejected_query(target)
+        }
+    }
+
+    fn warning_matrix(_: &str) -> &'static str {
+        r#"{"status":"success","data":{"resultType":"matrix","result":[{"metric":{},"values":[[1700000000,"1"]]}]},"warnings":["partial response"]}"#
+    }
+
+    fn clean_matrix(_: &str) -> &'static str {
+        r#"{"status":"success","data":{"resultType":"matrix","result":[{"metric":{},"values":[[1700000060,"2"]]}]}}"#
+    }
+
+    #[tokio::test]
+    async fn failed_refresh_keeps_the_last_successful_series() {
+        let (success_url, _) = mock_prometheus(successful_matrix).await;
+        let mut app = create_test_app();
+        app.prometheus = prom::PromClient::new(success_url);
+        let mut panel = test_panel("Requests", PanelType::Graph);
+        panel.exprs = vec!["up".to_string()];
+        panel.legends = vec![None];
+        panel.query_modes = vec![QueryMode::Range];
+        app.panels = vec![panel];
+        app.apply_layout(DashboardLayout::flat(1));
+
+        app.refresh().await.unwrap();
+        assert_eq!(app.panels[0].series.len(), 1);
+        let expected_name = app.panels[0].series[0].name.clone();
+        let expected_value = app.panels[0].series[0].value;
+        let expected_points = app.panels[0].series[0].points.clone();
+        assert_eq!(app.panels[0].last_samples, 2);
+
+        let (failure_url, _) = mock_prometheus(rejected_query).await;
+        app.prometheus = prom::PromClient::new(failure_url);
+        app.refresh().await.unwrap();
+
+        assert_eq!(app.panels[0].series.len(), 1);
+        assert_eq!(app.panels[0].series[0].name, expected_name);
+        assert_eq!(app.panels[0].series[0].value, expected_value);
+        assert_eq!(app.panels[0].series[0].points, expected_points);
+        assert_eq!(app.panels[0].last_samples, 2);
+        assert_eq!(app.panels[0].notices.stale_queries, 1);
+        assert!(
+            app.panels[0]
+                .last_error
+                .as_deref()
+                .is_some_and(|error| error.contains("bad expression"))
+        );
+    }
+
+    #[tokio::test]
+    async fn partial_refresh_replaces_successful_query_and_keeps_failed_query_series() {
+        let (initial_url, _) = mock_prometheus(initial_two_query_results).await;
+        let mut app = create_test_app();
+        app.prometheus = prom::PromClient::new(initial_url);
+        let mut panel = test_panel("Requests", PanelType::Graph);
+        panel.exprs = vec!["first".to_string(), "second".to_string()];
+        panel.legends = vec![Some("first".to_string()), Some("second".to_string())];
+        panel.query_modes = vec![QueryMode::Range, QueryMode::Range];
+        app.panels = vec![panel];
+        app.apply_layout(DashboardLayout::flat(1));
+
+        app.refresh().await.unwrap();
+        assert_eq!(
+            app.panels[0]
+                .series
+                .iter()
+                .map(|series| (series.name.as_str(), series.value))
+                .collect::<Vec<_>>(),
+            [("first", Some(1.0)), ("second", Some(2.0))]
+        );
+
+        let (partial_url, _) = mock_prometheus(partial_two_query_results).await;
+        app.prometheus = prom::PromClient::new(partial_url);
+        app.refresh().await.unwrap();
+
+        assert_eq!(
+            app.panels[0]
+                .series
+                .iter()
+                .map(|series| (series.name.as_str(), series.value))
+                .collect::<Vec<_>>(),
+            [("first", Some(10.0)), ("second", Some(2.0))]
+        );
+        assert_eq!(app.panels[0].notices.stale_queries, 1);
+        assert!(
+            app.panels[0]
+                .last_error
+                .as_deref()
+                .is_some_and(|error| error.contains("second") && error.contains("bad expression"))
+        );
+    }
+
+    #[tokio::test]
+    async fn prometheus_warnings_follow_their_result_and_clear_on_clean_success() {
+        let (warning_url, _) = mock_prometheus(warning_matrix).await;
+        let mut app = create_test_app();
+        app.prometheus = prom::PromClient::new(warning_url);
+        let mut panel = test_panel("Requests", PanelType::Graph);
+        panel.exprs = vec!["up".to_string()];
+        panel.legends = vec![None];
+        panel.query_modes = vec![QueryMode::Range];
+        app.panels = vec![panel];
+        app.apply_layout(DashboardLayout::flat(1));
+
+        app.refresh().await.unwrap();
+        assert_eq!(app.panels[0].notices.warnings, ["partial response"]);
+        assert_eq!(app.panels[0].notices.stale_queries, 0);
+
+        let (clean_url, _) = mock_prometheus(clean_matrix).await;
+        app.prometheus = prom::PromClient::new(clean_url);
+        app.refresh().await.unwrap();
+
+        assert!(app.panels[0].notices.warnings.is_empty());
+        assert_eq!(app.panels[0].notices.stale_queries, 0);
+        assert!(app.panels[0].last_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn failed_refresh_reports_every_failed_query() {
+        let (failure_url, _) = mock_prometheus(rejected_query).await;
+        let mut app = create_test_app();
+        app.prometheus = prom::PromClient::new(failure_url);
+        let mut panel = test_panel("Requests", PanelType::Graph);
+        panel.exprs = vec!["first".to_string(), "second".to_string()];
+        panel.legends = vec![None, None];
+        panel.query_modes = vec![QueryMode::Range, QueryMode::Range];
+        app.panels = vec![panel];
+        app.apply_layout(DashboardLayout::flat(1));
+
+        app.refresh().await.unwrap();
+
+        let error = app.panels[0].last_error.as_deref().unwrap();
+        assert!(error.contains("`first`"), "{error}");
+        assert!(error.contains("`second`"), "{error}");
+        assert_eq!(error.lines().count(), 2, "{error}");
+    }
+
+    #[tokio::test]
+    async fn refresh_drops_series_for_queries_removed_from_the_panel() {
+        let (initial_url, _) = mock_prometheus(initial_two_query_results).await;
+        let mut app = create_test_app();
+        app.prometheus = prom::PromClient::new(initial_url);
+        let mut panel = test_panel("Requests", PanelType::Graph);
+        panel.exprs = vec!["first".to_string(), "second".to_string()];
+        panel.legends = vec![Some("first".to_string()), Some("second".to_string())];
+        panel.query_modes = vec![QueryMode::Range, QueryMode::Range];
+        app.panels = vec![panel];
+        app.apply_layout(DashboardLayout::flat(1));
+
+        app.refresh().await.unwrap();
+        app.panels[0].exprs.truncate(1);
+        app.panels[0].legends.truncate(1);
+        app.panels[0].query_modes.truncate(1);
+
+        let (refresh_url, _) = mock_prometheus(initial_two_query_results).await;
+        app.prometheus = prom::PromClient::new(refresh_url);
+        app.refresh().await.unwrap();
+
+        assert_eq!(
+            app.panels[0]
+                .series
+                .iter()
+                .map(|series| series.name.as_str())
+                .collect::<Vec<_>>(),
+            ["first"]
+        );
+        assert_eq!(app.panels[0].notices.stale_queries, 0);
     }
 
     #[tokio::test]
@@ -1622,6 +1868,7 @@ mod tests {
             query_modes: vec![QueryMode::Instant],
             series: vec![],
             last_error: None,
+            notices: Default::default(),
             last_url: None,
             last_samples: 0,
             grid: None,
@@ -1764,6 +2011,7 @@ mod tests {
             query_modes: vec![],
             series: vec![],
             last_error: None,
+            notices: Default::default(),
             last_url: None,
             last_samples: 0,
             grid: None,
