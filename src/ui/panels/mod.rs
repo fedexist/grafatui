@@ -46,6 +46,32 @@ pub(crate) struct PanelRenderContext {
     pub(crate) local_body_offset: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NoticeLevel {
+    Error,
+    Warning,
+}
+
+/// A compact title marker for diagnostics that do not replace displayed data.
+pub(crate) fn data_notice(panel: &PanelState) -> Option<(&'static str, NoticeLevel)> {
+    if panel.last_error.is_some() && !panel.series.is_empty() {
+        let text = if panel.notices.stale_queries > 0
+            && panel.notices.stale_queries == panel.exprs.len()
+        {
+            "⚠ stale: queries failed"
+        } else if panel.notices.stale_queries > 0 {
+            "⚠ partial: stale query"
+        } else {
+            "⚠ query failed"
+        };
+        Some((text, NoticeLevel::Error))
+    } else if !panel.notices.warnings.is_empty() {
+        Some(("⚠ warning", NoticeLevel::Warning))
+    } else {
+        None
+    }
+}
+
 /// Renders a single panel.
 ///
 /// This function handles:
@@ -70,7 +96,9 @@ pub(crate) fn render_panel(
         Style::default().fg(theme.border)
     };
 
-    if let Some(err) = &p.last_error {
+    if let Some(err) = &p.last_error
+        && p.series.is_empty()
+    {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(border_style)
@@ -105,13 +133,24 @@ pub(crate) fn render_panel(
     }
 
     // Render the outer block (Panel container)
+    let mut title = vec![Span::styled(
+        p.title.clone(),
+        Style::default().fg(theme.title),
+    )];
+    if let Some((notice, level)) = data_notice(p) {
+        let color = match level {
+            NoticeLevel::Error => Color::LightRed,
+            NoticeLevel::Warning => theme.border_selected,
+        };
+        title.push(Span::styled(
+            format!(" {notice}"),
+            Style::default().fg(color),
+        ));
+    }
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(border_style)
-        .title(Span::styled(
-            p.title.clone(),
-            Style::default().fg(theme.title),
-        ));
+        .title(Line::from(title));
     frame.render_widget(block.clone(), area);
 
     let inner_area = block.inner(area);

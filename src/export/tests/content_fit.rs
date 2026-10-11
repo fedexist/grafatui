@@ -5,6 +5,7 @@ use crate::dashboard::{DashboardItemId, DashboardLayout, DashboardLayoutItem};
 pub(super) fn rows(count: usize) -> Vec<SeriesView> {
     (1..=count)
         .map(|i| SeriesView {
+            query_index: 0,
             name: format!("row{i:02}"),
             value: Some(i as f64),
             points: vec![],
@@ -70,6 +71,7 @@ fn content_fit_export_keeps_last_measured_row() {
     let svg = render_svg(&app, viewport);
     assert!(svg.contains("&lt;name&amp;&gt;"));
     assert!(svg.contains("&lt;missing&amp;&gt;"));
+    app.panels[0].series.clear();
     app.panels[0].last_error = Some("<error&>".into());
     let svg = render_svg(&app, viewport);
     assert!(svg.contains("&lt;error&amp;&gt;"));

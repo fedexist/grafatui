@@ -666,12 +666,14 @@ mod tests {
             query_modes: vec![],
             series: vec![
                 SeriesView {
+                    query_index: 0,
                     name: "a".to_string(),
                     value: Some(1.0),
                     points: vec![],
                     visible: true,
                 },
                 SeriesView {
+                    query_index: 0,
                     name: "b".to_string(),
                     value: Some(2.0),
                     points: vec![],
@@ -679,6 +681,7 @@ mod tests {
                 },
             ],
             last_error: None,
+            notices: Default::default(),
             last_url: None,
             last_samples: 0,
             grid: None,
