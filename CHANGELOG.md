@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.1.15] - 2026-10-12
+
+### 🐛 Bug Fixes
+
+- **query:** Preserve last-good data and diagnostics ([b834b3c](https://github.com/fedexist/grafatui/commit/b834b3c977af30e19ffb91263db33923aacdb08f))
+
+### 📚 Documentation
+
+- Explain stale query diagnostics ([837f4a1](https://github.com/fedexist/grafatui/commit/837f4a1f9818696c40af10dcb81a03d6d584c618))
+- Define focused post-0.1.14 roadmap ([a349715](https://github.com/fedexist/grafatui/commit/a3497153a0e5050784004d7a9ab5ab36b8ccd2de))
+
+
 ## [0.1.14] - 2026-10-07
 
 ### ⛰️  Features
