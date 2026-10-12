@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.1.15] - 2026-10-12
+
+### ⛰️  Features
+
+- **prom:** Support private CAs and mTLS ([cfe04e4](https://github.com/fedexist/grafatui/commit/cfe04e4ef494c05191a5149d46e92d75529a3397))
+
+### 🐛 Bug Fixes
+
+- **query:** Preserve last-good data and diagnostics ([b834b3c](https://github.com/fedexist/grafatui/commit/b834b3c977af30e19ffb91263db33923aacdb08f))
+- **prom:** Reject TLS downgrade redirects ([0ddccca](https://github.com/fedexist/grafatui/commit/0ddccca6a8cff865ee27dd6aa5fee9dd6a81e07d))
+
+### 📚 Documentation
+
+- Explain stale query diagnostics ([837f4a1](https://github.com/fedexist/grafatui/commit/837f4a1f9818696c40af10dcb81a03d6d584c618))
+- Define focused post-0.1.14 roadmap ([a349715](https://github.com/fedexist/grafatui/commit/a3497153a0e5050784004d7a9ab5ab36b8ccd2de))
+- Explain secure Prometheus connections ([9f02d38](https://github.com/fedexist/grafatui/commit/9f02d389c39af3bd481bcfd13c9eac6febaa7b5d))
+
+
 ## [0.1.14] - 2026-10-07
 
 ### ⛰️  Features
