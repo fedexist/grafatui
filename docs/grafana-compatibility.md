@@ -46,11 +46,12 @@ unsupported advanced V2 dashboards. See the
 | Prometheus `PanelQuery` queries | ✅ Supported | `prometheus`, `grafana-amazonprometheus-datasource`, and `grafana-azureprometheus-datasource` query groups are imported; other datasources emit import diagnostics and are skipped |
 | `RowsLayoutRow.spec.fillScreen` | ⛔ Not Applicable | Accepted and ignored; terminal rows size to their content |
 | Top-level `spec.variables` | 🔶 Partial | Supported variable kinds map to Grafatui variables; unsupported kinds emit diagnostics |
+| `spec.variables[].spec.refresh` | ✅ Supported | `never`, `onDashboardLoad`, and `onTimeRangeChanged` control initial and manual/time-range resolution |
 | `spec.timeSettings.autoRefresh` | ✅ Supported | Used as the dashboard refresh interval |
 | `vizConfig.spec.fieldConfig` | 🔶 Partial | The supported Classic-equivalent field configuration subset applies |
 | `AutoGridLayout` | ✅ Supported | Ordered panels at root or inside rows/tabs; responsive columns, fillScreen, table content fitting, minimum/maximum heights and row matching share TUI, hit-test, scroll, and export geometry; repeats and conditional visibility use scoped variables |
 | Repeated grid items and row repeat | ❌ Not Implemented | Rejected as fatal import errors |
-| Row/tab local variables | 🔶 Partial | Supported variable kinds retain scopes for descendant panel queries, AutoGrid repeats and predicates |
+| Row/tab local variables | 🔶 Partial | Supported variable kinds retain scopes for descendant panel queries, AutoGrid repeats and predicates; a newly visible scope resolves its variables once |
 | AutoGrid item conditional rendering | ✅ Supported | Variable, query-data and time-range conditions; AND/OR and show/hide composition |
 | Row/tab conditional rendering | ❌ Not Implemented | Deferred V2 feature |
 | `LibraryPanel` elements | ❌ Not Implemented | Exports reference library panels by uid only; they are skipped with a diagnostic. Export with **Share dashboard with another instance** enabled to inline them |
@@ -311,7 +312,7 @@ V2 dashboard outside this grid, rows, tabs, and AutoGrid subset.
 | `templating.list[].sort` | ❌ Not Implemented | |
 | `templating.list[].multi` | ❌ Not Implemented | Multi-value selection not supported |
 | `templating.list[].includeAll` | ❌ Not Implemented | |
-| `templating.list[].refresh` | 🔶 Partial | Dynamic variables refresh before panel queries |
+| `templating.list[].refresh` | ✅ Supported | `0` keeps a saved value, `1` resolves on load, and `2` also resolves on manual/time-range changes; periodic panel refreshes do not re-run variables |
 | `templating.list[].options` | ❌ Not Implemented | No dropdown/picker UI |
 | `templating.list[].hide` | ❌ Not Implemented | |
 | CLI `--var KEY=VALUE` override | ✅ Supported | Overrides dashboard defaults from command line |
@@ -439,7 +440,7 @@ compatibility with Grafana annotation queries, APIs, `annotations`, or
 |---|---|---|
 | Prometheus (`query_range`) | ✅ Supported | Primary and only supported datasource |
 | Prometheus (`query` instant) | ✅ Supported | Used for dynamic template variables and instant panel targets |
-| Prometheus labels API | ✅ Supported | Used for dynamic variable `label_values(...)` |
+| Prometheus labels API | ✅ Supported | Dynamic `label_values(...)` requests include the active start/end window and an optional `match[]` selector |
 | Mixed datasource | ❌ Not Implemented | |
 | InfluxDB | ❌ Not Implemented | |
 | Loki | ❌ Not Implemented | |
