@@ -57,6 +57,7 @@ impl TlsFiles {
         if reqwest::Url::parse(url).map_or(true, |url| url.scheme() != "https") {
             bail!("TLS options require an https:// Prometheus URL");
         }
+        builder = builder.https_only(true);
 
         match (&self.client_cert, &self.client_key) {
             (Some(_), None) | (None, Some(_)) => {
@@ -201,7 +202,7 @@ mod tests {
 
     const UP: &str = r#"{"status":"success","data":{"resultType":"vector","result":[{"metric":{"job":"node"},"value":[1,"1"]}]}}"#;
 
-    async fn answer(mut stream: impl AsyncRead + AsyncWrite + Unpin) {
+    async fn answer_with(mut stream: impl AsyncRead + AsyncWrite + Unpin, response: &[u8]) {
         let mut request = Vec::new();
         let mut buf = [0; 1024];
         while !request.windows(4).any(|window| window == b"\r\n\r\n") {
@@ -210,15 +211,19 @@ mod tests {
                 Ok(count) => request.extend_from_slice(&buf[..count]),
             }
         }
+        let _ = stream.write_all(response).await;
+        let _ = stream.shutdown().await;
+    }
+
+    async fn answer(stream: impl AsyncRead + AsyncWrite + Unpin) {
         let response = format!(
             "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{UP}",
             UP.len()
         );
-        let _ = stream.write_all(response.as_bytes()).await;
-        let _ = stream.shutdown().await;
+        answer_with(stream, response.as_bytes()).await;
     }
 
-    async fn tls_prometheus(server: &TestCert, client_ca: Option<&TestCa>) -> String {
+    async fn tls_server(server: &TestCert, client_ca: Option<&TestCa>, response: String) -> String {
         let provider = Arc::new(rustls::crypto::ring::default_provider());
         let builder = rustls::ServerConfig::builder_with_provider(Arc::clone(&provider))
             .with_protocol_versions(&[&rustls::version::TLS13])
@@ -250,17 +255,27 @@ mod tests {
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
+        let response = Arc::new(response.into_bytes());
         tokio::spawn(async move {
             while let Ok((stream, _)) = listener.accept().await {
                 let acceptor = acceptor.clone();
+                let response = Arc::clone(&response);
                 tokio::spawn(async move {
                     if let Ok(stream) = acceptor.accept(stream).await {
-                        answer(stream).await;
+                        answer_with(stream, &response).await;
                     }
                 });
             }
         });
         format!("https://{address}")
+    }
+
+    async fn tls_prometheus(server: &TestCert, client_ca: Option<&TestCa>) -> String {
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{UP}",
+            UP.len()
+        );
+        tls_server(server, client_ca, response).await
     }
 
     #[test]
@@ -444,5 +459,35 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.series.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn tls_client_rejects_redirects_to_plain_http() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server_hits = Arc::clone(&hits);
+        tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                server_hits.fetch_add(1, Ordering::Relaxed);
+                answer(stream).await;
+            }
+        });
+
+        let server_ca = TestCa::new("server CA");
+        let redirect = format!(
+            "HTTP/1.1 302 Found\r\nlocation: http://{address}/api/v1/query\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+        );
+        let url = tls_server(&server_ca.server_cert(), None, redirect).await;
+        let dir = test_dir("https-redirect");
+        let files = tls_files(&dir, &server_ca, None);
+
+        let result = PromClient::with_tls(url, &files)
+            .unwrap()
+            .query_instant_series("up", 1)
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(hits.load(Ordering::Relaxed), 0);
     }
 }
