@@ -14,6 +14,33 @@ If you are using the demo stack, the Prometheus port is `19090`:
 curl http://localhost:19090/-/healthy
 ```
 
+## TLS Configuration Errors
+
+Grafatui validates configured certificate files at startup. If startup fails:
+
+- use an `https://` Prometheus URL whenever a TLS option is set;
+- set `client_cert` and `client_key` together;
+- verify that the configured paths are readable PEM files and that the client
+  private key is unencrypted;
+- verify that `client_key` belongs to the first certificate in `client_cert`.
+
+For a private-CA server, inspect the server chain and the configured CA bundle:
+
+```bash
+openssl s_client -connect prometheus.internal:9090 -showcerts </dev/null
+openssl x509 -in ca.pem -noout -subject -issuer -enddate
+```
+
+For mutual TLS, verify the client certificate and key match:
+
+```bash
+openssl x509 -in client.pem -pubkey -noout | openssl pkey -pubin -outform DER | openssl sha256
+openssl pkey -in client.key -pubout -outform DER | openssl sha256
+```
+
+Grafatui reports file paths and validation failures, but never certificate or
+private-key contents.
+
 ## No Data Appears
 
 Prometheus may need a few scrape intervals before data is available. Wait 10 to 15 seconds and force a refresh with `r`.

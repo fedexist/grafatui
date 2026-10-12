@@ -7,6 +7,9 @@ Grafatui can be configured with CLI options, a TOML configuration file, or both.
 | Option | Description | Default |
 |---|---|---|
 | `--prometheus-url <URL>` | Prometheus server URL | `http://localhost:9090` |
+| `--ca-cert <FILE>` | PEM CA certificates to trust in addition to the built-in public roots | none |
+| `--client-cert <FILE>` | PEM client certificate chain for mutual TLS; requires `--client-key` or its config equivalent | none |
+| `--client-key <FILE>` | PEM private key for the mutual TLS client certificate | none |
 | `--grafana-json <FILE>` | Grafana dashboard file: Classic JSON, or V2 resource JSON or YAML | none |
 | `--annotations-file <FILE>` | Read-only external JSONL point-event file | none |
 | `--annotations-command <PROGRAM>` | Read-only executable annotation provider | none |
@@ -58,6 +61,41 @@ annotations_file = "./events.jsonl"
 job = "node"
 instance = "server-01"
 ```
+
+## Private CAs and Mutual TLS
+
+TLS settings are optional. Without them, plain HTTP and public HTTPS behave as
+before. To connect to a Prometheus server using a private CA and mutual TLS:
+
+```toml
+prometheus_url = "https://prometheus.internal:9090"
+
+[tls]
+ca_cert = "~/.config/grafatui/tls/ca.pem"
+client_cert = "~/.config/grafatui/tls/client.pem"
+client_key = "~/.config/grafatui/tls/client.key"
+```
+
+The equivalent CLI options are:
+
+```bash
+grafatui --prometheus-url https://prometheus.internal:9090 \
+  --ca-cert ca.pem \
+  --client-cert client.pem \
+  --client-key client.key
+```
+
+- `ca_cert` may contain multiple PEM CA certificates. They augment the built-in
+  public roots rather than replacing them.
+- `client_cert` contains the client certificate followed by any intermediate
+  certificates. `client_key` accepts an unencrypted RSA, SEC1 EC, or PKCS#8 PEM
+  private key. The two options must be set together.
+- CLI values override matching `[tls]` values one by one. Paths beginning with
+  `~` are expanded after precedence is resolved.
+- TLS options require an `https://` Prometheus URL. There is no insecure
+  certificate-verification bypass.
+- Unknown `[tls]` keys are rejected. File and parsing errors identify the
+  option and path without including certificate or private-key contents.
 
 ## Query Resolution
 
