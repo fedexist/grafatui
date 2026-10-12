@@ -266,6 +266,12 @@ fn normalize_variables(
                     query: query.clone(),
                     regex: variable.regex.clone(),
                     query_path: path.clone(),
+                    refresh: match variable.refresh {
+                        Some(model::VariableRefresh::OnTimeRangeChange) => {
+                            super::VariableRefresh::OnTimeRangeChange
+                        }
+                        _ => super::VariableRefresh::OnLoad,
+                    },
                 });
             variable.retained = Some(variables::retain(
                 spec,
@@ -334,6 +340,12 @@ fn normalize_query_variable(
         all_value: optional_string(spec, "allValue"),
         source_path,
         query_path: query.map(|(_, path)| path),
+        refresh: match spec.get("refresh").and_then(Value::as_str) {
+            Some("never") => Some(model::VariableRefresh::Never),
+            Some("onDashboardLoad") => Some(model::VariableRefresh::OnDashboardLoad),
+            Some("onTimeRangeChanged") => Some(model::VariableRefresh::OnTimeRangeChange),
+            _ => None,
+        },
     }))
 }
 
@@ -349,6 +361,7 @@ fn normalize_option_variable(spec: &JsonObject, source_path: &str) -> Result<mod
         all_value: optional_string(spec, "allValue"),
         source_path,
         query_path: None,
+        refresh: None,
     })
 }
 
@@ -369,6 +382,7 @@ fn normalize_switch_variable(spec: &JsonObject, source_path: &str) -> Result<mod
         all_value: None,
         source_path,
         query_path: None,
+        refresh: None,
     })
 }
 

@@ -79,6 +79,15 @@ pub(crate) struct TemplateQueryVar {
     pub(crate) regex: Option<String>,
     /// JSON-ish source path for the variable query.
     pub(crate) query_path: String,
+    /// When Grafana re-runs the query after the dashboard loads.
+    pub(crate) refresh: VariableRefresh,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum VariableRefresh {
+    #[default]
+    OnLoad,
+    OnTimeRangeChange,
 }
 
 /// A single panel extracted from Grafana.
@@ -1159,6 +1168,100 @@ mod tests {
             dashboard.query_vars[0].query_path,
             "spec.variables[0].spec.definition"
         );
+    }
+
+    #[test]
+    fn classic_query_variables_import_refresh_modes_and_keep_saved_never_values() {
+        let variable = |name: &str, refresh: serde_json::Value, current: &str| {
+            serde_json::json!({
+                "name": name,
+                "type": "query",
+                "query": format!("label_values({name})"),
+                "refresh": refresh,
+                "current": {"text": current, "value": current},
+            })
+        };
+        let json = serde_json::json!({
+            "title": "Refresh modes",
+            "panels": [],
+            "templating": {"list": [
+                variable("saved", serde_json::json!(0), "api"),
+                variable("cleared", serde_json::json!(0), ""),
+                {
+                    "name": "cleared_array",
+                    "type": "query",
+                    "query": "label_values(cleared_array)",
+                    "refresh": 0,
+                    "current": {"text": [""], "value": [""]},
+                },
+                variable("load", serde_json::json!(1), "api"),
+                variable("range", serde_json::json!(2), "api"),
+                variable("default", serde_json::Value::Null, "api"),
+            ]},
+        });
+
+        let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+        let refreshes = dashboard
+            .query_vars
+            .iter()
+            .map(|variable| (variable.name.as_str(), variable.refresh))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            refreshes,
+            [
+                ("cleared", VariableRefresh::OnLoad),
+                ("cleared_array", VariableRefresh::OnLoad),
+                ("load", VariableRefresh::OnLoad),
+                ("range", VariableRefresh::OnTimeRangeChange),
+                ("default", VariableRefresh::OnLoad),
+            ]
+        );
+        assert_eq!(dashboard.vars.get("saved").map(String::as_str), Some("api"));
+    }
+
+    #[test]
+    fn v2_query_variables_import_refresh_modes() {
+        let mut json = valid_v2_resource();
+        let variable = |name: &str, refresh: &str| {
+            serde_json::json!({
+                "kind": "QueryVariable",
+                "spec": {
+                    "name": name,
+                    "current": {"text": "api", "value": "api"},
+                    "refresh": refresh,
+                    "query": {
+                        "kind": "DataQuery",
+                        "group": "prometheus",
+                        "version": "v0",
+                        "spec": {"query": format!("label_values({name})")}
+                    }
+                }
+            })
+        };
+        json["spec"]["variables"] = serde_json::json!([
+            variable("saved", "never"),
+            variable("load", "onDashboardLoad"),
+            variable("range", "onTimeRangeChanged"),
+        ]);
+
+        let dashboard = parse_grafana_dashboard(&json.to_string()).unwrap();
+        let refreshes = dashboard
+            .query_vars
+            .iter()
+            .map(|variable| (variable.name.as_str(), variable.refresh))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            refreshes,
+            [
+                ("load", VariableRefresh::OnLoad),
+                ("range", VariableRefresh::OnTimeRangeChange),
+            ]
+        );
+        assert_eq!(dashboard.vars.get("saved").map(String::as_str), Some("api"));
+        let saved = dashboard.variable_state.lookup(0, "saved").unwrap();
+        assert!(saved.query.is_none());
     }
 
     #[test]

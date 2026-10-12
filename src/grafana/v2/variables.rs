@@ -120,6 +120,7 @@ pub(super) fn retain(
         ),
         query,
         last_error: None,
+        resolved: false,
     })
 }
 fn custom_options(query: &str) -> Vec<VariableOption> {
