@@ -16,6 +16,7 @@ async fn initial_dynamic_refresh_selects_first_resolved_instance() {
         query: "label_values(instance)".into(),
         regex: None,
         query_path: "spec.variables".into(),
+        refresh: Default::default(),
     });
     app.dynamic
         .as_mut()
@@ -144,8 +145,7 @@ async fn local_variable_refresh_obeys_parent_activation_even_when_items_are_hidd
                 "parent-node"
             };
             tx.send(query).unwrap();
-            let body =
-                serde_json::json!({"status":"success","data":[{"instance":node}]}).to_string();
+            let body = serde_json::json!({"status":"success","data":[node]}).to_string();
             socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{}",body.len(),body).as_bytes()).await.unwrap();
         }
     });
@@ -161,6 +161,7 @@ async fn local_variable_refresh_obeys_parent_activation_even_when_items_are_hidd
             },
             regex: None,
             query_path: "fixture".into(),
+            refresh: Default::default(),
         });
         VariableScope {
             parent: Some(parent),
@@ -243,7 +244,6 @@ async fn local_variable_refresh_obeys_parent_activation_even_when_items_are_hidd
     .await
     .unwrap()
     .unwrap();
-    assert_eq!(requests.try_recv().unwrap(), "up{section=\"parent\"}");
     assert_eq!(
         requests.try_recv().unwrap(),
         "up{section=\"second\",parent=\"parent-node\"}"

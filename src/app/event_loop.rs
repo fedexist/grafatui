@@ -96,7 +96,7 @@ where
 
         if app.last_refresh.elapsed() >= app.refresh_every {
             let before_refresh = app.last_refresh;
-            app.refresh().await?;
+            app.refresh_periodic().await?;
             reconcile_after_refresh(terminal_viewport(terminal)?, app, before_refresh);
             needs_draw = true;
             capture_recording_after_change(terminal, app)?;
