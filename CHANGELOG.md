@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.1.16] - 2026-10-12
+
+### ⛰️  Features
+
+- **variables:** Honor Grafana refresh semantics ([43ddc34](https://github.com/fedexist/grafatui/commit/43ddc34ad23c367d3043433c7cc28bff7616c095))
+
+### 📚 Documentation
+
+- Explain variable refresh behavior ([11fa5bb](https://github.com/fedexist/grafatui/commit/11fa5bbbd8de5ee51d432f095b1aea44fa8ee71a))
+
+
 ## [0.1.15] - 2026-10-12
 
 ### ⛰️  Features
