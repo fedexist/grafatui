@@ -22,6 +22,10 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
+mod tls;
+
+pub(crate) use tls::TlsFiles;
+
 /// Range query results kept for re-use, such as when panning back to a window.
 const CACHE_CAPACITY: usize = 64;
 /// Largest response body read from Prometheus.
@@ -212,22 +216,39 @@ pub(crate) struct PromClient {
 
 impl PromClient {
     pub(crate) fn new(base: String) -> Self {
-        let http = Client::builder()
+        let http = Self::client_builder().build().unwrap_or_else(|e| {
+            eprintln!(
+                "Warning: Failed to configure HTTP client with timeouts: {}",
+                e
+            );
+            eprintln!("         Falling back to default client (requests may hang).");
+            Client::new()
+        });
+
+        Self::with_client(base, http)
+    }
+
+    pub(crate) fn with_tls(base: String, tls: &TlsFiles) -> Result<Self> {
+        if tls.is_empty() {
+            return Ok(Self::new(base));
+        }
+        let http = tls
+            .configure(&base, Self::client_builder())?
+            .build()
+            .map_err(|error| tls.build_error(&error))?;
+        Ok(Self::with_client(base, http))
+    }
+
+    fn client_builder() -> reqwest::ClientBuilder {
+        Client::builder()
             .timeout(Duration::from_secs(10))
             .connect_timeout(Duration::from_secs(5))
-            .build()
-            .unwrap_or_else(|e| {
-                eprintln!(
-                    "Warning: Failed to configure HTTP client with timeouts: {}",
-                    e
-                );
-                eprintln!("         Falling back to default client (requests may hang).");
-                Client::new()
-            });
+    }
 
+    fn with_client(base: String, client: Client) -> Self {
         Self {
             base,
-            client: http,
+            client,
             cache: Arc::new(Mutex::new(QueryCache::default())),
             inflight: Arc::new(Mutex::new(HashMap::new())),
             max_response_bytes: MAX_RESPONSE_BYTES,

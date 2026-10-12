@@ -90,6 +90,8 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    let tls = resolve_tls_files(&args, config.tls);
+
     let annotation_source = resolve_annotation_source(
         AnnotationCliSource {
             file: args.annotations_file,
@@ -150,7 +152,7 @@ async fn main() -> Result<()> {
     let mut auto_grid_behaviors = HashMap::new();
     let mut dashboard_refresh_rate_ms = None;
 
-    let prom = prom::PromClient::new(prometheus_url);
+    let prom = prom::PromClient::with_tls(prometheus_url, &tls)?;
 
     // Build panels from Grafana import or simple queries.
     let (title, panels, skipped_panels, imported_layout) = if let Some(path) = dashboard_path {
@@ -400,6 +402,16 @@ fn load_startup_config(path: Option<std::path::PathBuf>) -> Result<Config> {
     Config::load(path)
 }
 
+fn resolve_tls_files(args: &cli::Args, configured: prom::TlsFiles) -> prom::TlsFiles {
+    prom::TlsFiles {
+        ca_cert: args.ca_cert.clone(),
+        client_cert: args.client_cert.clone(),
+        client_key: args.client_key.clone(),
+    }
+    .or(configured)
+    .map_paths(config::expand_path)
+}
+
 fn resolve_refresh_rate_ms(
     cli_refresh_rate: Option<u64>,
     config_refresh_rate: Option<u64>,
@@ -598,6 +610,33 @@ fn print_validation_summary(
 mod tests {
     use super::*;
     use crate::dashboard::{DashboardLayout, DashboardLayoutItem, DashboardRow, RowId};
+    use clap::Parser;
+
+    #[test]
+    fn tls_cli_options_override_config_one_by_one() {
+        let args = cli::Args::parse_from(["grafatui", "--client-cert", "~/cli-client.pem"]);
+        let configured = prom::TlsFiles {
+            ca_cert: Some("/etc/grafatui/ca.pem".into()),
+            client_cert: Some("/etc/grafatui/client.pem".into()),
+            client_key: Some("~/config-client.key".into()),
+        };
+
+        let resolved = resolve_tls_files(&args, configured);
+
+        assert_eq!(resolved.ca_cert, Some("/etc/grafatui/ca.pem".into()));
+        assert_eq!(
+            resolved.client_cert,
+            Some(config::expand_path(std::path::Path::new(
+                "~/cli-client.pem"
+            )))
+        );
+        assert_eq!(
+            resolved.client_key,
+            Some(config::expand_path(std::path::Path::new(
+                "~/config-client.key"
+            )))
+        );
+    }
 
     #[test]
     #[ignore = "requires a real PTY"]
