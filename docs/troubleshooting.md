@@ -61,6 +61,11 @@ grafatui --grafana-json ./dashboard.json --var instance=localhost:9090
 
 If a Grafana dashboard uses multi-select formatting modifiers such as `${var:csv}` or `${var:regex}`, check the [compatibility matrix](grafana-compatibility.md). Not every Grafana interpolation mode is implemented.
 
+If a Prometheus-backed variable fails to refresh, Grafatui keeps its previous
+selection and shows `Variable NAME failed: ...` in the footer. Other due
+variables and panels continue refreshing. Force a retry with `r`; a successful
+retry clears the warning.
+
 ## Stale Data and Query Warnings
 
 Grafatui keeps the last successful series for a query when a later refresh

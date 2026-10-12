@@ -167,9 +167,24 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
     // Statuses such as export results come first: the summary alone usually
     // fills the two footer lines, which would hide them.
     let text = if detail.is_empty() {
-        summary
+        Text::from(summary)
     } else {
-        format!("{detail}\n{summary}")
+        let detail = if let Some(warning) = app.variable_warning()
+            && let Some(rest) = detail.strip_prefix(&warning)
+        {
+            Line::from(vec![
+                Span::styled(
+                    warning,
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(rest.to_string()),
+            ])
+        } else {
+            Line::raw(detail)
+        };
+        Text::from(vec![detail, Line::raw(summary)])
     };
     let footer = Paragraph::new(text).wrap(Wrap { trim: true });
     frame.render_widget(footer, chunks[2]);
@@ -291,6 +306,10 @@ pub(crate) fn render_row_header(
 
 fn build_footer_detail(app: &AppState) -> String {
     let mut parts = Vec::new();
+
+    if let Some(warning) = app.variable_warning() {
+        parts.push(warning);
+    }
 
     if let Some(notice) = selected_panel_notice(app) {
         parts.push(notice);
@@ -476,6 +495,40 @@ mod tests {
         let recovered = last_good_contract_capture(&mut app, 100, 30, "warning-cleared");
         assert!(!recovered.contains("⚠ warning"), "{recovered}");
         assert!(!recovered.contains("partial response"), "{recovered}");
+    }
+
+    #[test]
+    fn variable_failure_keeps_dashboard_data_and_warns_in_footer() {
+        let mut app = test_app();
+        app.vars.insert("instance".into(), "node-a".into());
+        app.variable_errors
+            .insert("instance".into(), "request timed out".into());
+        app.panels = vec![graph_panel_with_data("Requests")];
+        app.apply_layout(crate::dashboard::DashboardLayout::flat(1));
+        app.view_end_ts = 1_700_000_060;
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+
+        terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+
+        let text = terminal_text(&terminal);
+        assert_eq!(app.vars.get("instance").map(String::as_str), Some("node-a"));
+        assert_eq!(app.panels[0].series.len(), 1);
+        assert!(text.contains("api"), "{text}");
+        assert!(
+            text.contains("Variable instance failed: request timed out"),
+            "{text}"
+        );
+        assert!(!text.contains("old cluster failure"), "{text}");
+        let warning_cell = terminal.backend().buffer().cell((0, 22)).unwrap();
+        assert_eq!(warning_cell.symbol(), "V");
+        assert_eq!(warning_cell.fg, Color::Yellow);
+        assert!(warning_cell.modifier.contains(Modifier::BOLD));
+
+        if let Ok(root) = std::env::var("GRAFATUI_VARIABLE_WARNING_CAPTURE_DIR") {
+            let directory = std::path::PathBuf::from(root);
+            std::fs::create_dir_all(&directory).unwrap();
+            capture_buffer(&terminal, &directory.join("footer-warning-80x24.json"));
+        }
     }
 
     #[test]

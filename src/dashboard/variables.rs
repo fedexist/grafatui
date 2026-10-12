@@ -19,6 +19,7 @@ pub(crate) struct Variable {
     pub(crate) repeatable: bool,
     pub(crate) query: Option<TemplateQueryVar>,
     pub(crate) last_error: Option<String>,
+    pub(crate) resolved: bool,
 }
 impl Variable {
     pub(crate) fn repeat_values(&self) -> Vec<VariableOption> {

@@ -115,11 +115,11 @@ reviewable slice that preserves current defaults and can ship independently.
 
 | Release | Focus | Outcome |
 |---|---|---|
-| **0.1.15** | Secure connectivity | Private CAs and mutual TLS work without weakening default TLS behavior |
+| **0.1.15** ✅ | Secure connectivity | Released: private CAs and mutual TLS work without weakening default TLS behavior |
 | **0.1.16** | Variable correctness | Grafana refresh settings and dependent variables behave predictably |
 | **0.1.17** | Value mappings | Common Grafana mappings render consistently across supported panels |
 
-### 0.1.15 - Secure Connectivity
+### 0.1.15 - Secure Connectivity (released)
 
 - Add optional private CA, client certificate, and client key settings.
 - Keep CLI-over-config precedence and the existing HTTP/public HTTPS defaults.
@@ -395,12 +395,12 @@ These are valuable, but they should not outrank core Grafana import fidelity.
 
 Recommended order for the next focused development cycle:
 
-1. Write and review the focused mTLS design for `0.1.15`.
-2. Audit the fork's mTLS commit file by file, reusing code only where it meets
-   current quality and compatibility requirements.
-3. Implement secure connectivity test-first as its own branch and pull request.
-4. Repeat the same focused design, audit, and implementation cycle for variable
-   correctness and value mappings.
+1. Complete the focused variable-correctness implementation and verification
+   for `0.1.16` as its own pull request.
+2. Release `0.1.16` after its CI and compatibility evidence are clean.
+3. Write and review the value-mapping design for `0.1.17` before implementation.
+4. Continue auditing fork features individually, reusing code only where it
+   meets current quality and compatibility requirements.
 5. Update the compatibility matrix and release notes with every shipped slice.
 
 ---

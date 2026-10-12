@@ -6,7 +6,7 @@ pub(super) fn finish(dashboard: model::Dashboard) -> Result<DashboardImport> {
     let model::Dashboard {
         title,
         refresh,
-        variables,
+        mut variables,
         layout,
         skipped_panels,
         diagnostics,
@@ -18,6 +18,13 @@ pub(super) fn finish(dashboard: model::Dashboard) -> Result<DashboardImport> {
         diagnostics,
         ..DashboardImport::default()
     };
+    for variable in &mut variables {
+        if !query_resolves(variable)
+            && let Some(retained) = &mut variable.retained
+        {
+            retained.query = None;
+        }
+    }
     out.variable_state.scopes[0].variables = variables
         .iter()
         .filter_map(|v| v.retained.clone())
@@ -62,6 +69,7 @@ fn import_variables(out: &mut DashboardImport, variables: Vec<model::Variable>) 
         }
 
         if variable.kind.as_deref() == Some("query")
+            && query_resolves(&variable)
             && !current_is_all(variable.current.as_ref())
             && let (Some(query), Some(query_path)) = (variable.query, variable.query_path)
         {
@@ -70,8 +78,32 @@ fn import_variables(out: &mut DashboardImport, variables: Vec<model::Variable>) 
                 query,
                 regex: variable.regex.filter(|regex| !regex.trim().is_empty()),
                 query_path,
+                refresh: match variable.refresh {
+                    Some(model::VariableRefresh::OnTimeRangeChange) => {
+                        super::VariableRefresh::OnTimeRangeChange
+                    }
+                    _ => super::VariableRefresh::OnLoad,
+                },
             });
         }
+    }
+}
+
+fn query_resolves(variable: &model::Variable) -> bool {
+    if variable.refresh != Some(model::VariableRefresh::Never) {
+        return true;
+    }
+    let value = variable
+        .current
+        .as_ref()
+        .and_then(|current| current.value.as_ref().or(current.text.as_ref()));
+    match value {
+        Some(serde_json::Value::String(value)) => value.is_empty(),
+        Some(serde_json::Value::Array(values)) => values
+            .iter()
+            .all(|value| matches!(value, serde_json::Value::String(value) if value.is_empty())),
+        None => true,
+        Some(_) => false,
     }
 }
 

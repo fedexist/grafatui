@@ -378,38 +378,29 @@ impl PromClient {
         })
     }
 
-    pub(crate) async fn label_values(&self, label: &str) -> Result<Vec<String>> {
-        let url = format!(
-            "{}/api/v1/label/{}/values",
-            self.base.trim_end_matches('/'),
-            urlencoding::encode(label)
-        );
-        let body: PromResponse<Vec<String>> = self.get_json(&url).await?;
-        ensure_success(&body.status)?;
-        Ok(body.data)
-    }
-
-    pub(crate) async fn series_label_values(
+    /// Values of `label` on series in `start..=end`, only those matching
+    /// `selector` when given, as Grafana's `label_values` queries.
+    pub(crate) async fn label_values(
         &self,
-        metric: &str,
         label: &str,
+        selector: Option<&str>,
         start: i64,
         end: i64,
     ) -> Result<Vec<String>> {
-        let url = format!(
-            "{}/api/v1/series?match[]={}&start={}&end={}",
+        let mut url = format!(
+            "{}/api/v1/label/{}/values?start={}&end={}",
             self.base.trim_end_matches('/'),
-            urlencoding::encode(metric),
+            urlencoding::encode(label),
             start,
             end
         );
-        let body: PromResponse<Vec<HashMap<String, String>>> = self.get_json(&url).await?;
+        if let Some(selector) = selector {
+            url.push_str("&match[]=");
+            url.push_str(&urlencoding::encode(selector));
+        }
+        let body: PromResponse<Vec<String>> = self.get_json(&url).await?;
         ensure_success(&body.status)?;
-        Ok(body
-            .data
-            .into_iter()
-            .filter_map(|series| series.get(label).cloned())
-            .collect())
+        Ok(body.data)
     }
 
     pub(crate) async fn query_instant_result_strings(
@@ -939,6 +930,44 @@ mod tests {
         assert_eq!(
             url,
             "http://localhost:9090/prometheus/api/v1/query?query=up%7Bjob%3D%22node%22%7D&time=1600003600"
+        );
+    }
+
+    #[tokio::test]
+    async fn label_values_are_bounded_by_time_and_optional_selector() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let request = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut bytes = Vec::new();
+            let mut chunk = [0_u8; 1024];
+            while !bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+                let read = socket.read(&mut chunk).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                bytes.extend_from_slice(&chunk[..read]);
+            }
+            let body = r#"{"status":"success","data":["api-1"]}"#;
+            socket
+                .write_all(ok_response(body).as_bytes())
+                .await
+                .unwrap();
+            String::from_utf8(bytes).unwrap()
+        });
+        let client = PromClient::new(format!("http://{address}"));
+
+        let values = client
+            .label_values("instance", Some(r#"up{job="api"}"#), 100, 200)
+            .await
+            .unwrap();
+
+        assert_eq!(values, ["api-1"]);
+        let request = request.await.unwrap();
+        let target = request.split_whitespace().nth(1).unwrap();
+        assert_eq!(
+            target,
+            "/api/v1/label/instance/values?start=100&end=200&match[]=up%7Bjob%3D%22api%22%7D"
         );
     }
 

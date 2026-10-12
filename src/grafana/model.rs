@@ -64,6 +64,14 @@ pub(super) struct Variable {
     #[allow(dead_code)]
     pub(super) source_path: String,
     pub(super) query_path: Option<String>,
+    pub(super) refresh: Option<VariableRefresh>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum VariableRefresh {
+    Never,
+    OnDashboardLoad,
+    OnTimeRangeChange,
 }
 
 #[derive(Debug)]

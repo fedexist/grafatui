@@ -54,6 +54,7 @@ fn repeated_app(values: &[&str]) -> AppState {
         repeatable: true,
         query: None,
         last_error: None,
+        resolved: false,
     }];
     app.variable_state.panel_scopes = vec![0, 0];
     app.apply_layout(DashboardLayout::new(vec![DashboardLayoutItem::AutoGrid(

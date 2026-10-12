@@ -17,7 +17,9 @@
 use crate::app::data::{
     QueryIntervals, StepPolicy, downsample, expand_expr, format_legend, parse_min_interval,
 };
-use crate::app::variables::refresh_query_variables;
+use crate::app::variables::{
+    VariableRefreshContext, VariableReport, VariableUpdate, refresh_query_variables,
+};
 use crate::dashboard::{DashboardItemId, DashboardLayout, RowId, TabGroupId};
 use crate::export::{ExportOptions, RecordingState};
 use crate::grafana::TemplateQueryVar;
@@ -28,7 +30,7 @@ use anyhow::Result;
 use futures::StreamExt;
 use ratatui::style::Color;
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 /// Represents the state of a single dashboard panel.
@@ -366,7 +368,9 @@ pub(crate) struct AppState {
     pub(crate) vars: HashMap<String, String>,
     /// Prometheus-backed template variables imported from Grafana.
     pub(crate) query_vars: Vec<TemplateQueryVar>,
+    pub(crate) variable_errors: BTreeMap<String, String>,
     pub(crate) variable_state: crate::dashboard::variables::VariableState,
+    variables_loaded: bool,
     pub(crate) dynamic: Option<super::dynamic::DynamicDashboard>,
     /// Count of panels skipped during import.
     pub(crate) skipped_panels: usize,
@@ -446,7 +450,9 @@ impl AppState {
             debug_bar: false,
             vars: HashMap::new(),
             query_vars: Vec::new(),
+            variable_errors: BTreeMap::new(),
             variable_state: Default::default(),
+            variables_loaded: false,
             dynamic: None,
             skipped_panels,
             layout,
@@ -743,7 +749,7 @@ impl AppState {
     }
 
     pub(crate) async fn refresh_initial(&mut self) -> Result<()> {
-        self.refresh().await?;
+        self.refresh_with(VariableUpdate::Load).await?;
         // Startup has no user selection to preserve; resolve options/conditions first.
         self.selected_item = self.layout.first_visible();
         Ok(())
@@ -761,6 +767,19 @@ impl AppState {
     }
 
     pub(crate) async fn refresh(&mut self) -> Result<()> {
+        self.refresh_with(VariableUpdate::TimeRangeChange).await
+    }
+
+    pub(crate) async fn refresh_periodic(&mut self) -> Result<()> {
+        self.refresh_with(VariableUpdate::Tick).await
+    }
+
+    async fn refresh_with(&mut self, requested_update: VariableUpdate) -> Result<()> {
+        let variable_update = if self.variables_loaded {
+            requested_update
+        } else {
+            VariableUpdate::Load
+        };
         let range = self.range;
         let step_policy = self.step_policy;
         let scrape_interval = self.scrape_interval;
@@ -782,9 +801,12 @@ impl AppState {
                     &self.prometheus,
                     &mut self.variable_state,
                     &active_scopes,
-                    range,
-                    default_intervals,
-                    end_ts,
+                    VariableRefreshContext {
+                        update: variable_update,
+                        range,
+                        intervals: default_intervals,
+                        end_ts,
+                    },
                     &self.vars,
                 )
                 .await;
@@ -803,17 +825,20 @@ impl AppState {
                 &mut self.vars,
                 &mut self.panels,
                 &visible_panel_indices,
-                true,
+                &self.variable_errors,
+                Some(variable_update),
             )
-            .await;
+            .await
         };
-        let (_, ()) = tokio::join!(annotation_refresh, prometheus_refresh);
+        let (_, variable_report) = tokio::join!(annotation_refresh, prometheus_refresh);
         self.annotations = annotations;
+        self.apply_variable_report(variable_report);
         self.evaluate_dynamic_visibility();
 
         self.reconcile_visible_annotation_targets();
 
         self.view_end_ts = end_ts;
+        self.variables_loaded = true;
         self.last_refresh = Instant::now();
         Ok(())
     }
@@ -845,9 +870,18 @@ impl AppState {
                 &self.prometheus,
                 &mut self.variable_state,
                 &active_scopes,
-                range,
-                QueryIntervals::for_policy(range, step_policy, scrape_interval, None, None),
-                end_ts,
+                VariableRefreshContext {
+                    update: VariableUpdate::Tick,
+                    range,
+                    intervals: QueryIntervals::for_policy(
+                        range,
+                        step_policy,
+                        scrape_interval,
+                        None,
+                        None,
+                    ),
+                    end_ts,
+                },
                 &self.vars,
             )
             .await;
@@ -858,7 +892,7 @@ impl AppState {
             let eligible = self.query_eligible_indices();
             requested.retain(|i| eligible.contains(i));
         }
-        Self::refresh_prometheus_data(
+        let variable_report = Self::refresh_prometheus_data(
             &self.prometheus,
             &self.query_vars,
             &self.variable_state,
@@ -870,10 +904,37 @@ impl AppState {
             &mut self.vars,
             &mut self.panels,
             &requested,
-            refresh_variables,
+            &self.variable_errors,
+            refresh_variables.then_some(VariableUpdate::TimeRangeChange),
         )
         .await;
+        self.apply_variable_report(variable_report);
         self.evaluate_dynamic_visibility();
+    }
+
+    fn apply_variable_report(&mut self, report: VariableReport) {
+        for name in report.queried {
+            self.variable_errors.remove(&name);
+        }
+        self.variable_errors.extend(report.errors);
+    }
+
+    pub(crate) fn variable_warning(&self) -> Option<String> {
+        let classic = self
+            .variable_errors
+            .iter()
+            .map(|(name, error)| (name.as_str(), error.as_str()));
+        let scoped = self.variable_state.scopes.iter().flat_map(|scope| {
+            scope.variables.iter().filter_map(|variable| {
+                variable
+                    .last_error
+                    .as_deref()
+                    .map(|error| (variable.name.as_str(), error))
+            })
+        });
+        let (name, error) = classic.chain(scoped).next()?;
+        let error = error.lines().next().unwrap_or(error);
+        Some(format!("Variable {name} failed: {error}"))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -889,19 +950,35 @@ impl AppState {
         vars: &mut HashMap<String, String>,
         panels: &mut [PanelState],
         indices: &[usize],
-        refresh_variables: bool,
-    ) {
-        if refresh_variables && !variable_state.has_variables() {
-            let _ = refresh_query_variables(
+        variable_errors: &BTreeMap<String, String>,
+        variable_update: Option<VariableUpdate>,
+    ) -> VariableReport {
+        let variable_report = if let Some(variable_update) = variable_update
+            && !variable_state.has_variables()
+        {
+            let failed_variables = variable_errors.keys().cloned().collect();
+            refresh_query_variables(
                 prometheus,
                 query_vars,
-                range,
-                QueryIntervals::for_policy(range, step_policy, scrape_interval, None, None),
-                end_ts,
+                VariableRefreshContext {
+                    update: variable_update,
+                    range,
+                    intervals: QueryIntervals::for_policy(
+                        range,
+                        step_policy,
+                        scrape_interval,
+                        None,
+                        None,
+                    ),
+                    end_ts,
+                },
+                &failed_variables,
                 vars,
             )
-            .await;
-        }
+            .await
+        } else {
+            VariableReport::default()
+        };
 
         // Create a stream of futures for fetching panel data.
         let indices = indices.iter().copied().collect::<HashSet<_>>();
@@ -987,6 +1064,7 @@ impl AppState {
                 warnings,
             };
         }
+        variable_report
     }
 
     async fn fetch_single_panel_data<'a>(
@@ -1314,6 +1392,128 @@ mod tests {
 
     fn successful_matrix(_: &str) -> &'static str {
         r#"{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"job":"api"},"values":[[1700000000,"1"],[1700000060,"2"]]}]}}"#
+    }
+
+    fn variable_values(target: &str) -> &'static str {
+        if target.starts_with("/api/v1/label/") {
+            r#"{"status":"success","data":["api"]}"#
+        } else {
+            r#"{"status":"success","data":{"resultType":"matrix","result":[]}}"#
+        }
+    }
+
+    #[tokio::test]
+    async fn app_refreshes_variables_for_initial_manual_and_periodic_triggers() {
+        let (url, requests) = mock_prometheus(variable_values).await;
+        let mut app = create_test_app();
+        app.prometheus = prom::PromClient::new(url);
+        app.query_vars = vec![
+            crate::grafana::TemplateQueryVar {
+                name: "load".into(),
+                query: "label_values(load)".into(),
+                regex: None,
+                query_path: "fixture.load".into(),
+                refresh: crate::grafana::VariableRefresh::OnLoad,
+            },
+            crate::grafana::TemplateQueryVar {
+                name: "range".into(),
+                query: "label_values(range)".into(),
+                regex: None,
+                query_path: "fixture.range".into(),
+                refresh: crate::grafana::VariableRefresh::OnTimeRangeChange,
+            },
+        ];
+
+        app.refresh_initial().await.unwrap();
+        app.refresh_periodic().await.unwrap();
+        app.refresh().await.unwrap();
+
+        let requests = requests.lock().unwrap();
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.starts_with("/api/v1/label/load/"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.starts_with("/api/v1/label/range/"))
+                .count(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn manual_refresh_retries_failed_load_variable_and_clears_warning() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut app = create_test_app();
+        app.prometheus =
+            prom::PromClient::new(format!("http://{}", listener.local_addr().unwrap()));
+        app.vars.insert("instance".into(), "node-a".into());
+        app.query_vars = vec![crate::grafana::TemplateQueryVar {
+            name: "instance".into(),
+            query: "label_values(instance)".into(),
+            regex: None,
+            query_path: "fixture.instance".into(),
+            refresh: crate::grafana::VariableRefresh::OnLoad,
+        }];
+        let server = tokio::spawn(async move {
+            for body in [
+                r#"{"status":"error","data":[],"errorType":"timeout","error":"request timed out"}"#,
+                r#"{"status":"success","data":["node-b"]}"#,
+            ] {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = [0_u8; 4096];
+                let _ = socket.read(&mut request).await.unwrap();
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                socket.write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+
+        app.refresh_initial().await.unwrap();
+        assert_eq!(app.vars["instance"], "node-a");
+        assert!(
+            app.variable_warning()
+                .is_some_and(|warning| warning.starts_with("Variable instance failed:"))
+        );
+
+        app.refresh_periodic().await.unwrap();
+        assert_eq!(app.vars["instance"], "node-a");
+        assert!(app.variable_warning().is_some());
+
+        app.refresh().await.unwrap();
+        assert_eq!(app.vars["instance"], "node-b");
+        assert!(app.variable_warning().is_none());
+        server.await.unwrap();
+    }
+
+    #[test]
+    fn variable_report_clears_only_errors_for_variables_queried_again() {
+        let mut app = create_test_app();
+        app.variable_errors
+            .insert("cluster".into(), "old cluster failure".into());
+        app.variable_errors
+            .insert("instance".into(), "old instance failure".into());
+
+        app.apply_variable_report(crate::app::variables::VariableReport {
+            queried: vec!["instance".into(), "job".into()],
+            errors: vec![("job".into(), "new job failure".into())],
+        });
+
+        assert_eq!(
+            app.variable_errors.get("cluster").map(String::as_str),
+            Some("old cluster failure")
+        );
+        assert!(!app.variable_errors.contains_key("instance"));
+        assert_eq!(
+            app.variable_errors.get("job").map(String::as_str),
+            Some("new job failure")
+        );
     }
 
     fn rejected_query(_: &str) -> &'static str {
