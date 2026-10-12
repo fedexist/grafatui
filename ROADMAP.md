@@ -108,6 +108,84 @@ difference between readable latency/cache panels and raw float noise.
 
 ---
 
+## Near-Term Focused Releases
+
+The next releases stay within the `0.1.x` line. Each release is a focused,
+reviewable slice that preserves current defaults and can ship independently.
+
+| Release | Focus | Outcome |
+|---|---|---|
+| **0.1.15** | Secure connectivity | Private CAs and mutual TLS work without weakening default TLS behavior |
+| **0.1.16** | Variable correctness | Grafana refresh settings and dependent variables behave predictably |
+| **0.1.17** | Value mappings | Common Grafana mappings render consistently across supported panels |
+
+### 0.1.15 - Secure Connectivity
+
+- Add optional private CA, client certificate, and client key settings.
+- Keep CLI-over-config precedence and the existing HTTP/public HTTPS defaults.
+- Do not add an insecure TLS bypass, custom headers, named connection profiles,
+  or hot reload in this slice.
+- Never expose certificate or key contents in diagnostics.
+- Partially port the useful behavior and fixtures from the fork's mTLS work,
+  while simplifying the implementation to fit Grafatui's configuration model.
+
+**Exit criteria:** public HTTPS remains unchanged; private-CA and mTLS paths are
+covered by tests; invalid and incomplete settings fail with actionable,
+secret-safe errors.
+
+### 0.1.16 - Variable Correctness
+
+- Import Classic and schema-v2 variable refresh settings.
+- Distinguish initial-load, time-range/manual, and periodic refresh behavior.
+- Preserve the last selected value when a variable refresh fails, continue
+  resolving later variables, and refresh dependent variables in order.
+- Keep `label_values(...)` requests bounded and preserve scoped row/tab
+  variables, repeats, and conditional rendering.
+- Partially port the fork's variable semantics, excluding its background
+  refresh coupling. A variable picker UI remains out of scope.
+
+**Exit criteria:** refresh modes and dependency ordering have fixture coverage;
+one failed variable cannot invalidate otherwise usable dashboard state.
+
+### 0.1.17 - Value Mappings
+
+- Support exact-value, range, and useful special mappings such as null and NaN.
+- Preserve raw numeric values for calculations and apply mapped text only at
+  the display layer.
+- Use one mapping path across Stat, Gauge, BarGauge, Table, applicable legends,
+  and exports, while preserving `noValue` fallback behavior.
+- Report unsupported mapping kinds through import diagnostics.
+- Implement this cleanly in Grafatui; the fork does not provide a suitable
+  implementation to port.
+
+**Exit criteria:** shared mapping tests cover parsing, precedence, calculations,
+panel rendering, exports, fallbacks, and unsupported-kind diagnostics.
+
+### Continuous Maintenance
+
+- Fix export clipping only when a current-main reproduction demonstrates it;
+  do not import the fork's wholesale export rewrite.
+- Add CI checks incrementally: formatting and linting first, then MSRV and
+  platform coverage.
+- Audit repeated-panel storage with churn and soak tests before applying any
+  memory-lifetime fix from the fork.
+- Keep one feature per branch and pull request, with implementation and
+  documentation separated into clear commits.
+
+### Deferred Queue
+
+- **Non-blocking background refresh:** tentatively `0.1.18`, after variable
+  semantics are stable and a clean generation, cancellation, and stale-result
+  design is agreed.
+- **Multi-dashboard top-level tabs:** after background scheduling and dashboard
+  state isolation; distinct from imported Grafana layout tabs.
+- **Custom themes and a live theme picker:** lower priority while the shipped
+  theme set covers common needs.
+- **Project-wide rebranding, package-manager removal, and documentation-site
+  migration:** explicitly outside this roadmap.
+
+---
+
 ## Compatibility Ladder
 
 This is the main backlog, ordered by Grafana parity domain.
@@ -317,25 +395,13 @@ These are valuable, but they should not outrank core Grafana import fidelity.
 
 Recommended order for the next focused development cycle:
 
-1. **Automate compatibility truth**
-   - Add tests or fixtures for fields already supported by v0.1.9 so the
-     compatibility matrix is easier to keep current.
-   - Prefer small checks that compare parser behavior with documented support.
-
-2. **Extend the field display layer**
-   - Add value mappings and broaden unit coverage beyond the shipped common
-     units.
-   - Keep the shared display configuration model applied across Stat, Gauge,
-     BarGauge, Table, Graph labels, legends, and exports.
-
-3. **Make unsupported imports visible**
-   - Track skipped panel types, hidden/unsupported target behavior, and ignored
-     high-impact fields.
-   - Surface a concise warning in the TUI and a fuller report via `--validate`.
-
-4. **Ship v0.2 as "Grafana Import Fidelity"**
-   - Keep the release tightly scoped.
-   - Prefer common Grafana dashboard correctness over new non-parity features.
+1. Write and review the focused mTLS design for `0.1.15`.
+2. Audit the fork's mTLS commit file by file, reusing code only where it meets
+   current quality and compatibility requirements.
+3. Implement secure connectivity test-first as its own branch and pull request.
+4. Repeat the same focused design, audit, and implementation cycle for variable
+   correctness and value mappings.
+5. Update the compatibility matrix and release notes with every shipped slice.
 
 ---
 
