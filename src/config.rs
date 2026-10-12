@@ -40,6 +40,8 @@ pub(crate) struct Config {
     pub(crate) autogrid: Option<bool>,
     pub(crate) autogrid_color: Option<String>,
     pub(crate) vars: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub(crate) tls: crate::prom::TlsFiles,
 }
 
 impl Config {
@@ -125,6 +127,34 @@ mod tests {
             config.annotations_file,
             Some(PathBuf::from("~/events.jsonl"))
         );
+    }
+
+    #[test]
+    fn parses_strict_tls_table() {
+        let config: Config = toml::from_str(
+            r#"
+            [tls]
+            ca_cert = "~/certs/ca.pem"
+            client_cert = "/etc/grafatui/client.pem"
+            client_key = "/etc/grafatui/client.key"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.tls.ca_cert, Some(PathBuf::from("~/certs/ca.pem")));
+        assert_eq!(
+            config.tls.client_cert,
+            Some(PathBuf::from("/etc/grafatui/client.pem"))
+        );
+        assert_eq!(
+            config.tls.client_key,
+            Some(PathBuf::from("/etc/grafatui/client.key"))
+        );
+
+        let error = toml::from_str::<Config>("[tls]\nca_file = \"ca.pem\"\n")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("unknown field `ca_file`"), "{error}");
     }
 
     #[test]
