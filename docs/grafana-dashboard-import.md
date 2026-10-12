@@ -91,6 +91,18 @@ grafatui --grafana-json ./dash.json --var job=node --var instance=server-01
 
 Prometheus query variables such as `label_values(up, instance)` and `query_result(...)` are resolved before panel queries run.
 
+Grafatui honors Classic refresh values `0`, `1`, and `2`, and schema-v2
+`never`, `onDashboardLoad`, and `onTimeRangeChanged`. Dashboard-load variables
+resolve once; time-range variables also resolve after manual refresh, zoom, pan,
+or reset. Periodic panel refreshes do not re-run already resolved variables.
+Variables in a row or tab resolve once when that scope first becomes visible.
+
+Dependent variables resolve in declaration order when an earlier value changes.
+If a refresh fails, Grafatui keeps the previous selection, continues with other
+due variables, and shows a compact footer warning. A later successful refresh
+clears that warning. `label_values(...)` uses Prometheus's bounded label-values
+endpoint with the current start/end window and an optional metric selector.
+
 ## Import Diagnostics
 
 Grafatui prints import warnings before starting the TUI when a dashboard uses
