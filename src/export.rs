@@ -1040,7 +1040,7 @@ fn render_gauge_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
         gauge.top + 18.0,
         &format!(
             "{} ({:.0}%)",
-            panel.display.format_number(value),
+            panel.display.format_value(Some(value)),
             ratio * 100.0
         ),
         "#ffffff",
@@ -1127,7 +1127,7 @@ fn render_bar_gauge_panel(app: &AppState, panel: &PanelState, rect: PlotRect, ou
             out,
             track_rect.right() + 8.0,
             y,
-            &panel.display.format_number(value),
+            &panel.display.format_value(Some(value)),
             &color,
             "start",
             SMALL_FONT_SIZE,
@@ -1407,7 +1407,7 @@ fn render_legend(
             .get(&series.name)
             .copied()
             .or(series.value)
-            .map(|value| panel.display.format_number(value));
+            .map(|value| panel.display.format_value(Some(value)));
         let label = value
             .map(|value| format!("{} ({value})", series.name))
             .unwrap_or_else(|| series.name.clone());
@@ -2863,6 +2863,7 @@ mod tests {
             unit: Some("bytes".to_string()),
             decimals: Some(1),
             no_value: None,
+            value_mappings: vec![],
         };
         stat_app.panels[0].series[0].value = Some(1536.0);
 
@@ -2879,6 +2880,7 @@ mod tests {
             unit: Some("percentunit".to_string()),
             decimals: Some(0),
             no_value: Some("n/a".to_string()),
+            value_mappings: vec![],
         };
         table_app.panels[0].series[0].value = Some(0.42);
         table_app.panels[0].series.push(SeriesView {
@@ -2892,6 +2894,29 @@ mod tests {
         let table_svg = render_svg(&table_app, Rect::new(0, 0, 100, 40));
         assert!(table_svg.contains("42%"));
         assert!(table_svg.contains("n/a"));
+    }
+
+    #[test]
+    fn test_export_uses_exact_value_mappings_for_panels_and_graph_legend() {
+        for panel_type in [
+            PanelType::Gauge,
+            PanelType::BarGauge,
+            PanelType::Table,
+            PanelType::Stat,
+            PanelType::Graph,
+        ] {
+            let mut app = test_app_with_panel_type(panel_type);
+            app.panels[0].display.value_mappings = vec![ui::ValueMapping {
+                value: 1.0,
+                text: "Healthy".to_string(),
+            }];
+            app.panels[0].series[0].value = Some(1.0);
+
+            let svg = render_svg(&app, Rect::new(0, 0, 100, 40));
+
+            assert!(svg.contains("Healthy"), "{panel_type:?}: {svg}");
+            assert_eq!(app.panels[0].series[0].value, Some(1.0));
+        }
     }
 
     #[test]

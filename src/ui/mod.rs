@@ -23,7 +23,9 @@ mod tabs;
 
 pub(crate) use annotations::{annotation_cluster_page_size, render_annotation_modal};
 pub(crate) use draw::draw_ui;
-pub(crate) use format::{DisplayFormat, format_time, get_hash_color, value_to_heatmap_color};
+pub(crate) use format::{
+    DisplayFormat, ValueMapping, format_time, get_hash_color, value_to_heatmap_color,
+};
 #[allow(unused_imports)]
 pub(crate) use layout::{
     DashboardRect, DashboardRectKind, clamp_dashboard_scroll, hit_test, scroll_selected_into_view,

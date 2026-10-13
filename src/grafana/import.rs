@@ -202,18 +202,20 @@ fn import_panel(
     }
 
     if let Some(defaults) = panel.field_defaults {
-        if let Some(path) = defaults.mappings_path {
+        let (value_mappings, mappings_supported) = parse_value_mappings(defaults.mappings.as_ref());
+        if !mappings_supported && let Some(path) = defaults.mappings_path {
             out.diagnostics.push(ImportDiagnostic::new(
-                    "ignored_field",
-                    path,
-                    "`fieldConfig.defaults.mappings` is not supported yet; value mappings will be ignored",
-                ));
+                "ignored_field",
+                path,
+                "`fieldConfig.defaults.mappings` contains unsupported entries; only exact numeric-to-text mappings are supported",
+            ));
         }
         graph_options = graph_options_from_custom(defaults.custom.as_ref());
         display = crate::ui::DisplayFormat {
             unit: defaults.unit,
             decimals: defaults.decimals,
             no_value: defaults.no_value,
+            value_mappings,
         };
         min = defaults.min;
         max = defaults.max;
@@ -328,6 +330,48 @@ fn import_layout_nodes(
         }
     }
     Ok(items)
+}
+
+fn parse_value_mappings(raw: Option<&serde_json::Value>) -> (Vec<crate::ui::ValueMapping>, bool) {
+    let Some(raw) = raw else {
+        return (Vec::new(), true);
+    };
+    let Some(entries) = raw.as_array() else {
+        return (Vec::new(), false);
+    };
+
+    let mut mappings = Vec::new();
+    let mut fully_supported = true;
+    for entry in entries {
+        if entry.get("type").and_then(serde_json::Value::as_str) != Some("value") {
+            fully_supported = false;
+            continue;
+        }
+        let Some(options) = entry.get("options").and_then(serde_json::Value::as_object) else {
+            fully_supported = false;
+            continue;
+        };
+        if options.is_empty() {
+            fully_supported = false;
+        }
+        for (raw_value, result) in options {
+            let value = raw_value
+                .parse::<f64>()
+                .ok()
+                .filter(|value| value.is_finite());
+            let text = result
+                .get("text")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned);
+            match (value, text) {
+                (Some(value), Some(text)) => {
+                    mappings.push(crate::ui::ValueMapping { value, text });
+                }
+                _ => fully_supported = false,
+            }
+        }
+    }
+    (mappings, fully_supported)
 }
 
 #[derive(Default)]

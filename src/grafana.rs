@@ -2389,6 +2389,93 @@ mod tests {
     }
 
     #[test]
+    fn exact_numeric_value_mappings_import_for_classic_and_v2_dashboards() {
+        let classic = parse_grafana_dashboard(
+            r#"{
+                "title": "Classic mappings",
+                "panels": [{
+                    "type": "stat",
+                    "title": "Health",
+                    "targets": [{"expr": "up"}],
+                    "fieldConfig": {"defaults": {
+                        "unit": "percent",
+                        "decimals": 0,
+                        "mappings": [{
+                            "type": "value",
+                            "options": {
+                                "0": {"text": "Down", "color": "red", "index": 0},
+                                "1": {"text": "Healthy", "color": "green", "index": 1}
+                            }
+                        }]
+                    }}
+                }]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            classic.queries[0].display.format_value(Some(1.0)),
+            "Healthy"
+        );
+        assert_eq!(classic.queries[0].display.format_value(Some(2.0)), "2%");
+        assert!(classic.diagnostics.is_empty(), "{:?}", classic.diagnostics);
+
+        let mut v2 = valid_v2_resource();
+        make_v2_panel_importable(&mut v2);
+        v2["spec"]["elements"]["panel-1"]["spec"]["vizConfig"]["group"] = serde_json::json!("stat");
+        v2["spec"]["elements"]["panel-1"]["spec"]["vizConfig"]["spec"]["fieldConfig"]["defaults"] = serde_json::json!({
+            "unit": "percent",
+            "decimals": 0,
+            "mappings": [{
+                "type": "value",
+                "options": {"1": {"text": "Healthy"}}
+            }]
+        });
+
+        let v2 = parse_grafana_dashboard(&v2.to_string()).unwrap();
+
+        assert_eq!(v2.queries[0].display.format_value(Some(1.0)), "Healthy");
+        assert_eq!(v2.queries[0].display.format_value(Some(2.0)), "2%");
+        assert!(v2.diagnostics.is_empty(), "{:?}", v2.diagnostics);
+    }
+
+    #[test]
+    fn exact_mapping_precedence_and_unsupported_kinds_are_explicit() {
+        let dashboard = parse_grafana_dashboard(
+            r#"{
+                "title": "Partial mappings",
+                "panels": [{
+                    "type": "stat",
+                    "title": "Health",
+                    "targets": [{"expr": "up"}],
+                    "fieldConfig": {"defaults": {"mappings": [
+                        {"type": "value", "options": {"1": {"text": "First"}}},
+                        {"type": "value", "options": {"1.0": {"text": "Second"}}},
+                        {"type": "range", "options": {"from": 0, "to": 10, "result": {"text": "Range"}}}
+                    ]}}
+                }]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            dashboard.queries[0].display.format_value(Some(1.0)),
+            "First"
+        );
+        assert_eq!(dashboard.diagnostics.len(), 1);
+        assert_eq!(dashboard.diagnostics[0].code, "ignored_field");
+        assert_eq!(
+            dashboard.diagnostics[0].path,
+            "panels[0].fieldConfig.defaults.mappings"
+        );
+        assert!(
+            dashboard.diagnostics[0]
+                .message
+                .contains("only exact numeric-to-text mappings are supported")
+        );
+    }
+
+    #[test]
     fn classic_query_options_set_panel_resolution() {
         let dashboard = parse_grafana_dashboard(
             r#"{
@@ -2766,7 +2853,7 @@ mod tests {
     }
 
     #[test]
-    fn test_import_diagnostics_report_ignored_high_impact_fields() {
+    fn test_import_diagnostics_report_unsupported_mapping_and_reduce_options() {
         let json = r#"{
             "title": "Ignored Fields",
             "panels": [
@@ -2779,7 +2866,7 @@ mod tests {
                     "fieldConfig": {
                         "defaults": {
                             "mappings": [
-                                { "type": "value", "options": { "0": { "text": "Down" } } }
+                                { "type": "range", "options": { "from": 0, "to": 1, "result": { "text": "Down" } } }
                             ]
                         }
                     },

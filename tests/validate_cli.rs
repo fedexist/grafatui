@@ -140,6 +140,77 @@ fn validate_strict_accepts_classic_transformations_without_warnings() {
 }
 
 #[test]
+fn validate_strict_accepts_exact_numeric_value_mappings() {
+    let path = write_dashboard(
+        "exact-value-mapping",
+        r#"{
+            "title": "Exact mapping",
+            "panels": [{
+                "type": "stat",
+                "title": "Health",
+                "targets": [{"expr": "up"}],
+                "fieldConfig": {"defaults": {"mappings": [{
+                    "type": "value",
+                    "options": {"0": {"text": "Down"}, "1": {"text": "Healthy"}}
+                }]}}
+            }]
+        }"#,
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+        .args([
+            "--validate",
+            "--strict",
+            "--format",
+            "json",
+            "--grafana-json",
+        ])
+        .arg(&path)
+        .output()
+        .unwrap();
+    fs::remove_file(path).unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summary["diagnostics"], serde_json::json!([]));
+}
+
+#[test]
+fn validate_strict_rejects_unsupported_value_mapping_kinds() {
+    let path = write_dashboard(
+        "range-value-mapping",
+        r#"{
+            "title": "Range mapping",
+            "panels": [{
+                "type": "stat",
+                "title": "Health",
+                "targets": [{"expr": "up"}],
+                "fieldConfig": {"defaults": {"mappings": [{
+                    "type": "range",
+                    "options": {"from": 0, "to": 1, "result": {"text": "Low"}}
+                }]}}
+            }]
+        }"#,
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+        .args(["--validate", "--strict", "--grafana-json"])
+        .arg(&path)
+        .output()
+        .unwrap();
+    fs::remove_file(path).unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("fieldConfig.defaults.mappings"), "{stderr}");
+    assert!(stderr.contains("exact numeric-to-text"), "{stderr}");
+}
+
+#[test]
 fn validate_json_outputs_machine_readable_summary() {
     let path = write_dashboard(
         "json",
