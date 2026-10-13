@@ -15,6 +15,7 @@ jobs:
     name: Release-plz release
     runs-on: ubuntu-latest
     permissions:
+      actions: write
       contents: write
       pull-requests: read
     steps:
@@ -28,11 +29,38 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Run release-plz
+        id: release-plz
         uses: release-plz/action@v0.5
         with:
           command: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Dispatch release assets
+        if: steps.release-plz.outputs.releases_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASES: ${{ steps.release-plz.outputs.releases }}
+        run: |
+          set -euo pipefail
+
+          release_count="$(jq 'length' <<< "${RELEASES}")"
+          if (( release_count == 0 )); then
+            echo "::error::release-plz reported a release without a tag."
+            exit 1
+          fi
+
+          while IFS= read -r release_tag; do
+            if [[ -z "${release_tag}" || "${release_tag}" == "null" ]]; then
+              echo "::error::release-plz reported a release without a tag."
+              exit 1
+            fi
+
+            gh workflow run release-assets.yml \
+              --repo "${GITHUB_REPOSITORY}" \
+              --ref "${release_tag}" \
+              -f "release_tag=${release_tag}"
+          done < <(jq -r '.[].tag' <<< "${RELEASES}")
 
   release-plz-pr:
     name: Release-plz PR
