@@ -337,8 +337,8 @@ V2 dashboard outside this grid, rows, tabs, and AutoGrid subset.
 
 `fieldConfig` is partially implemented. Thresholds, explicit min/max bounds,
 selected display formatting fields, threshold style, and per-panel autogrid
-settings are parsed; value mappings, display names, and field overrides remain
-major gaps.
+settings are parsed; exact numeric-to-text value mappings are supported, while
+display names and field overrides remain major gaps.
 
 | JSON Field | Status | Notes |
 |---|---|---|
@@ -349,7 +349,7 @@ major gaps.
 | `fieldConfig.defaults.max` | ✅ Supported | Used for Graph y-axis upper bounds, gauge scaling, and threshold boundaries |
 | `fieldConfig.defaults.decimals` | ✅ Supported | Controls numeric precision in panel values, graph axes, legends, and exports |
 | `fieldConfig.defaults.color` | ❌ Not Implemented | Uses theme palette instead |
-| `fieldConfig.defaults.mappings` | ❌ Not Implemented | Value mappings not supported; import diagnostics warn when mappings are ignored |
+| `fieldConfig.defaults.mappings` | 🔶 Partial | Exact numeric `value` mappings render mapped text in Stat, Gauge, BarGauge, Table, graph legends, and exports; range, regex, special-value, and mapping-color behavior is not implemented, and unsupported mapping kinds produce import diagnostics |
 | `fieldConfig.defaults.noValue` | 🔶 Partial | Used for null Stat/Table values and exports; empty panels still show Grafatui's `No data` state |
 | `fieldConfig.defaults.displayName` | ❌ Not Implemented | |
 | `fieldConfig.defaults.custom` | 🔶 Partial | Used for graph draw style, fill/points, axis placement, stacking metadata, threshold style, and axis grid visibility |
@@ -460,14 +460,14 @@ compatibility with Grafana annotation queries, APIs, `annotations`, or
 | PromQL Variables | 7 | 0 | 0 | 0 |
 | Templating | 6 | 6 | 6 | 0 |
 | Variable Substitution | 3 | 0 | 5 | 0 |
-| Field Config | 4 | 6 | 10 | 2 |
+| Field Config | 4 | 7 | 9 | 2 |
 | Thresholds | 5 | 0 | 0 | 0 |
 | Panel Options | 0 | 0 | 14 | 0 |
 | Annotations | 0 | 0 | 2 | 0 |
 | Data Links / Transforms | 0 | 0 | 2 | 1 |
 | Alert Rules | 0 | 0 | 3 | 0 |
 | Datasources | 3 | 0 | 5 | 0 |
-| **Total** | **52** | **12** | **83** | **15** |
+| **Total** | **52** | **13** | **82** | **15** |
 
 ---
 
@@ -475,9 +475,9 @@ compatibility with Grafana annotation queries, APIs, `annotations`, or
 
 Based on user feedback, the following missing features are most commonly expected:
 
-1. **Value mappings** (`fieldConfig.defaults.mappings`) — Map numeric values to text labels
-2. **Broader unit formatting** (`fieldConfig.defaults.unit`) — Extend the current common-unit subset to more Grafana unit families
-3. **Reduce options** (`options.reduceOptions`) — Use min/max/mean/total instead of always using the latest value
+1. **Broader unit formatting** (`fieldConfig.defaults.unit`) — Extend the current common-unit subset to more Grafana unit families
+2. **Reduce options** (`options.reduceOptions`) — Use min/max/mean/total instead of always using the latest value
+3. **Broader value mappings** (`fieldConfig.defaults.mappings`) — Add range and useful special-value mappings beyond exact numeric labels
 4. **Import diagnostics** — Warn clearly about skipped panel types and ignored high-impact fields
 5. **Additional panel types** — `text`, `piechart`, `histogram`, `logs`
 
@@ -505,4 +505,4 @@ Grafatui provides several TUI-native capabilities that don't map directly to Gra
 
 ---
 
-*This document was reviewed against the Grafatui source code at v0.1.13. If you notice any inaccuracies, please open an issue or PR.*
+*This document was reviewed against the Grafatui source code on 2026-10-13. If you notice any inaccuracies, please open an issue or PR.*

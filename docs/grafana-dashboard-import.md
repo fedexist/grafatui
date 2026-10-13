@@ -103,11 +103,23 @@ due variables, and shows a compact footer warning. A later successful refresh
 clears that warning. `label_values(...)` uses Prometheus's bounded label-values
 endpoint with the current start/end window and an optional metric selector.
 
+## Value Mappings
+
+Grafatui imports exact numeric Grafana `value` mappings whose results contain
+text. Mapped text is used by Stat, Gauge, BarGauge, Table, graph legends, and
+SVG/PNG exports. The underlying numeric value remains unchanged for sorting,
+scaling, thresholds, sparklines, and graph axes; an unmatched value continues
+through the normal unit and decimal formatter.
+
+Range, regex, null/NaN special-value mappings, and mapping colors are not part
+of this focused subset. Unsupported mapping kinds produce an import warning;
+null values continue to use the existing `noValue` behavior where supported.
+
 ## Import Diagnostics
 
 Grafatui prints import warnings before starting the TUI when a dashboard uses
 important Grafana features that are skipped or ignored. Diagnostics include
-unsupported panel types, value mappings, reduce options, unresolved variables,
+unsupported panel types, unsupported value-mapping kinds, reduce options, unresolved variables,
 unsupported V2 datasources, and unsupported variable modifiers such as
 `${var:regex}`. V2 diagnostics retain their `spec.*` source paths.
 

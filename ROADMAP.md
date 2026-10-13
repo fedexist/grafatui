@@ -8,7 +8,7 @@ oriented around two priorities:
 2. **User-visible product value** - parity work should make real dashboards
    easier to read, debug, and share.
 
-> **Current version**: 0.1.14 · **Status**: Active development, pre-1.0
+> **Current version**: 0.1.16 · **Status**: Active development, pre-1.0
 
 **Legend**:
 - 🟢 Low complexity · 🟡 Medium complexity · 🔴 High complexity
@@ -116,8 +116,8 @@ reviewable slice that preserves current defaults and can ship independently.
 | Release | Focus | Outcome |
 |---|---|---|
 | **0.1.15** ✅ | Secure connectivity | Released: private CAs and mutual TLS work without weakening default TLS behavior |
-| **0.1.16** | Variable correctness | Grafana refresh settings and dependent variables behave predictably |
-| **0.1.17** | Value mappings | Common Grafana mappings render consistently across supported panels |
+| **0.1.16** ✅ | Variable correctness | Released: Grafana refresh settings and dependent variables behave predictably |
+| **0.1.17** | Value mappings | Exact numeric mappings render consistently across supported panels |
 
 ### 0.1.15 - Secure Connectivity (released)
 
@@ -133,7 +133,7 @@ reviewable slice that preserves current defaults and can ship independently.
 covered by tests; invalid and incomplete settings fail with actionable,
 secret-safe errors.
 
-### 0.1.16 - Variable Correctness
+### 0.1.16 - Variable Correctness (released)
 
 - Import Classic and schema-v2 variable refresh settings.
 - Distinguish initial-load, time-range/manual, and periodic refresh behavior.
@@ -149,7 +149,8 @@ one failed variable cannot invalidate otherwise usable dashboard state.
 
 ### 0.1.17 - Value Mappings
 
-- Support exact-value, range, and useful special mappings such as null and NaN.
+- Support exact numeric `value` mappings with mapped text; defer range, regex,
+  special-value, and mapping-color behavior.
 - Preserve raw numeric values for calculations and apply mapped text only at
   the display layer.
 - Use one mapping path across Stat, Gauge, BarGauge, Table, applicable legends,
@@ -158,8 +159,9 @@ one failed variable cannot invalidate otherwise usable dashboard state.
 - Implement this cleanly in Grafatui; the fork does not provide a suitable
   implementation to port.
 
-**Exit criteria:** shared mapping tests cover parsing, precedence, calculations,
-panel rendering, exports, fallbacks, and unsupported-kind diagnostics.
+**Exit criteria:** shared mapping tests cover classic and v2 parsing,
+precedence, calculations, panel rendering, exports, fallbacks, and
+unsupported-kind diagnostics.
 
 ### Continuous Maintenance
 
