@@ -16,17 +16,30 @@
 
 use ratatui::style::Color;
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ValueMapping {
+    pub(crate) value: f64,
+    pub(crate) text: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct DisplayFormat {
     pub(crate) unit: Option<String>,
     pub(crate) decimals: Option<usize>,
     pub(crate) no_value: Option<String>,
+    pub(crate) value_mappings: Vec<ValueMapping>,
 }
 
 impl DisplayFormat {
     pub(crate) fn format_value(&self, value: Option<f64>) -> String {
         value
-            .map(|value| self.format_number(value))
+            .map(|value| {
+                self.value_mappings
+                    .iter()
+                    .find(|mapping| mapping.value == value)
+                    .map(|mapping| mapping.text.clone())
+                    .unwrap_or_else(|| self.format_number(value))
+            })
             .unwrap_or_else(|| self.no_value.clone().unwrap_or_else(|| "-".to_string()))
     }
 
@@ -250,6 +263,7 @@ mod tests {
             unit: Some("widgets".to_string()),
             decimals: None,
             no_value: None,
+            value_mappings: vec![],
         };
         assert_eq!(unknown.format_number(1_500.0), "1.50k");
     }
@@ -260,6 +274,7 @@ mod tests {
             unit: Some("bytes".to_string()),
             decimals: None,
             no_value: None,
+            value_mappings: vec![],
         };
         assert_eq!(bytes.format_number(1_536.0), "1.54KB");
 
@@ -267,6 +282,7 @@ mod tests {
             unit: Some("bits".to_string()),
             decimals: Some(1),
             no_value: None,
+            value_mappings: vec![],
         };
         assert_eq!(bits.format_number(1_536.0), "1.5Kb");
     }
@@ -277,6 +293,7 @@ mod tests {
             unit: Some("percent".to_string()),
             decimals: Some(1),
             no_value: None,
+            value_mappings: vec![],
         };
         assert_eq!(percent.format_number(42.42), "42.4%");
 
@@ -284,6 +301,7 @@ mod tests {
             unit: Some("percentunit".to_string()),
             decimals: Some(0),
             no_value: None,
+            value_mappings: vec![],
         };
         assert_eq!(percent_unit.format_number(0.4242), "42%");
     }
@@ -294,6 +312,7 @@ mod tests {
             unit: Some("reqps".to_string()),
             decimals: Some(0),
             no_value: Some("n/a".to_string()),
+            value_mappings: vec![],
         };
         assert_eq!(rate.format_number(1234.56), "1k req/s");
         assert_eq!(rate.format_value(None), "n/a");

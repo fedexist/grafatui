@@ -150,6 +150,7 @@ pub(super) struct FieldDefaults {
     pub(super) max: Option<f64>,
     pub(super) thresholds: Option<Thresholds>,
     pub(super) custom: Option<GraphCustom>,
+    pub(super) mappings: Option<Value>,
     pub(super) mappings_path: Option<String>,
 }
 

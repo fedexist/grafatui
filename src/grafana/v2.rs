@@ -630,6 +630,7 @@ fn parse_panel(
             .as_ref()
             .is_some_and(non_empty_json_value)
             .then(|| format!("{panel_path}.vizConfig.spec.fieldConfig.defaults.mappings")),
+        mappings: defaults.mappings,
     };
 
     Ok(Some(model::Panel {

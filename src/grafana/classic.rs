@@ -330,6 +330,7 @@ fn normalize_classic_panel(
                 .as_ref()
                 .is_some_and(non_empty_json_value)
                 .then(|| format!("{source_path}.fieldConfig.defaults.mappings")),
+            mappings: defaults.mappings,
         })
     });
     model::LayoutNode::Panel(model::Panel {

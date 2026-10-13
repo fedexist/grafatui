@@ -286,9 +286,9 @@ pub(super) fn render_graph_panel(
         // For legend display
         let mut name = s.name.clone();
         if let Some(val) = cursor_values.get(&s.name) {
-            name.push_str(&format!(" ({})", p.display.format_number(*val)));
+            name.push_str(&format!(" ({})", p.display.format_value(Some(*val))));
         } else if let Some(val) = s.value {
-            name.push_str(&format!(" ({})", p.display.format_number(val)));
+            name.push_str(&format!(" ({})", p.display.format_value(Some(val))));
         }
         if name.is_empty() {
             name = format!("Series {}", i);

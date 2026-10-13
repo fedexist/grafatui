@@ -1062,6 +1062,92 @@ mod tests {
     }
 
     #[test]
+    fn imported_exact_value_mapping_renders_stat_text() {
+        let path = std::env::temp_dir().join("grafatui-value-mapping-render.json");
+        std::fs::write(
+            &path,
+            r#"{
+                "title": "Mapped",
+                "panels": [{
+                    "type": "stat",
+                    "title": "Service health",
+                    "targets": [{"expr": "up"}],
+                    "fieldConfig": {"defaults": {"mappings": [{
+                        "type": "value",
+                        "options": {"1": {"text": "Healthy"}}
+                    }]}}
+                }]
+            }"#,
+        )
+        .unwrap();
+        let imported = crate::grafana::load_grafana_dashboard(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        let mut app = test_app();
+        let mut panel = graph_panel("Service health");
+        panel.panel_type = PanelType::Stat;
+        panel.display = imported.queries[0].display.clone();
+        panel.series = vec![SeriesView {
+            query_index: 0,
+            name: "up".to_string(),
+            value: Some(1.0),
+            points: vec![(1_700_000_000.0, 1.0)],
+            visible: true,
+        }];
+        app.panels = vec![panel];
+        app.apply_layout(crate::dashboard::DashboardLayout::flat(1));
+        assert_eq!(app.panels[0].series[0].value, Some(1.0));
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+
+        let text = terminal_text(&terminal);
+        assert!(text.contains("Service health"), "{text}");
+        assert!(text.contains("Healthy"), "{text}");
+        assert!(!text.contains("1.00"), "{text}");
+
+        if let Ok(root) = std::env::var("GRAFATUI_VALUE_MAPPING_CAPTURE_DIR") {
+            let directory = std::path::PathBuf::from(root);
+            std::fs::create_dir_all(&directory).unwrap();
+            capture_buffer(&terminal, &directory.join("mapped-stat-80x24.json"));
+        }
+    }
+
+    #[test]
+    fn exact_value_mapping_formats_value_panels_and_graph_legend() {
+        for panel_type in [
+            PanelType::Gauge,
+            PanelType::BarGauge,
+            PanelType::Table,
+            PanelType::Graph,
+        ] {
+            let mut app = test_app();
+            let mut panel = graph_panel("Service health");
+            panel.panel_type = panel_type;
+            panel.display.value_mappings = vec![crate::ui::ValueMapping {
+                value: 1.0,
+                text: "Healthy".to_string(),
+            }];
+            panel.series = vec![SeriesView {
+                query_index: 0,
+                name: "up".to_string(),
+                value: Some(1.0),
+                points: vec![(1_700_000_000.0, 1.0)],
+                visible: true,
+            }];
+            app.panels = vec![panel];
+            app.apply_layout(crate::dashboard::DashboardLayout::flat(1));
+
+            let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+            terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+
+            let text = terminal_text(&terminal);
+            assert!(text.contains("Healthy"), "{panel_type:?}: {text}");
+            assert_eq!(app.panels[0].series[0].value, Some(1.0));
+        }
+    }
+
+    #[test]
     fn structurally_flat_layout_growth_uses_rendered_panel_count() {
         let mut app = test_app();
         app.panels = vec![graph_panel("CPU")];
