@@ -30,7 +30,7 @@ mod ui;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, bail};
 use clap::Parser;
 use config::Config;
 use crossterm::{
@@ -50,6 +50,10 @@ use cli::Args;
 /// Main entry point for the Grafatui application.
 #[tokio::main]
 async fn main() -> Result<()> {
+    tokio::task::LocalSet::new().run_until(run()).await
+}
+
+async fn run() -> Result<()> {
     let args = Args::parse();
 
     if let Some(cmd) = args.command {
@@ -74,19 +78,28 @@ async fn main() -> Result<()> {
 
     // Load config
     let config = load_startup_config(args.config.clone())?;
-    let dashboard_path = args
-        .grafana_json
-        .clone()
-        .or_else(|| config.grafana_json.clone())
-        .map(|p| config::expand_path(&p));
+    let dashboard_paths = if args.grafana_json.is_empty() {
+        config.grafana_json.into_iter().collect::<Vec<_>>()
+    } else {
+        args.grafana_json.clone()
+    }
+    .into_iter()
+    .map(|path| config::expand_path(&path))
+    .collect::<Vec<_>>();
 
     if args.validate {
-        let path = dashboard_path.ok_or_else(|| {
-            anyhow!("--validate requires --grafana-json or grafana_json in config")
-        })?;
-        let dashboard = grafana::load_grafana_dashboard(&path)?;
-        let summary = validate_dashboard_import(dashboard, config.vars.clone(), &args.var);
-        print_validation_summary(&summary, args.format, args.strict)?;
+        if dashboard_paths.is_empty() {
+            bail!("--validate requires --grafana-json or grafana_json in config");
+        }
+        let mut summaries = Vec::with_capacity(dashboard_paths.len());
+        for path in &dashboard_paths {
+            let dashboard = grafana::load_grafana_dashboard(path)
+                .with_context(|| format!("failed to load dashboard `{}`", path.display()))?;
+            let mut summary = validate_dashboard_import(dashboard, config.vars.clone(), &args.var);
+            summary.source = Some(path.clone());
+            summaries.push(summary);
+        }
+        print_validation_summaries(&summaries, args.format, args.strict)?;
         return Ok(());
     }
 
@@ -146,76 +159,7 @@ async fn main() -> Result<()> {
         .filter(|color| *color != ratatui::style::Color::Reset)
         .unwrap_or(ratatui::style::Color::DarkGray);
 
-    let mut vars: HashMap<String, String> = HashMap::new();
-    let mut query_vars = Vec::new();
-    let mut variable_state = dashboard::variables::VariableState::default();
-    let mut auto_grid_behaviors = HashMap::new();
-    let mut dashboard_refresh_rate_ms = None;
-
     let prom = prom::PromClient::with_tls(prometheus_url, &tls)?;
-
-    // Build panels from Grafana import or simple queries.
-    let (title, panels, skipped_panels, imported_layout) = if let Some(path) = dashboard_path {
-        let d = grafana::load_grafana_dashboard(&path)?;
-        let import_context = build_import_context(&d, config.vars.clone(), &args.var);
-        print_import_diagnostics(&import_context.diagnostics);
-        dashboard_refresh_rate_ms = d.refresh_rate_ms;
-        vars = import_context.vars;
-        query_vars = import_context.query_vars;
-        variable_state = d.variable_state;
-        auto_grid_behaviors = d.auto_grid_behaviors;
-        merge_user_vars(
-            &mut variable_state.overrides,
-            config.vars.clone(),
-            &args.var,
-        );
-
-        let ps = d
-            .queries
-            .into_iter()
-            .map(|q| app::PanelState {
-                title: q.title,
-                exprs: q.exprs,
-                legends: q.legends,
-                query_modes: q.query_modes,
-                series: vec![],
-                last_error: None,
-                notices: Default::default(),
-                last_url: None,
-                last_samples: 0,
-                grid: q.grid.map(|g| app::GridUnit {
-                    x: g.x,
-                    y: g.y,
-                    w: g.w,
-                    h: g.h,
-                }),
-                y_axis_mode: app::YAxisMode::Auto,
-                panel_type: q.panel_type,
-                thresholds: q.thresholds,
-                min: q.min,
-                max: q.max,
-                autogrid: q.autogrid,
-                display: q.display,
-                options: q.options,
-                resolution: q.resolution,
-            })
-            .collect();
-        (
-            format!("{} (imported)", d.title),
-            ps,
-            d.skipped_panels,
-            Some(d.layout),
-        )
-    } else {
-        merge_user_vars(&mut vars, config.vars.clone(), &args.var);
-        (
-            "grafatui".to_string(),
-            app::default_queries(args.query),
-            0,
-            None,
-        )
-    };
-
     // Determine theme
     let theme_name = args
         .theme
@@ -228,46 +172,128 @@ async fn main() -> Result<()> {
         .threshold_marker
         .or(config.threshold_marker)
         .unwrap_or_else(|| "dashed-line".to_string());
-    let refresh_rate = resolve_refresh_rate_ms(
-        args.refresh_rate,
-        config.refresh_rate,
-        dashboard_refresh_rate_ms,
-    );
-    let refresh_every = Duration::from_millis(refresh_rate);
-
-    let mut state = app::AppState::new(
-        prom,
-        range,
-        step_policy,
-        refresh_every,
-        title,
-        panels,
-        skipped_panels,
-        theme,
-        marker_name,
-        export::ExportOptions {
-            dir: export_dir,
-            format: export_format,
-            record_max_frames,
-        }
-        .validate()?,
-    );
-    apply_imported_layout(&mut state, imported_layout);
-    state.annotations = annotations::AnnotationState::from_source(annotation_source);
-    state.scrape_interval = scrape_interval;
-    state.autogrid_enabled = autogrid_enabled;
-    state.autogrid_color = autogrid_color;
-    state.vars = vars; // <— pass variables into the app
-    state.query_vars = query_vars;
-    state.variable_state = variable_state;
-    state.configure_dynamic(auto_grid_behaviors);
-    // Signals are handled from here on, so stopping during the first refresh,
-    // which may be waiting on an annotation provider, still cleans up.
-    let mut shutdown = ShutdownSignals::register();
-    tokio::select! {
-        res = state.refresh_initial() => res?,
-        () = shutdown.recv() => return Ok(()),
+    let refresh_rate_override = args.refresh_rate.or(config.refresh_rate);
+    let mut dashboards = Vec::new();
+    if dashboard_paths.is_empty() {
+        dashboards.push(None);
+    } else {
+        dashboards.extend(
+            dashboard_paths
+                .iter()
+                .map(|path| {
+                    grafana::load_grafana_dashboard(path)
+                        .with_context(|| format!("failed to load dashboard `{}`", path.display()))
+                        .map(Some)
+                })
+                .collect::<Result<Vec<_>>>()?,
+        );
     }
+    let export_options = export::ExportOptions {
+        dir: export_dir,
+        format: export_format,
+        record_max_frames,
+    }
+    .validate()?;
+
+    let mut app_states = Vec::with_capacity(dashboards.len());
+    for dashboard in dashboards {
+        let mut vars = HashMap::new();
+        let mut query_vars = Vec::new();
+        let mut variable_state = dashboard::variables::VariableState::default();
+        let mut auto_grid_behaviors = HashMap::new();
+        let mut dashboard_refresh_rate_ms = None;
+
+        let (title, panels, skipped_panels, imported_layout) = if let Some(d) = dashboard {
+            let import_context = build_import_context(&d, config.vars.clone(), &args.var);
+            print_import_diagnostics(&import_context.diagnostics);
+            dashboard_refresh_rate_ms = d.refresh_rate_ms;
+            vars = import_context.vars;
+            query_vars = import_context.query_vars;
+            variable_state = d.variable_state;
+            auto_grid_behaviors = d.auto_grid_behaviors;
+            merge_user_vars(
+                &mut variable_state.overrides,
+                config.vars.clone(),
+                &args.var,
+            );
+            let panels = d
+                .queries
+                .into_iter()
+                .map(|q| app::PanelState {
+                    title: q.title,
+                    exprs: q.exprs,
+                    legends: q.legends,
+                    query_modes: q.query_modes,
+                    series: vec![],
+                    last_error: None,
+                    notices: Default::default(),
+                    last_url: None,
+                    last_samples: 0,
+                    grid: q.grid.map(|g| app::GridUnit {
+                        x: g.x,
+                        y: g.y,
+                        w: g.w,
+                        h: g.h,
+                    }),
+                    y_axis_mode: app::YAxisMode::Auto,
+                    panel_type: q.panel_type,
+                    thresholds: q.thresholds,
+                    min: q.min,
+                    max: q.max,
+                    autogrid: q.autogrid,
+                    display: q.display,
+                    options: q.options,
+                    resolution: q.resolution,
+                })
+                .collect();
+            (
+                format!("{} (imported)", d.title),
+                panels,
+                d.skipped_panels,
+                Some(d.layout),
+            )
+        } else {
+            merge_user_vars(&mut vars, config.vars.clone(), &args.var);
+            (
+                "grafatui".to_string(),
+                app::default_queries(args.query.clone()),
+                0,
+                None,
+            )
+        };
+
+        let refresh_every = Duration::from_millis(resolve_refresh_rate_ms(
+            refresh_rate_override,
+            None,
+            dashboard_refresh_rate_ms,
+        ));
+        let mut state = app::AppState::new(
+            prom.clone(),
+            range,
+            step_policy,
+            refresh_every,
+            title,
+            panels,
+            skipped_panels,
+            theme.clone(),
+            marker_name.clone(),
+            export_options.clone(),
+        );
+        apply_imported_layout(&mut state, imported_layout);
+        state.annotations = annotations::AnnotationState::from_source(annotation_source.clone());
+        state.scrape_interval = scrape_interval;
+        state.autogrid_enabled = autogrid_enabled;
+        state.autogrid_color = autogrid_color;
+        state.vars = vars;
+        state.query_vars = query_vars;
+        state.variable_state = variable_state;
+        state.configure_dynamic(auto_grid_behaviors);
+        app_states.push(state);
+    }
+    let mut workspace = app::DashboardWorkspace::new(app_states);
+    // Signals are handled from here on, so stopping during any refresh still
+    // cancels the in-flight providers and restores the terminal.
+    let mut shutdown = ShutdownSignals::register();
 
     install_terminal_panic_hook();
     let guard = TerminalGuard::enter()?;
@@ -276,14 +302,14 @@ async fn main() -> Result<()> {
     let res = tokio::select! {
         res = app::run_app(
             &mut terminal,
-            &mut state,
+            &mut workspace,
             Duration::from_millis(args.tick_rate),
         ) => res,
         () = shutdown.recv() => Ok(()),
     };
     // Save a recording however the session ended; this is a no-op when the
     // event loop already saved it on quit.
-    let finalized = app::finalize_recording_before_quit(&mut state);
+    let finalized = workspace.finalize_recordings();
 
     drop(guard);
     res.and(finalized)
@@ -493,6 +519,8 @@ struct ImportContext {
 
 #[derive(Debug, Serialize)]
 struct ImportValidationSummary {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source: Option<std::path::PathBuf>,
     title: String,
     panel_count: usize,
     diagnostics: Vec<grafana::ImportDiagnostic>,
@@ -505,6 +533,7 @@ fn validate_dashboard_import(
 ) -> ImportValidationSummary {
     let import_context = build_import_context(&dashboard, config_vars, cli_vars);
     ImportValidationSummary {
+        source: None,
         title: dashboard.title,
         panel_count: dashboard.queries.len(),
         diagnostics: import_context.diagnostics,
@@ -573,36 +602,46 @@ fn print_import_diagnostics(diagnostics: &[grafana::ImportDiagnostic]) {
     }
 }
 
-fn print_validation_summary(
-    summary: &ImportValidationSummary,
+fn print_validation_summaries(
+    summaries: &[ImportValidationSummary],
     format: cli::ValidateFormat,
     strict: bool,
 ) -> Result<()> {
+    let warning_count = summaries
+        .iter()
+        .map(|summary| summary.diagnostics.len())
+        .sum::<usize>();
     match format {
         cli::ValidateFormat::Text => {
-            print_import_diagnostics(&summary.diagnostics);
-            if strict && !summary.diagnostics.is_empty() {
-                bail!(
-                    "validation failed with {} warning(s)",
-                    summary.diagnostics.len()
+            for summary in summaries {
+                if !summary.diagnostics.is_empty() {
+                    if let Some(source) = &summary.source {
+                        eprintln!("Dashboard source: {}", source.display());
+                    }
+                    print_import_diagnostics(&summary.diagnostics);
+                }
+                println!(
+                    "Grafana dashboard is importable: {} ({} panel(s)){}",
+                    summary.title,
+                    summary.panel_count,
+                    summary.source.as_ref().map_or_else(String::new, |source| {
+                        format!(" from {}", source.display())
+                    })
                 );
             }
-            println!(
-                "Grafana dashboard is importable: {} ({} panel(s))",
-                summary.title, summary.panel_count
-            );
         }
         cli::ValidateFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(summary)?);
-            if strict && !summary.diagnostics.is_empty() {
-                bail!(
-                    "validation failed with {} warning(s)",
-                    summary.diagnostics.len()
-                );
+            if summaries.len() == 1 {
+                println!("{}", serde_json::to_string_pretty(&summaries[0])?);
+            } else {
+                println!("{}", serde_json::to_string_pretty(summaries)?);
             }
         }
     }
 
+    if strict && warning_count > 0 {
+        bail!("validation failed with {warning_count} warning(s)");
+    }
     Ok(())
 }
 

@@ -237,13 +237,14 @@ async fn local_variable_refresh_obeys_parent_activation_even_when_items_are_hidd
         app.variable_state.lookup(3, "scope").unwrap().values,
         vec!["a"]
     );
-    tokio::time::timeout(
+    let indices = tokio::time::timeout(
         Duration::from_secs(3),
         app.activate_tab(TabGroupId::new(0), 1),
     )
     .await
     .unwrap()
     .unwrap();
+    app = crate::app::state::test_support::complete_activation(app, indices.unwrap()).await;
     assert_eq!(
         requests.try_recv().unwrap(),
         "up{section=\"second\",parent=\"parent-node\"}"

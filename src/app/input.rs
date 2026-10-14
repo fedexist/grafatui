@@ -23,23 +23,44 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Rect, Size};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum InputAction {
     Redraw,
+    Refresh,
+    Activate(Vec<usize>),
     Quit,
     ExportCurrent,
     ToggleRecording,
 }
 
+fn activation_action(indices: Option<Vec<usize>>) -> InputAction {
+    indices.map_or(InputAction::Redraw, InputAction::Activate)
+}
+
 enum SharedKeyResult {
     Handled,
+    Refresh,
     Quit,
     Unhandled,
 }
 
+#[cfg(test)]
 pub(super) async fn handle_key(
     key: KeyEvent,
     terminal_size: Size,
+    app: &mut AppState,
+) -> Result<InputAction> {
+    handle_key_in_viewport(
+        key,
+        Rect::new(0, 0, terminal_size.width, terminal_size.height),
+        app,
+    )
+    .await
+}
+
+pub(super) async fn handle_key_in_viewport(
+    key: KeyEvent,
+    viewport: Rect,
     app: &mut AppState,
 ) -> Result<InputAction> {
     // Raw mode delivers Ctrl+C as a key rather than SIGINT.
@@ -56,7 +77,11 @@ pub(super) async fn handle_key(
     }
 
     if app.annotation_modal.is_some() {
-        return Ok(handle_annotation_modal_key(key, terminal_size, app));
+        return Ok(handle_annotation_modal_key(
+            key,
+            Size::new(viewport.right(), viewport.bottom()),
+            app,
+        ));
     }
 
     if key.code == KeyCode::Char('t') && key.modifiers.is_empty() && app.mode != AppMode::Search {
@@ -80,21 +105,17 @@ pub(super) async fn handle_key(
             _ => None,
         };
         if let Some(action) = action {
-            scroll_selected_body(
-                Rect::new(0, 0, terminal_size.width, terminal_size.height),
-                app,
-                action,
-            );
+            scroll_selected_body(viewport, app, action);
             return Ok(InputAction::Redraw);
         }
     }
 
     let action = match app.mode {
-        AppMode::Search => handle_search_key(key, terminal_size, app),
+        AppMode::Search => handle_search_key(key, viewport, app),
         AppMode::Inspect => handle_inspect_key(key, app),
         AppMode::Fullscreen => handle_fullscreen_key(key, app).await?,
         AppMode::FullscreenInspect => handle_fullscreen_inspect_key(key, app),
-        AppMode::Normal => handle_normal_key(key, terminal_size, app).await?,
+        AppMode::Normal => handle_normal_key(key, viewport, app).await?,
     };
     Ok(action)
 }
@@ -148,9 +169,23 @@ fn handle_annotation_modal_key(
     InputAction::Redraw
 }
 
+#[cfg(test)]
 pub(super) async fn handle_mouse(
     mouse: MouseEvent,
     terminal_size: Size,
+    app: &mut AppState,
+) -> Result<InputAction> {
+    handle_mouse_in_viewport(
+        mouse,
+        Rect::new(0, 0, terminal_size.width, terminal_size.height),
+        app,
+    )
+    .await
+}
+
+pub(super) async fn handle_mouse_in_viewport(
+    mouse: MouseEvent,
+    viewport: Rect,
     app: &mut AppState,
 ) -> Result<InputAction> {
     if app.annotation_modal.is_some() {
@@ -164,7 +199,6 @@ pub(super) async fn handle_mouse(
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
         )
     {
-        let viewport = Rect::new(0, 0, terminal_size.width, terminal_size.height);
         let owns = ui::panel_body_viewports(viewport, app)
             .into_iter()
             .any(|body| {
@@ -188,7 +222,8 @@ pub(super) async fn handle_mouse(
 
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left) => {
-            let rect = Rect::new(0, 0, terminal_size.width, terminal_size.height);
+            let mut activation = None;
+            let rect = viewport;
             if let Some(item) = ui::hit_test(app, rect, mouse.column, mouse.row) {
                 let tab_target = if app.mode == AppMode::Normal
                     && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
@@ -229,13 +264,13 @@ pub(super) async fn handle_mouse(
                         });
                 app.selected_item = Some(item.id);
                 if clicked_disclosure {
-                    app.toggle_selected_row().await?;
-                    ensure_selected_item_visible(terminal_size, app);
+                    activation = app.toggle_selected_row().await?;
+                    ensure_selected_item_visible(viewport, app);
                     ui::clamp_dashboard_scroll(rect, app);
                 }
                 if let Some((group_id, index)) = tab_target {
-                    app.activate_tab(group_id, index).await?;
-                    ensure_selected_item_visible(terminal_size, app);
+                    activation = app.activate_tab(group_id, index).await?;
+                    ensure_selected_item_visible(viewport, app);
                     ui::clamp_dashboard_scroll(rect, app);
                 }
 
@@ -255,29 +290,23 @@ pub(super) async fn handle_mouse(
                     _ => {}
                 }
             }
-            Ok(InputAction::Redraw)
+            Ok(activation_action(activation))
         }
         MouseEventKind::ScrollDown => {
             app.vertical_scroll = app.vertical_scroll.saturating_add(1);
-            ui::clamp_dashboard_scroll(
-                Rect::new(0, 0, terminal_size.width, terminal_size.height),
-                app,
-            );
+            ui::clamp_dashboard_scroll(viewport, app);
             Ok(InputAction::Redraw)
         }
         MouseEventKind::ScrollUp => {
             app.vertical_scroll = app.vertical_scroll.saturating_sub(1);
-            ui::clamp_dashboard_scroll(
-                Rect::new(0, 0, terminal_size.width, terminal_size.height),
-                app,
-            );
+            ui::clamp_dashboard_scroll(viewport, app);
             Ok(InputAction::Redraw)
         }
         _ => Ok(InputAction::Redraw),
     }
 }
 
-fn handle_search_key(key: KeyEvent, terminal_size: Size, app: &mut AppState) -> InputAction {
+fn handle_search_key(key: KeyEvent, viewport: Rect, app: &mut AppState) -> InputAction {
     match key.code {
         KeyCode::Esc => {
             app.mode = AppMode::Normal;
@@ -294,7 +323,7 @@ fn handle_search_key(key: KeyEvent, terminal_size: Size, app: &mut AppState) -> 
                 app.search_query.clear();
                 app.search_results.clear();
                 if matches!(item, DashboardItemId::Row(_) | DashboardItemId::Tabs(_)) {
-                    ensure_selected_item_visible(terminal_size, app);
+                    ensure_selected_item_visible(viewport, app);
                 }
             }
         }
@@ -389,7 +418,7 @@ fn handle_fullscreen_inspect_key(key: KeyEvent, app: &mut AppState) -> InputActi
 
 async fn handle_normal_key(
     key: KeyEvent,
-    terminal_size: Size,
+    viewport: Rect,
     app: &mut AppState,
 ) -> Result<InputAction> {
     let action = match key.code {
@@ -404,40 +433,41 @@ async fn handle_normal_key(
         }
         KeyCode::Up | KeyCode::Char('k') => {
             app.select_previous_item();
-            ensure_selected_item_visible(terminal_size, app);
+            ensure_selected_item_visible(viewport, app);
             InputAction::Redraw
         }
         KeyCode::Down | KeyCode::Char('j') => {
             app.select_next_item();
-            ensure_selected_item_visible(terminal_size, app);
+            ensure_selected_item_visible(viewport, app);
             InputAction::Redraw
         }
         KeyCode::Enter | KeyCode::Char(' ') if key.modifiers.is_empty() => {
-            if app.selected_tab_group_id().is_some() {
+            let action = if app.selected_tab_group_id().is_some() {
                 app.enter_selected_tab();
+                InputAction::Redraw
             } else {
-                app.toggle_selected_row().await?;
-            }
-            ensure_selected_item_visible(terminal_size, app);
-            InputAction::Redraw
+                activation_action(app.toggle_selected_row().await?)
+            };
+            ensure_selected_item_visible(viewport, app);
+            action
         }
         KeyCode::Left if key.modifiers.is_empty() => {
-            if app.selected_tab_group_id().is_some() {
-                app.move_selected_tab(-1).await?;
+            let change = if app.selected_tab_group_id().is_some() {
+                app.move_selected_tab(-1).await?
             } else {
-                app.set_selected_row_collapsed(true).await?;
-            }
-            ensure_selected_item_visible(terminal_size, app);
-            InputAction::Redraw
+                app.set_selected_row_collapsed(true).await?
+            };
+            ensure_selected_item_visible(viewport, app);
+            activation_action(change)
         }
         KeyCode::Right if key.modifiers.is_empty() => {
-            if app.selected_tab_group_id().is_some() {
-                app.move_selected_tab(1).await?;
+            let change = if app.selected_tab_group_id().is_some() {
+                app.move_selected_tab(1).await?
             } else {
-                app.set_selected_row_collapsed(false).await?;
-            }
-            ensure_selected_item_visible(terminal_size, app);
-            InputAction::Redraw
+                app.set_selected_row_collapsed(false).await?
+            };
+            ensure_selected_item_visible(viewport, app);
+            activation_action(change)
         }
         KeyCode::PageUp => {
             app.vertical_scroll = app.vertical_scroll.saturating_sub(10);
@@ -471,59 +501,45 @@ async fn handle_normal_key(
         }
         _ => shared_key_action(handle_shared_keys(key, app).await?),
     };
-    ui::clamp_dashboard_scroll(
-        Rect::new(0, 0, terminal_size.width, terminal_size.height),
-        app,
-    );
+    ui::clamp_dashboard_scroll(viewport, app);
     Ok(action)
 }
 
-fn ensure_selected_item_visible(terminal_size: Size, app: &mut AppState) {
-    let area = Rect::new(0, 0, terminal_size.width, terminal_size.height);
-    ui::scroll_selected_into_view(area, app);
+fn ensure_selected_item_visible(viewport: Rect, app: &mut AppState) {
+    ui::scroll_selected_into_view(viewport, app);
 }
 
 async fn handle_shared_keys(key: KeyEvent, app: &mut AppState) -> Result<SharedKeyResult> {
     match key.code {
         KeyCode::Char('q') => Ok(SharedKeyResult::Quit),
-        KeyCode::Char('r') | KeyCode::Char('R') => {
-            app.refresh().await?;
-            Ok(SharedKeyResult::Handled)
-        }
+        KeyCode::Char('r') | KeyCode::Char('R') => Ok(SharedKeyResult::Refresh),
         KeyCode::Char('+') => {
             app.zoom_out();
-            app.refresh().await?;
-            Ok(SharedKeyResult::Handled)
+            Ok(SharedKeyResult::Refresh)
         }
         KeyCode::Char('-') => {
             app.zoom_in();
-            app.refresh().await?;
-            Ok(SharedKeyResult::Handled)
+            Ok(SharedKeyResult::Refresh)
         }
         KeyCode::Char('[') if key.modifiers.contains(KeyModifiers::SHIFT) => {
             app.pan_left();
-            app.refresh().await?;
-            Ok(SharedKeyResult::Handled)
+            Ok(SharedKeyResult::Refresh)
         }
         KeyCode::Left if key.modifiers.contains(KeyModifiers::SHIFT) => {
             app.pan_left();
-            app.refresh().await?;
-            Ok(SharedKeyResult::Handled)
+            Ok(SharedKeyResult::Refresh)
         }
         KeyCode::Char(']') if key.modifiers.contains(KeyModifiers::SHIFT) => {
             app.pan_right();
-            app.refresh().await?;
-            Ok(SharedKeyResult::Handled)
+            Ok(SharedKeyResult::Refresh)
         }
         KeyCode::Right if key.modifiers.contains(KeyModifiers::SHIFT) => {
             app.pan_right();
-            app.refresh().await?;
-            Ok(SharedKeyResult::Handled)
+            Ok(SharedKeyResult::Refresh)
         }
         KeyCode::Char('0') => {
             app.reset_to_live();
-            app.refresh().await?;
-            Ok(SharedKeyResult::Handled)
+            Ok(SharedKeyResult::Refresh)
         }
         KeyCode::Char('y') => {
             if let Some(panel) = app
@@ -548,6 +564,7 @@ async fn handle_shared_keys(key: KeyEvent, app: &mut AppState) -> Result<SharedK
 fn shared_key_action(result: SharedKeyResult) -> InputAction {
     match result {
         SharedKeyResult::Handled | SharedKeyResult::Unhandled => InputAction::Redraw,
+        SharedKeyResult::Refresh => InputAction::Refresh,
         SharedKeyResult::Quit => InputAction::Quit,
     }
 }
@@ -1417,6 +1434,19 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(app.selected_panel_index(), Some(0));
+    }
+
+    #[tokio::test]
+    async fn refresh_shortcut_returns_an_intent_without_running_a_refresh() {
+        let mut app = test_app();
+        let last_refresh = app.last_refresh;
+
+        let action = handle_key(key(KeyCode::Char('r')), size(), &mut app)
+            .await
+            .unwrap();
+
+        assert_eq!(action, InputAction::Refresh);
+        assert_eq!(app.last_refresh, last_refresh);
     }
 
     #[tokio::test]

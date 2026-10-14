@@ -16,7 +16,7 @@
 
 use super::layout::{DashboardRectKind, centered_rect, visible_dashboard_rects};
 use super::panels::render_panel;
-use crate::app::{AppMode, AppState, PanelState};
+use crate::app::{AppMode, AppState, DashboardWorkspace, PanelState};
 use crate::{dashboard::DashboardRow, theme::Theme};
 use humantime::format_duration;
 use ratatui::{
@@ -24,8 +24,33 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 
+#[cfg(test)]
 pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
-    let size = frame.area();
+    draw_ui_with_tabs(frame, app, None);
+}
+
+pub(crate) fn draw_workspace_ui(frame: &mut Frame, workspace: &mut DashboardWorkspace) {
+    if workspace.dashboards().len() == 1 {
+        draw_ui_with_tabs(frame, workspace.active_mut(), None);
+        return;
+    }
+    let active = workspace.active_index();
+    let titles = workspace
+        .dashboards()
+        .iter()
+        .map(|dashboard| dashboard.title.clone())
+        .collect::<Vec<_>>();
+    draw_ui_with_tabs(frame, workspace.active_mut(), Some((&titles, active)));
+}
+
+fn draw_ui_with_tabs(frame: &mut Frame, app: &mut AppState, tabs: Option<(&[String], usize)>) {
+    let frame_area = frame.area();
+    if let Some((titles, active)) = tabs {
+        let tab_area = Rect::new(frame_area.x, frame_area.y, frame_area.width, 1);
+        let geometry = super::tab_bar_geometry(tab_area, titles, Some(active), 0);
+        super::render_tab_bar(frame, &geometry, &app.theme, true);
+    }
+    let size = super::dashboard_viewport(frame_area, tabs.is_some());
 
     // Layout: title bar, charts area, footer
     let chunks = Layout::default()
@@ -38,14 +63,18 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
         .split(size);
 
     // Title
-    let title_text = format!(
-        "{} — range={} step={}  panels={}  {}(r to refresh, +/- range, [] pan, 0 live, q quit)",
-        app.title,
-        format_duration(app.range),
-        format_duration(app.default_intervals().step),
-        normal_panel_count(app),
-        if app.is_live() { "" } else { "⏸ PAUSED " }
-    );
+    let title_text = if tabs.is_some() {
+        format!("{} — {}", app.title, format_duration(app.range))
+    } else {
+        format!(
+            "{} — range={} step={}  panels={}  {}(r refresh, +/- range, [] pan, 0 live, q quit)",
+            app.title,
+            format_duration(app.range),
+            format_duration(app.default_intervals().step),
+            normal_panel_count(app),
+            if app.is_live() { "" } else { "⏸ PAUSED " }
+        )
+    };
     let title_block = Block::default()
         .borders(Borders::ALL)
         .title(Line::from(title_text).alignment(Alignment::Center));
@@ -131,7 +160,9 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
         AppMode::FullscreenInspect => "FULLSCREEN INSPECT",
     };
 
-    let navigation_hint = if app.selected_tab_group_id().is_some() {
+    let navigation_hint = if tabs.is_some() {
+        "Tab/Shift+Tab dashboards, ↑/↓ navigate"
+    } else if app.selected_tab_group_id().is_some() {
         "←/→ switch tab, Enter enter, ↑/↓ navigate"
     } else {
         "↑/↓ navigate"
@@ -147,20 +178,31 @@ pub(crate) fn draw_ui(frame: &mut Frame, app: &mut AppState) {
     } else {
         ""
     };
-    let summary = format!(
-        "{body_hint}Mode: {}{} | Prom: {} | range={} step={:?} refresh={} | grid={} | panels={} (skipped {}) errors={} | keys: {navigation_hint}, r refresh, e export, Ctrl+E record, +/- range, q quit, ? debug:{}",
-        mode_display,
-        if app.recording.is_some() { " REC" } else { "" },
-        app.prometheus.base,
-        format_duration(app.range),
-        app.default_intervals().step,
-        format_duration(app.refresh_every),
-        if app.autogrid_enabled { "on" } else { "off" },
-        panel_count_display,
-        app.skipped_panels,
-        errors,
-        if app.debug_bar { "on" } else { "off" }
-    );
+    let summary = if tabs.is_some() {
+        format!(
+            "Mode: {}{} | range={} step={} | panels={} | keys: Tab/Shift+Tab, ↑/↓, r, +/-, q",
+            mode_display,
+            if app.recording.is_some() { " REC" } else { "" },
+            format_duration(app.range),
+            format_duration(app.default_intervals().step),
+            panel_count_display,
+        )
+    } else {
+        format!(
+            "{body_hint}Mode: {}{} | Prom: {} | range={} step={:?} refresh={} | grid={} | panels={} (skipped {}) errors={} | keys: {navigation_hint}, r refresh, e export, Ctrl+E record, +/- range, q quit, ? debug:{}",
+            mode_display,
+            if app.recording.is_some() { " REC" } else { "" },
+            app.prometheus.base,
+            format_duration(app.range),
+            app.default_intervals().step,
+            format_duration(app.refresh_every),
+            if app.autogrid_enabled { "on" } else { "off" },
+            panel_count_display,
+            app.skipped_panels,
+            errors,
+            if app.debug_bar { "on" } else { "off" }
+        )
+    };
 
     let detail = build_footer_detail(app);
 
@@ -382,7 +424,7 @@ fn selected_panel_notice(app: &AppState) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::{
         app::{GridUnit, PanelType, SeriesView, YAxisMode},
@@ -404,6 +446,123 @@ mod tests {
             "dashed-line".to_string(),
             ExportOptions::default(),
         )
+    }
+
+    #[test]
+    fn workspace_title_shows_all_top_level_tabs_and_active_dashboard() {
+        use crate::dashboard::DashboardLayout;
+
+        let mut alpha = test_app();
+        alpha.title = "Alpha".into();
+        alpha.panels = vec![graph_panel("Alpha CPU")];
+        alpha.apply_layout(DashboardLayout::flat(1));
+        let mut beta = test_app();
+        beta.title = "Beta".into();
+        beta.panels = vec![graph_panel("Beta Memory")];
+        beta.apply_layout(DashboardLayout::flat(1));
+        alpha.view_end_ts = 1_783_080_000;
+        beta.view_end_ts = 1_783_080_000;
+        let mut workspace = DashboardWorkspace::new(vec![alpha, beta]);
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+
+        terminal
+            .draw(|frame| draw_workspace_ui(frame, &mut workspace))
+            .unwrap();
+        let initial = terminal_text(&terminal);
+        assert!(initial.contains("* Alpha"));
+        assert!(initial.contains("Beta"));
+        assert!(initial.contains("Alpha CPU"));
+        assert!(!initial.contains("Beta Memory"));
+        if let Ok(directory) = std::env::var("GRAFATUI_MULTI_DASHBOARD_CAPTURE_DIR") {
+            let directory = std::path::PathBuf::from(directory);
+            std::fs::create_dir_all(&directory).unwrap();
+            capture_buffer(&terminal, &directory.join("alpha-active-100x30.json"));
+        }
+
+        workspace.switch_next();
+        terminal
+            .draw(|frame| draw_workspace_ui(frame, &mut workspace))
+            .unwrap();
+        let switched = terminal_text(&terminal);
+        assert!(switched.contains("Alpha"));
+        assert!(switched.contains("* Beta"));
+        assert!(switched.contains("Beta Memory"));
+        assert!(!switched.contains("Alpha CPU"));
+        if let Ok(directory) = std::env::var("GRAFATUI_MULTI_DASHBOARD_CAPTURE_DIR") {
+            let directory = std::path::PathBuf::from(directory);
+            capture_buffer(&terminal, &directory.join("beta-active-100x30.json"));
+        }
+    }
+
+    #[test]
+    fn single_dashboard_workspace_keeps_the_legacy_screen() {
+        let mut legacy_app = test_app();
+        legacy_app.title = "Solo".into();
+        let mut workspace_app = test_app();
+        workspace_app.title = "Solo".into();
+        let mut workspace_state = DashboardWorkspace::new(vec![workspace_app]);
+        let mut legacy = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let mut workspace = Terminal::new(TestBackend::new(80, 24)).unwrap();
+
+        legacy
+            .draw(|frame| draw_ui(frame, &mut legacy_app))
+            .unwrap();
+        workspace
+            .draw(|frame| draw_workspace_ui(frame, &mut workspace_state))
+            .unwrap();
+
+        assert_eq!(terminal_text(&workspace), terminal_text(&legacy));
+    }
+
+    #[test]
+    fn workspace_tabs_keep_the_active_dashboard_visible_when_narrow() {
+        use crate::dashboard::DashboardLayout;
+
+        let dashboards = ["Alpha", "Beta", "Gamma"]
+            .into_iter()
+            .map(|name| {
+                let mut dashboard = test_app();
+                dashboard.title = name.to_string();
+                dashboard.panels = vec![graph_panel(&format!("{name} panel"))];
+                dashboard.apply_layout(DashboardLayout::flat(1));
+                dashboard.view_end_ts = 1_783_080_000;
+                dashboard
+            })
+            .collect();
+        let mut workspace = DashboardWorkspace::new(dashboards);
+        workspace.switch_next();
+        workspace.switch_next();
+        let mut terminal = Terminal::new(TestBackend::new(24, 16)).unwrap();
+
+        terminal
+            .draw(|frame| draw_workspace_ui(frame, &mut workspace))
+            .unwrap();
+        let text = terminal_text(&terminal);
+        assert!(text.contains("* Gamma"), "{text}");
+        assert!(text.contains("Gamma — 5m"), "{text}");
+
+        let titles = workspace
+            .dashboards()
+            .iter()
+            .map(|dashboard| dashboard.title.clone())
+            .collect::<Vec<_>>();
+        let geometry = super::super::tab_bar_geometry(
+            ratatui::layout::Rect::new(0, 0, 24, 1),
+            &titles,
+            Some(workspace.active_index()),
+            0,
+        );
+        assert!(
+            geometry
+                .segments
+                .iter()
+                .all(|segment| segment.rect.right() <= 24)
+        );
+        if let Ok(directory) = std::env::var("GRAFATUI_MULTI_DASHBOARD_CAPTURE_DIR") {
+            let directory = std::path::PathBuf::from(directory);
+            std::fs::create_dir_all(&directory).unwrap();
+            capture_buffer(&terminal, &directory.join("gamma-active-24x16.json"));
+        }
     }
 
     fn graph_panel(title: &str) -> PanelState {
@@ -802,7 +961,7 @@ mod tests {
         terminal_text(&terminal)
     }
 
-    fn capture_buffer(terminal: &Terminal<TestBackend>, path: &std::path::Path) {
+    pub(crate) fn capture_buffer(terminal: &Terminal<TestBackend>, path: &std::path::Path) {
         let buffer = terminal.backend().buffer();
         let cells = (0..buffer.area.height)
             .flat_map(|y| {

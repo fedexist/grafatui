@@ -23,7 +23,7 @@ struct Instance {
     binding: Option<(String, VariableOption)>,
     query_data: Option<bool>,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct DynamicDashboard {
     templates: Vec<PanelState>,
     layout: DashboardLayout,
@@ -32,6 +32,13 @@ pub(crate) struct DynamicDashboard {
     instances: Vec<Instance>,
 }
 impl DynamicDashboard {
+    pub(super) fn remap_index(&self, next: &Self, index: usize) -> Option<usize> {
+        let key = &self.instances.get(index)?.key;
+        next.instances
+            .iter()
+            .position(|instance| &instance.key == key)
+    }
+
     pub(crate) fn mark_query_result(&mut self, index: usize, has_data: bool) {
         if let Some(instance) = self.instances.get_mut(index) {
             instance.query_data = Some(has_data);
