@@ -1307,6 +1307,94 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn gauge_uses_no_value_for_visible_null_samples() {
+        let render = |value: Option<f64>,
+                      has_visible_series: bool,
+                      no_value: Option<&str>,
+                      min: f64,
+                      viewport: (u16, u16)| {
+            let mut app = test_app();
+            let mut panel = graph_panel("Cache health");
+            panel.panel_type = PanelType::Gauge;
+            panel.min = Some(min);
+            panel.max = Some(100.0);
+            panel.display.no_value = no_value.map(str::to_owned);
+            if has_visible_series {
+                panel.series = vec![SeriesView {
+                    query_index: 0,
+                    name: "cache_hit_ratio".to_string(),
+                    value,
+                    points: vec![],
+                    visible: true,
+                }];
+            }
+            app.panels = vec![panel];
+            app.apply_layout(crate::dashboard::DashboardLayout::flat(1));
+            if has_visible_series {
+                assert_eq!(app.panels[0].series[0].value, value);
+            }
+
+            let mut terminal = Terminal::new(TestBackend::new(viewport.0, viewport.1)).unwrap();
+            terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+            (terminal_text(&terminal), terminal)
+        };
+        let capture = |terminal: &Terminal<TestBackend>, name: &str, viewport: (u16, u16)| {
+            if let Ok(root) = std::env::var("GRAFATUI_GAUGE_NO_VALUE_CAPTURE_DIR") {
+                let directory = std::path::PathBuf::from(root);
+                std::fs::create_dir_all(&directory).unwrap();
+                capture_buffer(
+                    terminal,
+                    &directory.join(format!("{name}-{}x{}.json", viewport.0, viewport.1)),
+                );
+            }
+        };
+
+        let (configured, terminal) = render(None, true, Some("n/a"), 0.0, (80, 24));
+        assert!(configured.contains("n/a (cache_hit_ratio)"), "{configured}");
+        assert!(
+            !configured.contains("0.00 (cache_hit_ratio)"),
+            "{configured}"
+        );
+        assert_eq!(
+            terminal.backend().buffer().cell((3, 7)).unwrap().symbol(),
+            " ",
+            "a null value must leave the gauge fill empty"
+        );
+        capture(&terminal, "gauge-null-configured", (80, 24));
+
+        let (negative_minimum, terminal) = render(None, true, Some("n/a"), -100.0, (80, 24));
+        assert!(negative_minimum.contains("n/a (cache_hit_ratio)"));
+        assert_eq!(
+            terminal.backend().buffer().cell((3, 7)).unwrap().symbol(),
+            " ",
+            "a null value must leave the gauge empty even with a negative minimum"
+        );
+        capture(&terminal, "gauge-null-negative-min", (80, 24));
+
+        let (default, terminal) = render(None, true, None, 0.0, (80, 24));
+        assert!(default.contains("- (cache_hit_ratio)"), "{default}");
+        assert!(!default.contains("0.00 (cache_hit_ratio)"), "{default}");
+        capture(&terminal, "gauge-null-default", (80, 24));
+
+        let (numeric, terminal) = render(Some(42.5), true, Some("n/a"), 0.0, (80, 24));
+        assert!(numeric.contains("42.50 (cache_hit_ratio)"), "{numeric}");
+        assert_eq!(
+            terminal.backend().buffer().cell((3, 7)).unwrap().symbol(),
+            "█",
+            "a numeric gauge value should retain its proportional fill"
+        );
+        capture(&terminal, "gauge-numeric", (80, 24));
+
+        let (no_series, terminal) = render(None, false, Some("n/a"), 0.0, (80, 24));
+        assert!(no_series.contains("0.00 (No data)"), "{no_series}");
+        capture(&terminal, "gauge-no-series", (80, 24));
+
+        let (narrow, terminal) = render(None, true, Some("n/a"), 0.0, (60, 20));
+        assert!(narrow.contains("n/a (cache_hit_ratio)"), "{narrow}");
+        capture(&terminal, "gauge-null-narrow", (60, 20));
+    }
+
+    #[test]
     fn structurally_flat_layout_growth_uses_rendered_panel_count() {
         let mut app = test_app();
         app.panels = vec![graph_panel("CPU")];
