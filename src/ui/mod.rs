@@ -21,8 +21,26 @@ mod layout;
 mod panels;
 mod tabs;
 
+/// Shared content geometry for rendering, input hit testing and scroll clamping.
+pub(crate) fn dashboard_viewport(
+    viewport: ratatui::layout::Rect,
+    has_workspace_tabs: bool,
+) -> ratatui::layout::Rect {
+    let tab_rows = u16::from(has_workspace_tabs).min(viewport.height);
+    ratatui::layout::Rect::new(
+        viewport.x,
+        viewport.y.saturating_add(tab_rows),
+        viewport.width,
+        viewport.height.saturating_sub(tab_rows),
+    )
+}
+
 pub(crate) use annotations::{annotation_cluster_page_size, render_annotation_modal};
+#[cfg(test)]
 pub(crate) use draw::draw_ui;
+pub(crate) use draw::draw_workspace_ui;
+#[cfg(test)]
+pub(crate) use draw::tests::capture_buffer;
 pub(crate) use format::{
     DisplayFormat, ValueMapping, format_time, get_hash_color, value_to_heatmap_color,
 };

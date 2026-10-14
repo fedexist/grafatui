@@ -77,6 +77,35 @@ impl AnnotationState {
             Self::Disabled | Self::Active { provider: None, .. } => return false,
         };
 
+        self.apply_provider_poll(poll)
+    }
+
+    pub(crate) fn take_provider(&mut self) -> Option<Box<dyn AnnotationProvider>> {
+        match self {
+            Self::Disabled => None,
+            Self::Active { provider, .. } => provider.take(),
+        }
+    }
+
+    pub(crate) fn restore_provider_after_refresh(
+        &mut self,
+        mut provider: Box<dyn AnnotationProvider>,
+        poll: Option<ProviderPoll>,
+    ) -> bool {
+        let Self::Active {
+            provider: current, ..
+        } = self
+        else {
+            return false;
+        };
+        if poll.is_none() {
+            provider.invalidate_after_discard();
+        }
+        *current = Some(provider);
+        poll.is_some_and(|poll| self.apply_provider_poll(poll))
+    }
+
+    fn apply_provider_poll(&mut self, poll: ProviderPoll) -> bool {
         match (self, poll) {
             (
                 Self::Active {
@@ -356,6 +385,35 @@ mod tests {
 
         assert!(!state.is_visible());
         assert_eq!(*refresh_count.lock().unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn discarded_jsonl_poll_is_invalidated_on_the_returned_provider() {
+        let path = temp_path("discarded-workspace-refresh");
+        tokio::fs::write(
+            &path,
+            "{\"time\":\"2026-08-12T10:00:00Z\",\"text\":\"deploy\"}\n",
+        )
+        .await
+        .unwrap();
+        let context = refresh_context();
+        let mut state = AnnotationState::from_path(Some(path.clone()));
+        assert!(state.refresh(&context).await);
+
+        let mut provider = state.take_provider().unwrap();
+        assert!(matches!(
+            provider.refresh(&context).await,
+            ProviderPoll::Unchanged
+        ));
+        state.restore_provider_after_refresh(provider, None);
+
+        let mut provider = state.take_provider().unwrap();
+        assert!(matches!(
+            provider.refresh(&context).await,
+            ProviderPoll::Loaded(_)
+        ));
+
+        tokio::fs::remove_file(path).await.unwrap();
     }
 
     #[tokio::test]

@@ -32,6 +32,7 @@ use ratatui::style::Color;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::{Duration, Instant};
+use tokio::task::JoinHandle;
 
 /// Represents the state of a single dashboard panel.
 #[derive(Debug, Clone)]
@@ -585,61 +586,59 @@ impl AppState {
         self.scroll_to_selected_panel();
     }
 
-    pub(crate) async fn set_selected_row_collapsed(&mut self, collapsed: bool) -> Result<()> {
+    pub(crate) async fn set_selected_row_collapsed(
+        &mut self,
+        collapsed: bool,
+    ) -> Result<Option<Vec<usize>>> {
         let Some(row_id) = self.selected_row_id() else {
-            return Ok(());
+            return Ok(None);
         };
         let Some(change) = self.layout.set_row_collapsed(row_id, collapsed) else {
-            return Ok(());
+            return Ok(None);
         };
-        if !change.newly_visible_panels.is_empty() || self.dynamic.is_some() {
-            self.refresh_panel_indices(&change.newly_visible_panels, false)
-                .await;
-        }
         self.reconcile_visible_annotation_targets();
         self.ensure_selection_visible();
-        Ok(())
+        Ok(Some(change.newly_visible_panels))
     }
 
-    pub(crate) async fn toggle_selected_row(&mut self) -> Result<()> {
+    pub(crate) async fn toggle_selected_row(&mut self) -> Result<Option<Vec<usize>>> {
         let Some(row_id) = self.selected_row_id() else {
-            return Ok(());
+            return Ok(None);
         };
         let Some(change) = self.layout.toggle_row(row_id) else {
-            return Ok(());
+            return Ok(None);
         };
-        if !change.newly_visible_panels.is_empty() || self.dynamic.is_some() {
-            self.refresh_panel_indices(&change.newly_visible_panels, false)
-                .await;
-        }
         self.reconcile_visible_annotation_targets();
         self.ensure_selection_visible();
-        Ok(())
+        Ok(Some(change.newly_visible_panels))
     }
 
-    pub(crate) async fn activate_tab(&mut self, id: TabGroupId, index: usize) -> Result<()> {
+    pub(crate) async fn activate_tab(
+        &mut self,
+        id: TabGroupId,
+        index: usize,
+    ) -> Result<Option<Vec<usize>>> {
         let Some(change) = self.layout.set_active_tab(id, index) else {
-            return Ok(());
+            return Ok(None);
         };
         self.selected_item = Some(DashboardItemId::Tabs(id));
-        if !change.newly_visible_panels.is_empty() || self.dynamic.is_some() {
-            self.refresh_panel_indices(&change.newly_visible_panels, false)
-                .await;
-        }
         self.reconcile_visible_annotation_targets();
         self.ensure_selection_visible();
-        Ok(())
+        Ok(Some(change.newly_visible_panels))
     }
 
-    pub(crate) async fn move_selected_tab(&mut self, direction: isize) -> Result<()> {
+    pub(crate) async fn move_selected_tab(
+        &mut self,
+        direction: isize,
+    ) -> Result<Option<Vec<usize>>> {
         let Some(id) = self.selected_tab_group_id() else {
-            return Ok(());
+            return Ok(None);
         };
         let Some(group) = self.layout.tabs(id) else {
-            return Ok(());
+            return Ok(None);
         };
         let Some(active) = group.active else {
-            return Ok(());
+            return Ok(None);
         };
         let next = active
             .saturating_add_signed(direction)
@@ -748,6 +747,7 @@ impl AppState {
         }
     }
 
+    #[cfg(test)]
     pub(crate) async fn refresh_initial(&mut self) -> Result<()> {
         self.refresh_with(VariableUpdate::Load).await?;
         // Startup has no user selection to preserve; resolve options/conditions first.
@@ -766,15 +766,36 @@ impl AppState {
         )
     }
 
+    #[cfg(test)]
     pub(crate) async fn refresh(&mut self) -> Result<()> {
         self.refresh_with(VariableUpdate::TimeRangeChange).await
     }
 
+    #[cfg(test)]
     pub(crate) async fn refresh_periodic(&mut self) -> Result<()> {
         self.refresh_with(VariableUpdate::Tick).await
     }
 
+    #[cfg(test)]
     async fn refresh_with(&mut self, requested_update: VariableUpdate) -> Result<()> {
+        let end_ts = chrono::Utc::now().timestamp() - self.time_offset.as_secs() as i64;
+        self.refresh_with_at(requested_update, end_ts).await
+    }
+
+    async fn refresh_at(&mut self, update: VariableUpdate, end_ts: i64) -> Result<()> {
+        let initial = !self.variables_loaded;
+        self.refresh_with_at(update, end_ts).await?;
+        if initial {
+            self.selected_item = self.layout.first_visible();
+        }
+        Ok(())
+    }
+
+    async fn refresh_with_at(
+        &mut self,
+        requested_update: VariableUpdate,
+        end_ts: i64,
+    ) -> Result<()> {
         let variable_update = if self.variables_loaded {
             requested_update
         } else {
@@ -785,8 +806,6 @@ impl AppState {
         let scrape_interval = self.scrape_interval;
         let default_intervals = self.default_intervals();
 
-        // Calculate end timestamp: "now" minus time_offset
-        let end_ts = chrono::Utc::now().timestamp() - self.time_offset.as_secs() as i64;
         let annotation_context =
             crate::annotations::AnnotationRefreshContext::from_unix_window(end_ts, range);
         let mut annotations = std::mem::replace(
@@ -843,6 +862,112 @@ impl AppState {
         Ok(())
     }
 
+    fn refresh_snapshot(&self) -> Self {
+        Self {
+            prometheus: self.prometheus.clone(),
+            annotations: crate::annotations::AnnotationState::from_path(None),
+            rendered_annotation_cluster: self.rendered_annotation_cluster.clone(),
+            annotation_modal: self.annotation_modal.clone(),
+            range: self.range,
+            step_policy: self.step_policy,
+            scrape_interval: self.scrape_interval,
+            refresh_every: self.refresh_every,
+            panels: self.panels.clone(),
+            last_refresh: self.last_refresh,
+            view_end_ts: self.view_end_ts,
+            vertical_scroll: self.vertical_scroll,
+            panel_body_scroll: self.panel_body_scroll.clone(),
+            title: self.title.clone(),
+            debug_bar: self.debug_bar,
+            vars: self.vars.clone(),
+            query_vars: self.query_vars.clone(),
+            variable_errors: self.variable_errors.clone(),
+            variable_state: self.variable_state.clone(),
+            variables_loaded: self.variables_loaded,
+            dynamic: self.dynamic.clone(),
+            skipped_panels: self.skipped_panels,
+            layout: self.layout.clone(),
+            selected_item: self.selected_item,
+            theme: self.theme.clone(),
+            time_offset: self.time_offset,
+            mode: self.mode,
+            search_query: self.search_query.clone(),
+            search_results: self.search_results.clone(),
+            cursor_x: self.cursor_x,
+            threshold_marker: self.threshold_marker.clone(),
+            autogrid_enabled: self.autogrid_enabled,
+            autogrid_color: self.autogrid_color,
+            export: self.export.clone(),
+            recording: None,
+            export_status: self.export_status.clone(),
+        }
+    }
+
+    /// Merge query-owned state without restoring the interaction state captured
+    /// before the request. Dynamic panels are matched by stable instance identity.
+    fn apply_refresh_snapshot(&mut self, mut snapshot: Self) {
+        let remap = (0..self.panels.len())
+            .filter_map(|index| {
+                let next = match (&self.dynamic, &snapshot.dynamic) {
+                    (Some(current), Some(next)) => current.remap_index(next, index),
+                    (None, None) => (index < snapshot.panels.len()).then_some(index),
+                    _ => None,
+                }?;
+                Some((index, next))
+            })
+            .collect::<HashMap<_, _>>();
+        let map_item = |item| match item {
+            DashboardItemId::Panel(index) => remap.get(&index).copied().map(DashboardItemId::Panel),
+            other => Some(other),
+        };
+        let selected = self
+            .selected_item
+            .and_then(map_item)
+            .or(snapshot.selected_item);
+        for (&old, &new) in &remap {
+            let current = &self.panels[old];
+            let next = &mut snapshot.panels[new];
+            next.y_axis_mode = current.y_axis_mode;
+            for series in &mut next.series {
+                if let Some(previous) = current.series.iter().find(|previous| {
+                    previous.query_index == series.query_index && previous.name == series.name
+                }) {
+                    series.visible = previous.visible;
+                }
+            }
+        }
+        self.panel_body_scroll = std::mem::take(&mut self.panel_body_scroll)
+            .into_iter()
+            .filter_map(|(index, state)| remap.get(&index).map(|&next| (next, state)))
+            .collect();
+        self.search_results = std::mem::take(&mut self.search_results)
+            .into_iter()
+            .filter_map(map_item)
+            .collect();
+        self.panels = snapshot.panels;
+        self.layout = snapshot.layout;
+        self.dynamic = snapshot.dynamic;
+        self.vars = snapshot.vars;
+        self.variable_state = snapshot.variable_state;
+        self.variable_errors = snapshot.variable_errors;
+        self.variables_loaded = snapshot.variables_loaded;
+        self.view_end_ts = snapshot.view_end_ts;
+        self.last_refresh = snapshot.last_refresh;
+        self.selected_item = selected
+            .and_then(|item| self.layout.nearest_visible_ancestor(item))
+            .or_else(|| self.layout.first_visible());
+        if self.selected_panel_index().is_none() {
+            self.mode = match self.mode {
+                AppMode::Fullscreen => AppMode::Normal,
+                AppMode::FullscreenInspect => AppMode::Inspect,
+                mode => mode,
+            };
+        }
+        if self.mode == AppMode::Search {
+            super::input::update_search_results(self);
+        }
+    }
+
     fn reconcile_visible_annotation_targets(&mut self) {
         let visible_panels = self
             .visible_panel_indices()
@@ -859,7 +984,7 @@ impl AppState {
         self.annotations.reconcile_targets(&titles);
     }
 
-    async fn refresh_panel_indices(&mut self, indices: &[usize], refresh_variables: bool) {
+    async fn refresh_activation(&mut self, indices: &[usize]) {
         let range = self.range;
         let step_policy = self.step_policy;
         let scrape_interval = self.scrape_interval;
@@ -889,9 +1014,11 @@ impl AppState {
         let mut requested = indices.to_vec();
         if self.dynamic.is_some() {
             requested.extend(self.reconcile_dynamic());
-            let eligible = self.query_eligible_indices();
-            requested.retain(|i| eligible.contains(i));
         }
+        let eligible = self.query_eligible_indices();
+        requested.retain(|i| eligible.contains(i));
+        requested.sort_unstable();
+        requested.dedup();
         let variable_report = Self::refresh_prometheus_data(
             &self.prometheus,
             &self.query_vars,
@@ -905,7 +1032,7 @@ impl AppState {
             &mut self.panels,
             &requested,
             &self.variable_errors,
-            refresh_variables.then_some(VariableUpdate::TimeRangeChange),
+            None,
         )
         .await;
         self.apply_variable_report(variable_report);
@@ -1177,6 +1304,355 @@ impl AppState {
     }
 }
 
+/// Independent imported dashboards hosted in one terminal session.
+const MAX_CONCURRENT_DASHBOARD_REFRESHES: usize = 4;
+
+pub(crate) struct DashboardWorkspace {
+    dashboards: Vec<AppState>,
+    active: usize,
+    generations: Vec<u64>,
+    refresh_tasks: Vec<Option<DashboardRefreshTask>>,
+    refresh_requested: Vec<Option<RefreshRequest>>,
+    next_refresh_index: usize,
+}
+
+#[derive(Clone)]
+enum RefreshRequest {
+    Manual,
+    Activation(Vec<usize>),
+}
+
+struct DashboardRefreshTask {
+    request: Option<RefreshRequest>,
+    handle: JoinHandle<RefreshCompletion>,
+}
+
+struct RefreshCompletion {
+    generation: u64,
+    previous_refresh: Instant,
+    snapshot: AppState,
+    annotation: Option<(
+        Box<dyn crate::annotations::AnnotationProvider>,
+        crate::annotations::ProviderPoll,
+    )>,
+    error: Option<String>,
+}
+
+impl DashboardWorkspace {
+    pub(crate) fn new(dashboards: Vec<AppState>) -> Self {
+        assert!(
+            !dashboards.is_empty(),
+            "a dashboard workspace cannot be empty"
+        );
+        let count = dashboards.len();
+        Self {
+            dashboards,
+            active: 0,
+            generations: vec![0; count],
+            refresh_tasks: (0..count).map(|_| None).collect(),
+            refresh_requested: vec![None; count],
+            next_refresh_index: 0,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn active(&self) -> &AppState {
+        &self.dashboards[self.active]
+    }
+
+    pub(crate) fn active_mut(&mut self) -> &mut AppState {
+        &mut self.dashboards[self.active]
+    }
+
+    pub(crate) fn active_index(&self) -> usize {
+        self.active
+    }
+
+    pub(crate) fn dashboards(&self) -> &[AppState] {
+        &self.dashboards
+    }
+
+    pub(crate) fn dashboard_mut(&mut self, index: usize) -> &mut AppState {
+        &mut self.dashboards[index]
+    }
+
+    pub(crate) fn switch_next(&mut self) {
+        self.active = (self.active + 1) % self.dashboards.len();
+    }
+
+    pub(crate) fn switch_previous(&mut self) {
+        self.active = self
+            .active
+            .checked_sub(1)
+            .unwrap_or(self.dashboards.len() - 1);
+    }
+
+    pub(crate) fn invalidate_active(&mut self) {
+        self.generations[self.active] = self.generations[self.active].wrapping_add(1);
+    }
+
+    pub(crate) fn request_active_refresh(&mut self) {
+        self.invalidate_active();
+        self.refresh_requested[self.active] = Some(RefreshRequest::Manual);
+    }
+
+    pub(crate) fn request_activation_refresh(&mut self, indices: Vec<usize>) {
+        self.invalidate_active();
+        // A superseded manual refresh must retain its variable-refresh policy.
+        let in_flight = self.refresh_tasks[self.active]
+            .as_ref()
+            .and_then(|task| task.request.clone());
+        for request in in_flight
+            .into_iter()
+            .chain([RefreshRequest::Activation(indices)])
+        {
+            let pending = &mut self.refresh_requested[self.active];
+            match (&mut *pending, request) {
+                (Some(RefreshRequest::Manual), _) => {}
+                (_, RefreshRequest::Manual) => *pending = Some(RefreshRequest::Manual),
+                (Some(RefreshRequest::Activation(current)), RefreshRequest::Activation(next)) => {
+                    current.extend(next);
+                    current.sort_unstable();
+                    current.dedup();
+                }
+                (None, next) => *pending = Some(next),
+            }
+        }
+    }
+
+    pub(crate) fn next_refresh_in(&self) -> Duration {
+        if self
+            .refresh_tasks
+            .iter()
+            .filter(|task| task.is_some())
+            .count()
+            >= MAX_CONCURRENT_DASHBOARD_REFRESHES
+        {
+            return Duration::from_millis(250);
+        }
+        self.dashboards
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| self.refresh_tasks[*index].is_none())
+            .map(|(index, dashboard)| {
+                if self.refresh_requested[index].is_some() {
+                    return Duration::ZERO;
+                }
+                dashboard
+                    .refresh_every
+                    .saturating_sub(dashboard.last_refresh.elapsed())
+            })
+            .min()
+            .unwrap_or(Duration::from_millis(250))
+    }
+
+    pub(crate) fn start_due_refreshes(&mut self) -> bool {
+        let mut in_flight = self
+            .refresh_tasks
+            .iter()
+            .filter(|task| task.is_some())
+            .count();
+        let mut started = false;
+        let start_index = self.next_refresh_index;
+        for offset in 0..self.dashboards.len() {
+            let index = (start_index + offset) % self.dashboards.len();
+            if in_flight >= MAX_CONCURRENT_DASHBOARD_REFRESHES {
+                break;
+            }
+            let dashboard = &mut self.dashboards[index];
+            if self.refresh_tasks[index].is_some()
+                || (self.refresh_requested[index].is_none()
+                    && dashboard.last_refresh.elapsed() < dashboard.refresh_every)
+            {
+                continue;
+            }
+            let request = self.refresh_requested[index].take();
+            let update = if matches!(request, Some(RefreshRequest::Manual)) {
+                VariableUpdate::TimeRangeChange
+            } else {
+                VariableUpdate::Tick
+            };
+            let activation = match &request {
+                Some(RefreshRequest::Activation(indices)) if dashboard.variables_loaded => {
+                    Some(indices.clone())
+                }
+                _ => None,
+            };
+            let end_ts = if activation.is_some() {
+                dashboard.view_end_ts
+            } else {
+                chrono::Utc::now().timestamp() - dashboard.time_offset.as_secs() as i64
+            };
+            let context = crate::annotations::AnnotationRefreshContext::from_unix_window(
+                end_ts,
+                dashboard.range,
+            );
+            let provider = if activation.is_none() {
+                dashboard.annotations.take_provider()
+            } else {
+                None
+            };
+            let mut snapshot = dashboard.refresh_snapshot();
+            let generation = self.generations[index];
+            let previous_refresh = dashboard.last_refresh;
+            self.refresh_tasks[index] = Some(DashboardRefreshTask {
+                request,
+                handle: tokio::task::spawn_local(async move {
+                    let annotation_refresh = async move {
+                        match provider {
+                            Some(mut provider) => {
+                                let poll = provider.refresh(&context).await;
+                                Some((provider, poll))
+                            }
+                            None => None,
+                        }
+                    };
+                    let prometheus_refresh = async {
+                        if let Some(indices) = activation {
+                            snapshot.refresh_activation(&indices).await;
+                            Ok(())
+                        } else {
+                            snapshot.refresh_at(update, end_ts).await
+                        }
+                    };
+                    let (annotation, result) = tokio::join!(annotation_refresh, prometheus_refresh);
+                    RefreshCompletion {
+                        generation,
+                        previous_refresh,
+                        snapshot,
+                        annotation,
+                        error: result.err().map(|error| format!("{error:#}")),
+                    }
+                }),
+            });
+            in_flight += 1;
+            started = true;
+            self.next_refresh_index = (index + 1) % self.dashboards.len();
+        }
+        started
+    }
+
+    pub(crate) async fn collect_completed_refreshes(&mut self) -> Result<Vec<(usize, Instant)>> {
+        let mut completed_indices = Vec::new();
+        for index in 0..self.refresh_tasks.len() {
+            if !self.refresh_tasks[index]
+                .as_ref()
+                .is_some_and(|task| task.handle.is_finished())
+            {
+                continue;
+            }
+            let task = self.refresh_tasks[index]
+                .take()
+                .expect("checked as present");
+            let completion = task
+                .handle
+                .await
+                .map_err(|error| anyhow::anyhow!("dashboard refresh task failed: {error}"))?;
+            let dashboard = &mut self.dashboards[index];
+            let current_generation = self.generations[index] == completion.generation;
+            if let Some((provider, poll)) = completion.annotation {
+                dashboard
+                    .annotations
+                    .restore_provider_after_refresh(provider, current_generation.then_some(poll));
+            }
+            if let Some(error) = completion.error {
+                if current_generation {
+                    dashboard.export_status = Some(format!("Dashboard refresh failed: {error}"));
+                    dashboard.last_refresh = Instant::now();
+                }
+            } else if current_generation {
+                dashboard.apply_refresh_snapshot(completion.snapshot);
+                dashboard.reconcile_visible_annotation_targets();
+            }
+            completed_indices.push((index, completion.previous_refresh));
+        }
+        Ok(completed_indices)
+    }
+
+    pub(crate) fn finalize_recordings(&mut self) -> Result<()> {
+        self.cancel_refreshes();
+        for dashboard in &mut self.dashboards {
+            super::event_loop::finalize_recording_before_quit(dashboard)?;
+        }
+        Ok(())
+    }
+
+    fn cancel_refreshes(&mut self) {
+        for refresh in &mut self.refresh_tasks {
+            if let Some(refresh) = refresh.take() {
+                refresh.handle.abort();
+            }
+        }
+    }
+}
+
+impl Drop for DashboardWorkspace {
+    fn drop(&mut self) {
+        self.cancel_refreshes();
+    }
+}
+
+#[cfg(test)]
+pub(super) mod test_support {
+    use super::*;
+    use crate::app::{event_loop, input::InputAction};
+
+    pub(crate) fn loaded_fixture(mut app: AppState) -> AppState {
+        app.variables_loaded = true;
+        app
+    }
+
+    async fn complete(mut workspace: DashboardWorkspace) -> AppState {
+        assert!(workspace.start_due_refreshes());
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                if !workspace
+                    .collect_completed_refreshes()
+                    .await
+                    .unwrap()
+                    .is_empty()
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("requested dashboard refresh should finish");
+        workspace.dashboards.remove(0)
+    }
+
+    pub(crate) async fn complete_activation(app: AppState, indices: Vec<usize>) -> AppState {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let mut workspace = DashboardWorkspace::new(vec![app]);
+                workspace.request_activation_refresh(indices);
+                complete(workspace).await
+            })
+            .await
+    }
+
+    pub(crate) async fn complete_event(
+        app: AppState,
+        event: crossterm::event::Event,
+        viewport: ratatui::layout::Rect,
+    ) -> AppState {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let mut workspace = DashboardWorkspace::new(vec![app]);
+                let action = event_loop::handle_event(event, viewport, &mut workspace)
+                    .await
+                    .unwrap();
+                if matches!(action, InputAction::Refresh | InputAction::Activate(_)) {
+                    complete(workspace).await
+                } else {
+                    workspace.dashboards.remove(0)
+                }
+            })
+            .await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1190,7 +1666,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
-    use tokio::sync::Notify;
+    use tokio::sync::{Barrier, Notify};
 
     fn temp_annotation_path(name: &str) -> std::path::PathBuf {
         let suffix = std::time::SystemTime::now()
@@ -1216,6 +1692,727 @@ mod tests {
             "dashed".to_string(),
             ExportOptions::default(),
         )
+    }
+
+    async fn workspace_regression_wait_for_workspace(workspace: &mut DashboardWorkspace) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if !workspace
+                    .collect_completed_refreshes()
+                    .await
+                    .unwrap()
+                    .is_empty()
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("workspace refresh should finish");
+    }
+
+    #[tokio::test]
+    async fn workspace_regression_workspace_manual_refresh_updates_range_variables() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let (url, requests) = mock_prometheus(variable_values).await;
+                let mut app = create_test_app();
+                app.prometheus = prom::PromClient::new(url);
+                app.query_vars = vec![
+                    crate::grafana::TemplateQueryVar {
+                        name: "range".into(),
+                        query: "label_values(range)".into(),
+                        regex: None,
+                        query_path: "fixture.range".into(),
+                        refresh: crate::grafana::VariableRefresh::OnTimeRangeChange,
+                    },
+                    crate::grafana::TemplateQueryVar {
+                        name: "load".into(),
+                        query: "label_values(load)".into(),
+                        regex: None,
+                        query_path: "fixture.load".into(),
+                        refresh: crate::grafana::VariableRefresh::OnLoad,
+                    },
+                ];
+                let mut workspace = DashboardWorkspace::new(vec![app]);
+                assert!(workspace.start_due_refreshes());
+                workspace_regression_wait_for_workspace(&mut workspace).await;
+                workspace.active_mut().last_refresh = Instant::now() - Duration::from_secs(10);
+                assert!(workspace.start_due_refreshes());
+                workspace_regression_wait_for_workspace(&mut workspace).await;
+                use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+                for key in ['r', '+'] {
+                    super::super::event_loop::handle_event(
+                        Event::Key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE)),
+                        ratatui::layout::Rect::new(0, 0, 80, 24),
+                        &mut workspace,
+                    )
+                    .await
+                    .unwrap();
+                    assert!(workspace.start_due_refreshes());
+                    workspace_regression_wait_for_workspace(&mut workspace).await;
+                }
+                let count = requests
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|request| request.starts_with("/api/v1/label/range/"))
+                    .count();
+                assert_eq!(
+                    count, 3,
+                    "initial, manual and range changes refresh variables; periodic ticks do not"
+                );
+                assert_eq!(
+                    requests
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .filter(|request| request.starts_with("/api/v1/label/load/"))
+                        .count(),
+                    1
+                );
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn workspace_regression_row_expansion_returns_before_network_reply() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut app =
+            row_test_app_with_queries(&format!("http://{}", listener.local_addr().unwrap()));
+        let result = tokio::time::timeout(
+            Duration::from_millis(100),
+            crate::app::input::handle_key(
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                ratatui::layout::Size::new(80, 24),
+                &mut app,
+            ),
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "row expansion blocks inside the input handler waiting for Prometheus"
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_regression_mouse_click_uses_rendered_row_position() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        use ratatui::{Terminal, backend::TestBackend, layout::Rect};
+        let mut app = row_test_app();
+        app.apply_layout(row_test_layout(true));
+        let mut workspace = DashboardWorkspace::new(vec![app, create_test_app()]);
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| crate::ui::draw_workspace_ui(frame, &mut workspace))
+            .unwrap();
+        let row = crate::ui::visible_dashboard_rects(Rect::new(0, 1, 80, 23), workspace.active())
+            .into_iter()
+            .find(|item| item.id == DashboardItemId::Row(RowId::new(0)))
+            .unwrap();
+        let disclosure = row.disclosure_rect.unwrap();
+        assert_eq!(
+            terminal
+                .backend()
+                .buffer()
+                .cell((row.rect.x, row.rect.y))
+                .unwrap()
+                .symbol(),
+            "▶"
+        );
+        super::super::event_loop::handle_event(
+            crossterm::event::Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: disclosure.x,
+                row: disclosure.y,
+                modifiers: KeyModifiers::NONE,
+            }),
+            Rect::new(0, 0, 80, 24),
+            &mut workspace,
+        )
+        .await
+        .unwrap();
+        assert!(
+            !workspace
+                .active()
+                .layout
+                .row(RowId::new(0))
+                .unwrap()
+                .collapsed,
+            "clicking the displayed row disclosure at {},{} must expand it",
+            disclosure.x,
+            disclosure.y
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_regression_workspace_refresh_reconciles_annotation_targets() {
+        tokio::task::LocalSet::new().run_until(async {
+            let path = temp_annotation_path("debug-audit-targets");
+            tokio::fs::write(&path, "{\"time\":\"2026-08-12T10:00:00Z\",\"text\":\"deploy\",\"panel_titles\":[\"Missing\"]}\n").await.unwrap();
+            let mut app = create_test_app();
+            app.panels = vec![test_panel("CPU", PanelType::Graph)];
+            app.apply_layout(DashboardLayout::flat(1));
+            app.annotations = crate::annotations::AnnotationState::from_path(Some(path.clone()));
+            let mut workspace = DashboardWorkspace::new(vec![app]);
+            assert!(workspace.start_due_refreshes());
+            workspace_regression_wait_for_workspace(&mut workspace).await;
+            tokio::fs::remove_file(path).await.unwrap();
+            let status = workspace.active().annotations.footer_status();
+            assert!(status.as_deref().is_some_and(|text| text.contains("Missing")),
+                "missing target diagnostic must survive workspace merge, got {status:?}");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn workspace_regression_noop_mouse_movement_does_not_discard_refresh() {
+        use crossterm::event::{KeyModifiers, MouseEvent, MouseEventKind};
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let release = Arc::new(Notify::new());
+                let mut app = create_test_app();
+                app.annotations = crate::annotations::AnnotationState::from_provider(Some(
+                    Box::new(BlockedProvider(Arc::clone(&release))),
+                ));
+                let mut workspace = DashboardWorkspace::new(vec![app]);
+                assert!(workspace.start_due_refreshes());
+                super::super::event_loop::handle_event(
+                    crossterm::event::Event::Mouse(MouseEvent {
+                        kind: MouseEventKind::Moved,
+                        column: 10,
+                        row: 10,
+                        modifiers: KeyModifiers::NONE,
+                    }),
+                    ratatui::layout::Rect::new(0, 0, 80, 24),
+                    &mut workspace,
+                )
+                .await
+                .unwrap();
+                release.notify_one();
+                workspace_regression_wait_for_workspace(&mut workspace).await;
+                assert_eq!(
+                    workspace.active().annotations.snapshot().unwrap().len(),
+                    1,
+                    "no-op mouse movement must not discard a valid refresh result"
+                );
+            })
+            .await;
+    }
+
+    #[test]
+    fn workspace_tab_switching_wraps_and_preserves_dashboard_state() {
+        let mut alpha = create_test_app();
+        alpha.title = "Alpha".into();
+        alpha.range = Duration::from_secs(60);
+        alpha.vars.insert("cluster".into(), "west".into());
+        let mut beta = create_test_app();
+        beta.title = "Beta".into();
+        beta.range = Duration::from_secs(300);
+        beta.vars.insert("cluster".into(), "east".into());
+        let mut workspace = DashboardWorkspace::new(vec![alpha, beta]);
+
+        assert_eq!(workspace.active_index(), 0);
+        assert_eq!(workspace.active().title, "Alpha");
+        workspace.switch_next();
+        assert_eq!(workspace.active_index(), 1);
+        assert_eq!(workspace.active().title, "Beta");
+        workspace.active_mut().range = Duration::from_secs(900);
+        workspace.switch_previous();
+        assert_eq!(workspace.active_index(), 0);
+        assert_eq!(workspace.active().range, Duration::from_secs(60));
+        assert_eq!(workspace.active().vars["cluster"], "west");
+        workspace.switch_previous();
+        assert_eq!(workspace.active().title, "Beta");
+        assert_eq!(workspace.active().range, Duration::from_secs(900));
+        assert_eq!(workspace.active().vars["cluster"], "east");
+    }
+
+    #[tokio::test]
+    async fn workspace_refresh_preserves_navigation_and_display_edits() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let (url, requests) = mock_prometheus(successful_matrix).await;
+                let release = Arc::new(Notify::new());
+                let mut app = create_test_app();
+                app.prometheus = prom::PromClient::new(url);
+                app.panels = ["First", "Second"]
+                    .into_iter()
+                    .map(|title| {
+                        let mut panel = test_panel(title, PanelType::Graph);
+                        panel.exprs = vec!["up".into()];
+                        panel.legends = vec![Some("api".into())];
+                        panel.query_modes = vec![QueryMode::Range];
+                        panel.series = vec![SeriesView {
+                            query_index: 0,
+                            name: "api".into(),
+                            value: Some(0.0),
+                            points: vec![],
+                            visible: true,
+                        }];
+                        panel
+                    })
+                    .collect();
+                app.apply_layout(DashboardLayout::flat(2));
+                app.annotations = crate::annotations::AnnotationState::from_provider(Some(
+                    Box::new(BlockedProvider(Arc::clone(&release))),
+                ));
+                let mut workspace = DashboardWorkspace::new(vec![app]);
+                workspace.start_due_refreshes();
+                tokio::time::timeout(Duration::from_secs(1), async {
+                    while requests.lock().unwrap().is_empty() {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                let app = workspace.active_mut();
+                app.selected_item = Some(DashboardItemId::Panel(1));
+                app.mode = AppMode::Inspect;
+                app.cursor_x = Some(123.0);
+                app.debug_bar = true;
+                app.panels[1].y_axis_mode = YAxisMode::ZeroBased;
+                app.panels[1].series[0].visible = false;
+                app.export_status = Some("latest export".into());
+                release.notify_one();
+                workspace_regression_wait_for_workspace(&mut workspace).await;
+                let app = workspace.active();
+                assert_eq!(app.panels[1].series[0].value, Some(2.0));
+                assert_eq!(app.selected_item, Some(DashboardItemId::Panel(1)));
+                assert_eq!(app.mode, AppMode::Inspect);
+                assert_eq!(app.cursor_x, Some(123.0));
+                assert!(app.debug_bar);
+                assert_eq!(app.panels[1].y_axis_mode, YAxisMode::ZeroBased);
+                assert!(!app.panels[1].series[0].visible);
+                assert_eq!(app.export_status.as_deref(), Some("latest export"));
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn workspace_activation_keeps_superseded_manual_refresh_policy() {
+        use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let (url, requests) = mock_prometheus(variable_values).await;
+                let mut app = create_test_app();
+                app.prometheus = prom::PromClient::new(url);
+                app.query_vars = vec![TemplateQueryVar {
+                    name: "range".into(),
+                    query: "label_values(range)".into(),
+                    regex: None,
+                    query_path: "fixture.range".into(),
+                    refresh: crate::grafana::VariableRefresh::OnTimeRangeChange,
+                }];
+                app.apply_layout(DashboardLayout::new(vec![DashboardLayoutItem::Row(
+                    DashboardRow::new(RowId::new(0), "Empty row", true, false, vec![]),
+                )]));
+                app.refresh_initial().await.unwrap();
+                let release = Arc::new(Notify::new());
+                app.annotations = crate::annotations::AnnotationState::from_provider(Some(
+                    Box::new(BlockedProvider(Arc::clone(&release))),
+                ));
+                let mut workspace = DashboardWorkspace::new(vec![app]);
+                let viewport = ratatui::layout::Rect::new(0, 0, 80, 24);
+                super::super::event_loop::handle_event(
+                    Event::Key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)),
+                    viewport,
+                    &mut workspace,
+                )
+                .await
+                .unwrap();
+                assert!(workspace.start_due_refreshes());
+                tokio::time::timeout(Duration::from_secs(1), async {
+                    while requests.lock().unwrap().len() < 2 {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                super::super::event_loop::handle_event(
+                    Event::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)),
+                    viewport,
+                    &mut workspace,
+                )
+                .await
+                .unwrap();
+                release.notify_one();
+                workspace_regression_wait_for_workspace(&mut workspace).await;
+                assert!(workspace.start_due_refreshes());
+                release.notify_one();
+                workspace_regression_wait_for_workspace(&mut workspace).await;
+                assert_eq!(
+                    requests
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .filter(|request| request.starts_with("/api/v1/label/range/"))
+                        .count(),
+                    3,
+                    "activation must not downgrade the pending manual request to a tick"
+                );
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn workspace_refresh_maps_live_selection_to_repeated_panel_identity() {
+        use crate::dashboard::{
+            autogrid::{AutoGridBehavior, DashboardAutoGrid, test_items},
+            variables::{Variable, VariableOption},
+        };
+        fn changed_node(target: &str) -> &'static str {
+            if target.starts_with("/api/v1/label/") {
+                r#"{"status":"success","data":["b"]}"#
+            } else {
+                successful_matrix(target)
+            }
+        }
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let (url, requests) = mock_prometheus(changed_node).await;
+                let mut app = create_test_app();
+                app.prometheus = prom::PromClient::new(url);
+                let mut panel = test_panel("Load $node", PanelType::Graph);
+                panel.exprs = vec!["up{node=\"$node\"}".into()];
+                panel.legends = vec![Some("api".into())];
+                panel.query_modes = vec![QueryMode::Range];
+                app.panels = vec![panel];
+                app.variable_state.scopes[0].variables = vec![Variable {
+                    name: "node".into(),
+                    values: vec!["a".into(), "b".into()],
+                    texts: vec!["a".into(), "b".into()],
+                    options: ["a", "b"]
+                        .into_iter()
+                        .map(|v| VariableOption {
+                            value: v.into(),
+                            text: v.into(),
+                        })
+                        .collect(),
+                    all: false,
+                    all_value: None,
+                    repeatable: true,
+                    last_error: None,
+                    resolved: true,
+                    query: Some(TemplateQueryVar {
+                        name: "node".into(),
+                        query: "label_values(node)".into(),
+                        regex: None,
+                        query_path: "fixture.node".into(),
+                        refresh: crate::grafana::VariableRefresh::OnTimeRangeChange,
+                    }),
+                }];
+                app.variable_state.panel_scopes = vec![0];
+                app.apply_layout(DashboardLayout::new(vec![DashboardLayoutItem::AutoGrid(
+                    DashboardAutoGrid {
+                        options: Default::default(),
+                        items: test_items(vec![0]),
+                    },
+                )]));
+                app.configure_dynamic(HashMap::from([(
+                    0,
+                    AutoGridBehavior {
+                        repeat: Some("node".into()),
+                        ..Default::default()
+                    },
+                )]));
+                app.variables_loaded = true;
+                let release = Arc::new(Notify::new());
+                app.annotations = crate::annotations::AnnotationState::from_provider(Some(
+                    Box::new(BlockedProvider(Arc::clone(&release))),
+                ));
+                let mut workspace = DashboardWorkspace::new(vec![app]);
+                workspace.request_active_refresh();
+                workspace.start_due_refreshes();
+                tokio::time::timeout(Duration::from_secs(1), async {
+                    while requests.lock().unwrap().len() < 2 {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                workspace.active_mut().selected_item = Some(DashboardItemId::Panel(1));
+                workspace.active_mut().panels[1].y_axis_mode = YAxisMode::ZeroBased;
+                release.notify_one();
+                workspace_regression_wait_for_workspace(&mut workspace).await;
+                assert_eq!(workspace.active().panels.len(), 1);
+                assert_eq!(workspace.active().panels[0].title, "Load b");
+                assert_eq!(workspace.active().selected_panel_index(), Some(0));
+                assert_eq!(
+                    workspace.active().panels[0].y_axis_mode,
+                    YAxisMode::ZeroBased
+                );
+            })
+            .await;
+    }
+
+    #[derive(Debug)]
+    struct DashboardRefreshBarrier(Arc<Barrier>);
+
+    impl AnnotationProvider for DashboardRefreshBarrier {
+        fn refresh<'a>(&'a mut self, _context: &'a AnnotationRefreshContext) -> ProviderFuture<'a> {
+            let barrier = Arc::clone(&self.0);
+            Box::pin(async move {
+                barrier.wait().await;
+                ProviderPoll::Loaded(AnnotationSnapshot::new(Vec::new()))
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn workspace_refreshes_inactive_dashboards_concurrently() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let barrier = Arc::new(Barrier::new(2));
+                let mut alpha = create_test_app();
+                alpha.title = "Alpha".into();
+                alpha.annotations = crate::annotations::AnnotationState::from_provider(Some(
+                    Box::new(DashboardRefreshBarrier(Arc::clone(&barrier))),
+                ));
+                let mut beta = create_test_app();
+                beta.title = "Beta".into();
+                beta.annotations = crate::annotations::AnnotationState::from_provider(Some(
+                    Box::new(DashboardRefreshBarrier(Arc::clone(&barrier))),
+                ));
+                let mut workspace = DashboardWorkspace::new(vec![alpha, beta]);
+
+                workspace.start_due_refreshes();
+                tokio::time::timeout(Duration::from_secs(1), async {
+                    loop {
+                        if workspace.collect_completed_refreshes().await.unwrap().len() == 2 {
+                            break;
+                        }
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .expect("dashboard refreshes must run concurrently");
+
+                assert!(workspace.dashboards()[0].last_refresh.elapsed() < Duration::from_secs(1));
+                assert!(workspace.dashboards()[1].last_refresh.elapsed() < Duration::from_secs(1));
+                assert!(workspace.dashboards()[0].annotations.snapshot().is_some());
+                assert!(workspace.dashboards()[1].annotations.snapshot().is_some());
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn workspace_caps_background_dashboard_refreshes() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let dashboards = (0..MAX_CONCURRENT_DASHBOARD_REFRESHES + 2)
+                    .map(|index| {
+                        let mut dashboard = create_test_app();
+                        dashboard.title = format!("Dashboard {index}");
+                        dashboard
+                    })
+                    .collect();
+                let mut workspace = DashboardWorkspace::new(dashboards);
+
+                assert!(workspace.start_due_refreshes());
+                assert_eq!(
+                    workspace
+                        .refresh_tasks
+                        .iter()
+                        .filter(|task| task.is_some())
+                        .count(),
+                    MAX_CONCURRENT_DASHBOARD_REFRESHES
+                );
+                assert!(!workspace.next_refresh_in().is_zero());
+                assert!(!workspace.start_due_refreshes());
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn requested_refresh_starts_without_waiting_for_the_periodic_interval() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let mut dashboard = create_test_app();
+                dashboard.last_refresh = Instant::now();
+                let mut workspace = DashboardWorkspace::new(vec![dashboard]);
+
+                workspace.request_active_refresh();
+
+                assert!(workspace.start_due_refreshes());
+                assert!(workspace.refresh_tasks[0].is_some());
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn requested_refresh_does_not_overlap_an_in_flight_dashboard_refresh() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let mut workspace = DashboardWorkspace::new(vec![create_test_app()]);
+                assert!(workspace.start_due_refreshes());
+
+                workspace.request_active_refresh();
+
+                assert!(!workspace.start_due_refreshes());
+                assert_eq!(
+                    workspace
+                        .refresh_tasks
+                        .iter()
+                        .filter(|task| task.is_some())
+                        .count(),
+                    1
+                );
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn requested_refresh_runs_after_the_in_flight_refresh_is_discarded() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let release = Arc::new(Notify::new());
+                let mut dashboard = create_test_app();
+                dashboard.annotations = crate::annotations::AnnotationState::from_provider(Some(
+                    Box::new(BlockedProvider(Arc::clone(&release))),
+                ));
+                let mut workspace = DashboardWorkspace::new(vec![dashboard]);
+                assert!(workspace.start_due_refreshes());
+                workspace.invalidate_active();
+                workspace.request_active_refresh();
+                release.notify_one();
+
+                tokio::time::timeout(Duration::from_secs(1), async {
+                    loop {
+                        if !workspace
+                            .collect_completed_refreshes()
+                            .await
+                            .unwrap()
+                            .is_empty()
+                        {
+                            break;
+                        }
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .expect("the original refresh should complete");
+
+                assert!(workspace.start_due_refreshes());
+                assert!(workspace.refresh_tasks[0].is_some());
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn zero_interval_refresh_scheduling_rotates_past_the_first_batch() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let dashboards = (0..MAX_CONCURRENT_DASHBOARD_REFRESHES + 2)
+                    .map(|index| {
+                        let mut dashboard = create_test_app();
+                        dashboard.title = format!("Dashboard {index}");
+                        dashboard.refresh_every = Duration::ZERO;
+                        dashboard
+                    })
+                    .collect();
+                let mut workspace = DashboardWorkspace::new(dashboards);
+
+                workspace.start_due_refreshes();
+                tokio::task::yield_now().await;
+                workspace.collect_completed_refreshes().await.unwrap();
+                workspace.start_due_refreshes();
+
+                assert!(workspace.refresh_tasks[4].is_some());
+                assert!(workspace.refresh_tasks[5].is_some());
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn stale_refresh_failure_does_not_replace_newer_dashboard_status() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let mut dashboard = create_test_app();
+                dashboard.export_status = Some("newer status".into());
+                dashboard.last_refresh = Instant::now() - Duration::from_secs(5);
+                let last_refresh = dashboard.last_refresh;
+                let mut workspace = DashboardWorkspace::new(vec![dashboard]);
+                let snapshot = workspace.dashboards[0].refresh_snapshot();
+                workspace.generations[0] = 1;
+                workspace.refresh_tasks[0] = Some(DashboardRefreshTask {
+                    request: None,
+                    handle: tokio::task::spawn_local(async move {
+                        RefreshCompletion {
+                            generation: 0,
+                            previous_refresh: last_refresh,
+                            snapshot,
+                            annotation: None,
+                            error: Some("outdated failure".into()),
+                        }
+                    }),
+                });
+                tokio::task::yield_now().await;
+
+                workspace.collect_completed_refreshes().await.unwrap();
+
+                assert_eq!(
+                    workspace.dashboards[0].export_status.as_deref(),
+                    Some("newer status")
+                );
+                assert_eq!(workspace.dashboards[0].last_refresh, last_refresh);
+            })
+            .await;
+    }
+
+    #[derive(Debug)]
+    struct BlockedProvider(Arc<Notify>);
+
+    impl AnnotationProvider for BlockedProvider {
+        fn refresh<'a>(&'a mut self, _context: &'a AnnotationRefreshContext) -> ProviderFuture<'a> {
+            let release = Arc::clone(&self.0);
+            Box::pin(async move {
+                release.notified().await;
+                ProviderPoll::Loaded(AnnotationSnapshot::new(vec![
+                    crate::annotations::test_event_at(0.0, "stale"),
+                ]))
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn workspace_discards_refresh_results_made_stale_by_input() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let release = Arc::new(Notify::new());
+                let mut alpha = create_test_app();
+                alpha.range = Duration::from_secs(60);
+                alpha.annotations = crate::annotations::AnnotationState::from_provider(Some(
+                    Box::new(BlockedProvider(Arc::clone(&release))),
+                ));
+                let mut workspace = DashboardWorkspace::new(vec![alpha]);
+
+                assert!(workspace.start_due_refreshes());
+                workspace.active_mut().range = Duration::from_secs(900);
+                workspace.invalidate_active();
+                release.notify_one();
+
+                tokio::time::timeout(Duration::from_secs(1), async {
+                    loop {
+                        if !workspace
+                            .collect_completed_refreshes()
+                            .await
+                            .unwrap()
+                            .is_empty()
+                        {
+                            break;
+                        }
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .expect("the released refresh should finish");
+
+                assert_eq!(workspace.active().range, Duration::from_secs(900));
+                assert_eq!(workspace.active().annotations.snapshot().unwrap().len(), 0);
+            })
+            .await;
     }
 
     fn test_panel(title: &str, panel_type: PanelType) -> PanelState {
@@ -1709,7 +2906,8 @@ mod tests {
         assert!(app.panels[0].last_error.is_none());
         assert!(app.panels[1].last_error.is_none());
 
-        app.toggle_selected_row().await.unwrap();
+        let indices = app.toggle_selected_row().await.unwrap().unwrap();
+        app = test_support::complete_activation(app, indices).await;
         assert!(app.panels[0].last_error.is_some());
         assert!(app.panels[1].last_error.is_none());
     }
@@ -1718,10 +2916,12 @@ mod tests {
     async fn expansion_uses_the_displayed_window_without_resetting_refresh_clock() {
         let mut app = row_test_app_with_queries("http://127.0.0.1:9");
         app.view_end_ts = 1_700_000_000;
+        app.variables_loaded = true;
         app.last_refresh = Instant::now() - Duration::from_secs(30);
         let last_refresh = app.last_refresh;
 
-        app.toggle_selected_row().await.unwrap();
+        let indices = app.toggle_selected_row().await.unwrap().unwrap();
+        app = test_support::complete_activation(app, indices).await;
 
         assert_eq!(app.view_end_ts, 1_700_000_000);
         assert_eq!(app.last_refresh, last_refresh);

@@ -15,66 +15,64 @@
  */
 
 use super::input::{self, InputAction};
-use super::state::AppState;
+use super::state::{AppState, DashboardWorkspace};
 use crate::export::{self, RecordingCompletionReason};
 use crate::ui;
 use anyhow::Result;
-use crossterm::event::{self, Event};
+use crossterm::event::{self, Event, KeyCode};
 use ratatui::Terminal;
 use ratatui::layout::Rect;
 use std::time::Duration;
 
 pub(crate) async fn run_app<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
-    app: &mut AppState,
+    workspace: &mut DashboardWorkspace,
     _tick_rate: Duration,
 ) -> Result<()>
 where
     <B as ratatui::backend::Backend>::Error: Send + Sync + 'static,
 {
-    super::panel_scroll::reconcile_panel_body_scroll(terminal_viewport(terminal)?, app);
+    let content_viewport = ui::dashboard_viewport(
+        terminal_viewport(terminal)?,
+        workspace.dashboards().len() > 1,
+    );
+    super::panel_scroll::reconcile_panel_body_scroll(content_viewport, workspace.active_mut());
     let mut needs_draw = true;
 
     loop {
+        let viewport = terminal_viewport(terminal)?;
+        let content_viewport = ui::dashboard_viewport(viewport, workspace.dashboards().len() > 1);
+        let completed = workspace.collect_completed_refreshes().await?;
+        for (index, before_refresh) in &completed {
+            let dashboard = workspace.dashboard_mut(*index);
+            reconcile_after_refresh(content_viewport, dashboard, *before_refresh);
+            capture_recording_after_change(terminal, dashboard)?;
+            if *index == workspace.active_index() {
+                needs_draw = true;
+            }
+        }
+        workspace.start_due_refreshes();
+
         if needs_draw {
-            terminal.draw(|f| ui::draw_ui(f, app))?;
+            terminal.draw(|f| ui::draw_workspace_ui(f, workspace))?;
             needs_draw = false;
         }
 
         // `event::poll` blocks this task, so it is kept short and the loop
         // yields below; otherwise shutdown signals, which `main` selects on
         // alongside this loop, would wait for the next refresh.
-        let timeout = app
-            .refresh_every
-            .saturating_sub(app.last_refresh.elapsed())
-            .min(MAX_INPUT_WAIT);
+        let timeout = workspace.next_refresh_in().min(MAX_INPUT_WAIT);
 
         if event::poll(timeout)? {
-            let before_refresh = app.last_refresh;
-            let action = match event::read()? {
-                Event::Key(key) => {
-                    let size = terminal.size()?;
-                    input::handle_key(key, size, app).await?
-                }
-                Event::Mouse(mouse) => {
-                    let size = terminal.size()?;
-                    input::handle_mouse(mouse, size, app).await?
-                }
-                Event::Resize(width, height) => {
-                    ui::scroll_selected_into_view(Rect::new(0, 0, width, height), app);
-                    InputAction::Redraw
-                }
-                _ => InputAction::Redraw,
-            };
-
-            reconcile_after_refresh(terminal_viewport(terminal)?, app, before_refresh);
+            let action = handle_event(event::read()?, viewport, workspace).await?;
             match action {
                 InputAction::Quit => {
-                    finalize_recording_before_quit(app)?;
+                    workspace.finalize_recordings()?;
                     return Ok(());
                 }
                 InputAction::ExportCurrent => {
                     let viewport = terminal_viewport(terminal)?;
+                    let app = workspace.active_mut();
                     let exported = export::export_current(app, viewport);
                     report_export_error(app, "Export", exported);
                     needs_draw = true;
@@ -82,25 +80,24 @@ where
                 }
                 InputAction::ToggleRecording => {
                     let viewport = terminal_viewport(terminal)?;
+                    let app = workspace.active_mut();
                     let toggled = export::toggle_recording(app, viewport);
                     report_export_error(app, "Recording", toggled);
                     needs_draw = true;
                     capture_recording_after_change(terminal, app)?;
                 }
+                InputAction::Refresh | InputAction::Activate(_) => {
+                    needs_draw = true;
+                    capture_recording_after_change(terminal, workspace.active_mut())?;
+                }
                 InputAction::Redraw => {
                     needs_draw = true;
-                    capture_recording_after_change(terminal, app)?;
+                    capture_recording_after_change(terminal, workspace.active_mut())?;
                 }
             }
         }
 
-        if app.last_refresh.elapsed() >= app.refresh_every {
-            let before_refresh = app.last_refresh;
-            app.refresh_periodic().await?;
-            reconcile_after_refresh(terminal_viewport(terminal)?, app, before_refresh);
-            needs_draw = true;
-            capture_recording_after_change(terminal, app)?;
-        }
+        workspace.start_due_refreshes();
         tokio::task::yield_now().await;
     }
 }
@@ -120,6 +117,51 @@ fn reconcile_after_refresh(viewport: Rect, app: &mut AppState, before: std::time
 
 /// Longest the event loop blocks waiting for input before yielding.
 const MAX_INPUT_WAIT: Duration = Duration::from_millis(250);
+
+pub(super) async fn handle_event(
+    event: Event,
+    viewport: Rect,
+    workspace: &mut DashboardWorkspace,
+) -> Result<InputAction> {
+    let viewport = match &event {
+        Event::Resize(width, height) => Rect::new(0, 0, *width, *height),
+        _ => viewport,
+    };
+    let content_viewport = ui::dashboard_viewport(viewport, workspace.dashboards().len() > 1);
+    let action = match event {
+        Event::Key(key) if key.code == KeyCode::Tab => {
+            workspace.switch_next();
+            InputAction::Redraw
+        }
+        Event::Key(key) if key.code == KeyCode::BackTab => {
+            workspace.switch_previous();
+            InputAction::Redraw
+        }
+        Event::Key(key) => {
+            input::handle_key_in_viewport(key, content_viewport, workspace.active_mut()).await?
+        }
+        Event::Mouse(mouse) => {
+            if content_viewport.contains(ratatui::layout::Position::new(mouse.column, mouse.row)) {
+                input::handle_mouse_in_viewport(mouse, content_viewport, workspace.active_mut())
+                    .await?
+            } else {
+                InputAction::Redraw
+            }
+        }
+        Event::Resize(_, _) => {
+            ui::scroll_selected_into_view(content_viewport, workspace.active_mut());
+            InputAction::Redraw
+        }
+        _ => InputAction::Redraw,
+    };
+    match &action {
+        InputAction::Refresh => workspace.request_active_refresh(),
+        InputAction::Activate(indices) => workspace.request_activation_refresh(indices.clone()),
+        _ => {}
+    }
+    super::panel_scroll::reconcile_panel_body_scroll(content_viewport, workspace.active_mut());
+    Ok(action)
+}
 
 fn terminal_viewport<B: ratatui::backend::Backend>(terminal: &Terminal<B>) -> Result<Rect>
 where
@@ -265,6 +307,132 @@ mod tests {
         app
     }
 
+    #[tokio::test]
+    async fn dashboard_switch_preserves_saved_scroll_with_distinct_refresh_times() {
+        use crossterm::event::{KeyEvent, KeyModifiers};
+        let alpha = test_app(ExportOptions::default());
+        let mut beta = content_fit_test_app();
+        beta.last_refresh = std::time::Instant::now();
+        beta.vertical_scroll = 1;
+        let viewport = Rect::new(0, 0, 100, 24);
+        ui::clamp_dashboard_scroll(ui::dashboard_viewport(viewport, true), &mut beta);
+        assert_eq!(
+            beta.vertical_scroll, 1,
+            "fixture must have a valid saved scroll position"
+        );
+        let mut workspace = DashboardWorkspace::new(vec![alpha, beta]);
+        for code in [KeyCode::Tab, KeyCode::BackTab, KeyCode::Tab] {
+            handle_event(
+                Event::Key(KeyEvent::new(code, KeyModifiers::NONE)),
+                viewport,
+                &mut workspace,
+            )
+            .await
+            .unwrap();
+        }
+        assert_eq!(workspace.active_index(), 1);
+        assert_eq!(workspace.active().vertical_scroll, 1);
+    }
+
+    #[tokio::test]
+    async fn workspace_row_input_matches_rendered_geometry() {
+        use crate::dashboard::{
+            DashboardItemId, DashboardLayout, DashboardLayoutItem, DashboardRow, RowId,
+        };
+        use crossterm::event::{KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        let mut alpha = test_app(ExportOptions::default());
+        alpha.title = "Alpha".into();
+        alpha.range = Duration::from_secs(300);
+        alpha.view_end_ts = 1_783_080_000;
+        alpha.panels[0].title = "Alpha CPU".into();
+        alpha.panels[0].series[0].points = vec![(1_783_079_900.0, 0.0), (1_783_080_000.0, 1.0)];
+        alpha.apply_layout(DashboardLayout::new(vec![DashboardLayoutItem::Row(
+            DashboardRow::new(
+                RowId::new(0),
+                "Parent",
+                true,
+                false,
+                vec![DashboardLayoutItem::Panel(0)],
+            ),
+        )]));
+        let mut beta = test_app(ExportOptions::default());
+        beta.title = "Beta".into();
+        let mut workspace = DashboardWorkspace::new(vec![alpha, beta]);
+        let viewport = Rect::new(0, 0, 80, 24);
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let capture = |terminal: &Terminal<TestBackend>, name: &str| {
+            if let Ok(directory) = std::env::var("GRAFATUI_MULTI_DASHBOARD_FIX_CAPTURE_DIR") {
+                let directory = std::path::PathBuf::from(directory);
+                fs::create_dir_all(&directory).unwrap();
+                ui::capture_buffer(terminal, &directory.join(format!("{name}-80x24.json")));
+            }
+        };
+        terminal
+            .draw(|frame| ui::draw_workspace_ui(frame, &mut workspace))
+            .unwrap();
+        assert_eq!(
+            terminal.backend().buffer().cell((1, 5)).unwrap().symbol(),
+            "▶"
+        );
+        capture(&terminal, "row-collapsed");
+        let action = handle_event(
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 1,
+                row: 5,
+                modifiers: KeyModifiers::NONE,
+            }),
+            viewport,
+            &mut workspace,
+        )
+        .await
+        .unwrap();
+        assert_eq!(action, InputAction::Activate(vec![0]));
+        assert!(
+            !workspace
+                .active()
+                .layout
+                .row(RowId::new(0))
+                .unwrap()
+                .collapsed
+        );
+        terminal
+            .draw(|frame| ui::draw_workspace_ui(frame, &mut workspace))
+            .unwrap();
+        assert_eq!(
+            terminal.backend().buffer().cell((1, 5)).unwrap().symbol(),
+            "▼"
+        );
+        capture(&terminal, "row-expanded");
+        handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+            viewport,
+            &mut workspace,
+        )
+        .await
+        .unwrap();
+        assert_eq!(workspace.active().selected_panel_index(), Some(0));
+        terminal
+            .draw(|frame| ui::draw_workspace_ui(frame, &mut workspace))
+            .unwrap();
+        let rect =
+            ui::visible_dashboard_rects(ui::dashboard_viewport(viewport, true), workspace.active())
+                .into_iter()
+                .find(|item| item.id == DashboardItemId::Panel(0))
+                .unwrap()
+                .rect;
+        assert_eq!(
+            terminal
+                .backend()
+                .buffer()
+                .cell((rect.x, rect.y))
+                .unwrap()
+                .fg,
+            workspace.active().theme.border_selected
+        );
+        capture(&terminal, "row-panel-focused");
+    }
+
     #[test]
     fn content_fit_refresh_reconciles_scroll() {
         use crate::dashboard::DashboardItemId;
@@ -352,13 +520,15 @@ mod tests {
         for count in [1, 20] {
             app.prometheus = PromClient::new(format!("http://{address}"));
             let before = app.last_refresh;
-            input::handle_key(
+            let action = input::handle_key(
                 KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
                 size,
                 &mut app,
             )
             .await
             .unwrap();
+            assert_eq!(action, InputAction::Refresh);
+            app.refresh().await.unwrap();
             reconcile_after_refresh(viewport, &mut app, before);
             assert_eq!(app.panels[1].series.len(), count);
             assert!(app.panels.iter().all(|p| p.last_error.is_none()));
@@ -444,13 +614,15 @@ mod tests {
             if periodic {
                 app.refresh().await.unwrap();
             } else {
-                input::handle_key(
+                let action = input::handle_key(
                     KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
                     ratatui::layout::Size::new(100, 40),
                     &mut app,
                 )
                 .await
                 .unwrap();
+                assert_eq!(action, InputAction::Refresh);
+                app.refresh().await.unwrap();
             }
             reconcile_after_refresh(viewport, &mut app, before);
             assert_eq!(app.panels[0].series.len(), if periodic { 20 } else { 1 });

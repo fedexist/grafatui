@@ -74,6 +74,9 @@ pub(crate) enum ProviderPoll {
 
 pub(crate) trait AnnotationProvider: fmt::Debug + Send {
     fn refresh<'a>(&'a mut self, context: &'a AnnotationRefreshContext) -> ProviderFuture<'a>;
+
+    /// Reset source-side caching when a completed result is intentionally discarded.
+    fn invalidate_after_discard(&mut self) {}
 }
 
 pub(crate) fn build_provider(source: AnnotationSourceConfig) -> Box<dyn AnnotationProvider> {

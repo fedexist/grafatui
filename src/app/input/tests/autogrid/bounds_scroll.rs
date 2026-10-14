@@ -607,6 +607,7 @@ async fn bounds_scroll_nested_reactivation_retains_and_clamps_siblings() {
         }
     });
     let size = Size::new(100, 40);
+    app = crate::app::state::test_support::loaded_fixture(app);
     app.selected_item = Some(DashboardItemId::Panel(0));
     control(&mut app, size, KeyCode::End).await;
     assert_eq!(local(&app, 0), 14);
@@ -614,30 +615,42 @@ async fn bounds_scroll_nested_reactivation_retains_and_clamps_siblings() {
     control(&mut app, size, KeyCode::PageDown).await;
     assert_eq!(local(&app, 1), 6);
     app.selected_item = Some(DashboardItemId::Row(row));
-    handle_key(key(KeyCode::Enter), size, &mut app)
-        .await
-        .unwrap();
+    app = crate::app::state::test_support::complete_event(
+        app,
+        crossterm::event::Event::Key(key(KeyCode::Enter)),
+        Rect::new(0, 0, size.width, size.height),
+    )
+    .await;
     reconcile(&mut app, size);
     render(&mut app, size, "bounds-scroll-nested-collapsed");
     assert_eq!((local(&app, 0), local(&app, 1)), (14, 6));
     app.panels[0].series.truncate(1);
-    handle_key(key(KeyCode::Enter), size, &mut app)
-        .await
-        .unwrap();
+    app = crate::app::state::test_support::complete_event(
+        app,
+        crossterm::event::Event::Key(key(KeyCode::Enter)),
+        Rect::new(0, 0, size.width, size.height),
+    )
+    .await;
     reconcile(&mut app, size);
     assert_eq!((local(&app, 0), local(&app, 1)), (0, 6));
     render(&mut app, size, "bounds-scroll-nested-expanded");
     app.selected_item = Some(DashboardItemId::Tabs(tabs));
-    handle_key(key(KeyCode::Right), size, &mut app)
-        .await
-        .unwrap();
+    app = crate::app::state::test_support::complete_event(
+        app,
+        crossterm::event::Event::Key(key(KeyCode::Right)),
+        Rect::new(0, 0, size.width, size.height),
+    )
+    .await;
     reconcile(&mut app, size);
     render(&mut app, size, "bounds-scroll-tab-second");
     assert_eq!(local(&app, 1), 6);
     app.panels[1].series.truncate(1);
-    handle_key(key(KeyCode::Left), size, &mut app)
-        .await
-        .unwrap();
+    app = crate::app::state::test_support::complete_event(
+        app,
+        crossterm::event::Event::Key(key(KeyCode::Left)),
+        Rect::new(0, 0, size.width, size.height),
+    )
+    .await;
     reconcile(&mut app, size);
     assert_eq!(local(&app, 1), 0);
     render(&mut app, size, "bounds-scroll-tab-return-clamped");

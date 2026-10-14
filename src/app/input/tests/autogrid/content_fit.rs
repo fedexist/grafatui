@@ -477,18 +477,18 @@ async fn content_fit_mouse_collapse_bounds_document_scroll() {
     assert!(app.visible_panel_indices().is_empty());
     assert_eq!(app.vertical_scroll, 0);
     content_fit_render(&mut app, size, "content-fit-mouse-collapsed", &[]);
-    handle_mouse(
-        MouseEvent {
+    app = crate::app::state::test_support::loaded_fixture(app);
+    app = crate::app::state::test_support::complete_event(
+        app,
+        crossterm::event::Event::Mouse(MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: 1,
             row: 4,
             modifiers: KeyModifiers::NONE,
-        },
-        size,
-        &mut app,
+        }),
+        Rect::new(0, 0, size.width, size.height),
     )
-    .await
-    .unwrap();
+    .await;
     assert_eq!(app.visible_panel_indices(), vec![0, 1, 2, 3]);
     assert_eq!(app.selected_item, Some(DashboardItemId::Row(RowId::new(0))));
     content_fit_render(

@@ -206,7 +206,13 @@ async fn fill_screen_nested_keyboard_buffers_follow_rows_and_tabs() {
             vec!["A", "B"],
         ),
     ] {
-        handle_key(key(keycode), size, &mut app).await.unwrap();
+        app = crate::app::state::test_support::loaded_fixture(app);
+        app = crate::app::state::test_support::complete_event(
+            app,
+            crossterm::event::Event::Key(key(keycode)),
+            Rect::new(0, 0, size.width, size.height),
+        )
+        .await;
         assert_eq!(app.selected_item, Some(selected));
         assert_eq!(app.visible_panel_indices().len(), titles.len());
         if keycode == KeyCode::Enter && !titles.is_empty() {

@@ -279,6 +279,10 @@ impl AnnotationProvider for JsonlFileProvider {
     fn refresh<'a>(&'a mut self, _context: &'a AnnotationRefreshContext) -> ProviderFuture<'a> {
         Box::pin(async move { self.poll_file().await })
     }
+
+    fn invalidate_after_discard(&mut self) {
+        self.last_seen = None;
+    }
 }
 
 #[cfg(test)]
@@ -452,6 +456,34 @@ mod tests {
 
         assert!(error.to_string().contains("limit"), "{error}");
         assert!(matches!(unchanged, ProviderPoll::Unchanged));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn discarded_load_can_be_retried_after_source_cache_invalidation() {
+        let path = temp_path("discarded-load");
+        std::fs::write(
+            &path,
+            "{\"time\":\"2026-07-23T14:30:00Z\",\"text\":\"deploy\"}\n",
+        )
+        .unwrap();
+        let mut provider = JsonlFileProvider::new(path.clone());
+        let context = refresh_context();
+
+        assert!(matches!(
+            provider.refresh(&context).await,
+            ProviderPoll::Loaded(_)
+        ));
+        assert!(matches!(
+            provider.refresh(&context).await,
+            ProviderPoll::Unchanged
+        ));
+        provider.invalidate_after_discard();
+        assert!(matches!(
+            provider.refresh(&context).await,
+            ProviderPoll::Loaded(_)
+        ));
+
         std::fs::remove_file(path).unwrap();
     }
 
