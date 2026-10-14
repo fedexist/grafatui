@@ -53,10 +53,10 @@ pub(crate) struct Args {
     #[arg(long, value_name = "DURATION")]
     pub(crate) scrape_interval: Option<String>,
 
-    /// Grafana dashboard file to import: Classic JSON, or V2 resource JSON or YAML
-    /// (e.g., ./dashboard.json, ./dashboard.yaml)
+    /// Grafana dashboard file to import: Classic JSON, or V2 resource JSON or YAML.
+    /// Repeat to open multiple dashboards as top-level tabs.
     #[arg(long, value_name = "FILE")]
-    pub(crate) grafana_json: Option<PathBuf>,
+    pub(crate) grafana_json: Vec<PathBuf>,
 
     /// Optional JSONL point-event file to overlay on graph panels.
     #[arg(
@@ -208,7 +208,24 @@ mod tests {
         let args = Args::parse_from(["grafatui", "--validate", "--grafana-json", "dashboard.json"]);
 
         assert!(args.validate);
-        assert_eq!(args.grafana_json, Some(PathBuf::from("dashboard.json")));
+        assert_eq!(args.grafana_json, vec![PathBuf::from("dashboard.json")]);
+    }
+
+    #[test]
+    fn test_parse_multiple_grafana_json_paths_in_order() {
+        let args = Args::try_parse_from([
+            "grafatui",
+            "--grafana-json",
+            "alpha.json",
+            "--grafana-json",
+            "beta.json",
+        ])
+        .unwrap();
+
+        assert_eq!(
+            args.grafana_json,
+            vec![PathBuf::from("alpha.json"), PathBuf::from("beta.json")]
+        );
     }
 
     #[test]

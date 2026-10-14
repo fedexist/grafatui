@@ -249,6 +249,86 @@ fn validate_json_outputs_machine_readable_summary() {
 }
 
 #[test]
+fn validate_accepts_multiple_dashboard_paths_in_order() {
+    let alpha = write_dashboard(
+        "multi-alpha",
+        r#"{"title":"Alpha","panels":[{"type":"timeseries","title":"A","targets":[{"expr":"up"}]}]}"#,
+    );
+    let beta = write_dashboard(
+        "multi-beta",
+        r#"{"title":"Beta","panels":[{"type":"timeseries","title":"B","targets":[{"expr":"process_cpu_seconds_total"}]}]}"#,
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+        .args(["--validate", "--grafana-json"])
+        .arg(&alpha)
+        .arg("--grafana-json")
+        .arg(&beta)
+        .output()
+        .unwrap();
+    fs::remove_file(&alpha).unwrap();
+    fs::remove_file(&beta).unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let alpha_index = stdout.find("Alpha").unwrap();
+    let beta_index = stdout.find("Beta").unwrap();
+    assert!(alpha_index < beta_index, "{stdout}");
+    assert!(stdout.contains(&alpha.display().to_string()), "{stdout}");
+    assert!(stdout.contains(&beta.display().to_string()), "{stdout}");
+}
+
+#[test]
+fn validate_json_returns_source_labeled_array_for_multiple_dashboards() {
+    let alpha = write_dashboard("multi-json-alpha", r#"{"title":"Alpha","panels":[]}"#);
+    let beta = write_dashboard("multi-json-beta", r#"{"title":"Beta","panels":[]}"#);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+        .args(["--validate", "--format", "json", "--grafana-json"])
+        .arg(&alpha)
+        .arg("--grafana-json")
+        .arg(&beta)
+        .output()
+        .unwrap();
+    fs::remove_file(&alpha).unwrap();
+    fs::remove_file(&beta).unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let summaries: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summaries[0]["title"], "Alpha");
+    assert_eq!(summaries[0]["source"], alpha.display().to_string());
+    assert_eq!(summaries[1]["title"], "Beta");
+    assert_eq!(summaries[1]["source"], beta.display().to_string());
+}
+
+#[test]
+fn validate_import_error_identifies_which_dashboard_file_failed() {
+    let path = write_dashboard("invalid-multi-dashboard", "not valid JSON");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
+        .args(["--validate", "--grafana-json"])
+        .arg(&path)
+        .output()
+        .unwrap();
+    fs::remove_file(&path).unwrap();
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains(&path.display().to_string()),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn validate_accepts_supported_v2_resource_json() {
     let output = Command::new(env!("CARGO_BIN_EXE_grafatui"))
         .args(["--validate", "--format", "json", "--grafana-json"])
