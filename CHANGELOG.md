@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.1.18] - 2026-10-14
+
+### ⛰️  Features
+
+- **cli:** Accept multiple dashboard files ([cd8f49b](https://github.com/fedexist/grafatui/commit/cd8f49b474c3d7d4e2ea1f9bac68bfdb33cc882f))
+- Add concurrent multi-dashboard tabs ([e95e9aa](https://github.com/fedexist/grafatui/commit/e95e9aaceff3de9df00a80bb862edbbd8e1eedfd))
+
+
 ## [0.1.17] - 2026-10-13
 
 ### ⛰️  Features
