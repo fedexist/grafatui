@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.1.18] - 2026-10-22
+
+### ⛰️  Features
+
+- **cli:** Accept multiple dashboard files ([cd8f49b](https://github.com/fedexist/grafatui/commit/cd8f49b474c3d7d4e2ea1f9bac68bfdb33cc882f))
+- Add concurrent multi-dashboard tabs ([e95e9aa](https://github.com/fedexist/grafatui/commit/e95e9aaceff3de9df00a80bb862edbbd8e1eedfd))
+- **grafana:** Apply single reduceOptions calculation to summary panels ([baf6206](https://github.com/fedexist/grafatui/commit/baf6206ac0262a6f44d096cc4f6c4bff27bda6ec))
+
+### 🐛 Bug Fixes
+
+- **gauge:** Show no-value for null samples ([b3122ce](https://github.com/fedexist/grafatui/commit/b3122ceecbe81bdf781af4fbdc3e65c330105d40))
+
+### 🧪 Testing
+
+- Verify reduced summary values in TUI and exports ([eb1b5f7](https://github.com/fedexist/grafatui/commit/eb1b5f79465ae456023959f2f14a1a6edc22c2ec))
+
+
 ## [0.1.17] - 2026-10-13
 
 ### ⛰️  Features
