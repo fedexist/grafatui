@@ -641,11 +641,13 @@ fn parse_panel(
         count_as_skipped_if_empty: has_visible_target && !has_supported_visible_target,
         grid,
         field_defaults: Some(field_defaults),
-        reduce_options_path: viz_spec
+        reduce_options: viz_spec
             .options
             .reduce_options
-            .is_some()
-            .then(|| format!("{panel_path}.vizConfig.spec.options.reduceOptions")),
+            .map(|value| model::ReduceOptions {
+                value,
+                path: format!("{panel_path}.vizConfig.spec.options.reduceOptions"),
+            }),
         transformations_path: (!raw.spec.data.spec.transformations.is_empty())
             .then(|| format!("{panel_path}.data.spec.transformations")),
         min_interval: model::MinInterval::new(

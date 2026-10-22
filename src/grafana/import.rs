@@ -155,6 +155,18 @@ fn import_panel(
         return Ok(None);
     }
 
+    let summary_calc = panel.reduce_options.as_ref().and_then(|options| {
+        if !matches!(
+            panel_type,
+            crate::app::PanelType::Stat
+                | crate::app::PanelType::Gauge
+                | crate::app::PanelType::BarGauge
+        ) {
+            return None;
+        }
+        parse_summary_calc(&options.value)
+    });
+
     let mut exprs = Vec::new();
     let mut expr_paths = Vec::new();
     let mut legends = Vec::new();
@@ -168,7 +180,10 @@ fn import_panel(
             exprs.push(expr);
             expr_paths.push(target.expr_path);
             legends.push(target.legend_format);
-            query_modes.push(query_mode_for_target(target.instant, panel_type));
+            query_modes.push(match (target.instant, summary_calc) {
+                (None, Some(_)) => crate::app::QueryMode::Range,
+                _ => query_mode_for_target(target.instant, panel_type),
+            });
             target_min_intervals.push(checked_min_interval(target.min_interval, out));
         }
     }
@@ -193,11 +208,13 @@ fn import_panel(
         ));
     }
 
-    if let Some(path) = panel.reduce_options_path {
+    if let Some(options) = &panel.reduce_options
+        && summary_calc.is_none()
+    {
         out.diagnostics.push(ImportDiagnostic::new(
             "ignored_field",
-            path,
-            "`options.reduceOptions` is not supported yet; Grafatui will use default value selection",
+            options.path.clone(),
+            "`options.reduceOptions` is unsupported for this panel or contains unsupported settings; Grafatui will use default value selection",
         ));
     }
 
@@ -227,8 +244,14 @@ fn import_panel(
     }
 
     if !exprs.is_empty() {
-        let options = match panel_type {
-            crate::app::PanelType::Graph => crate::app::PanelOptions::Graph(graph_options),
+        let options = match (panel_type, summary_calc) {
+            (crate::app::PanelType::Graph, _) => crate::app::PanelOptions::Graph(graph_options),
+            (
+                crate::app::PanelType::Stat
+                | crate::app::PanelType::Gauge
+                | crate::app::PanelType::BarGauge,
+                Some(calc),
+            ) => crate::app::PanelOptions::Summary(calc),
             _ => crate::app::PanelOptions::None,
         };
         let index = out.queries.len();
@@ -409,6 +432,43 @@ fn query_mode_for_target(
         Some(true) => crate::app::QueryMode::Instant,
         Some(false) => crate::app::QueryMode::Range,
         None => default_query_mode_for_panel(panel_type),
+    }
+}
+
+fn parse_summary_calc(value: &serde_json::Value) -> Option<crate::app::SummaryCalc> {
+    use crate::app::SummaryCalc;
+    let options = value.as_object()?;
+    if options
+        .keys()
+        .any(|key| !matches!(key.as_str(), "calcs" | "fields" | "values" | "limit"))
+    {
+        return None;
+    }
+    if !matches!(
+        options.get("values"),
+        None | Some(serde_json::Value::Bool(false))
+    ) {
+        return None;
+    }
+    match options.get("fields") {
+        None => {}
+        Some(serde_json::Value::String(fields)) if fields.is_empty() => {}
+        _ => return None,
+    }
+    let calc = match options.get("calcs") {
+        None => "last",
+        Some(serde_json::Value::Array(calcs)) if calcs.is_empty() => "last",
+        Some(serde_json::Value::Array(calcs)) if calcs.len() == 1 => calcs[0].as_str()?,
+        _ => return None,
+    };
+    match calc {
+        "last" => Some(SummaryCalc::Last),
+        "lastNotNull" => Some(SummaryCalc::LastNotNull),
+        "min" => Some(SummaryCalc::Min),
+        "max" => Some(SummaryCalc::Max),
+        "mean" => Some(SummaryCalc::Mean),
+        "sum" => Some(SummaryCalc::Sum),
+        _ => None,
     }
 }
 

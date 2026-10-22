@@ -89,12 +89,18 @@ pub(super) struct Panel {
     pub(super) count_as_skipped_if_empty: bool,
     pub(super) grid: Option<GridPos>,
     pub(super) field_defaults: Option<FieldDefaults>,
-    pub(super) reduce_options_path: Option<String>,
+    pub(super) reduce_options: Option<ReduceOptions>,
     #[allow(dead_code)]
     pub(super) transformations_path: Option<String>,
     /// Panel min interval (Classic `interval`, V2 `queryOptions.interval`).
     pub(super) min_interval: Option<MinInterval>,
     pub(super) max_data_points: Option<u32>,
+}
+
+#[derive(Debug)]
+pub(super) struct ReduceOptions {
+    pub(super) value: serde_json::Value,
+    pub(super) path: String,
 }
 
 /// A Grafana min interval as written, such as `30s`, `>1m`, or `$interval`.
