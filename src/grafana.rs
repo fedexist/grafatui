@@ -448,7 +448,7 @@ mod tests {
             count_as_skipped_if_empty: false,
             grid: None,
             field_defaults: None,
-            reduce_options_path: None,
+            reduce_options: None,
             transformations_path: None,
             min_interval: None,
             max_data_points: None,
@@ -554,6 +554,93 @@ mod tests {
                 }
             }
         }]);
+    }
+
+    #[test]
+    fn supported_reduce_options_use_range_queries_for_summary_panels() {
+        let classic = parse_grafana_dashboard(
+            r#"{"title":"Reduction","panels":[{"type":"gauge","title":"CPU","targets":[{"expr":"up"},{"expr":"up","instant":true}],"options":{"reduceOptions":{"calcs":["mean"]}}}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            classic.queries[0].query_modes,
+            vec![crate::app::QueryMode::Range, crate::app::QueryMode::Instant]
+        );
+        assert_eq!(
+            classic.queries[0].options,
+            crate::app::PanelOptions::Summary(crate::app::SummaryCalc::Mean)
+        );
+        assert!(classic.diagnostics.is_empty());
+
+        let mut v2 = valid_v2_resource();
+        make_v2_panel_importable(&mut v2);
+        v2["spec"]["elements"]["panel-1"]["spec"]["vizConfig"]["group"] =
+            serde_json::json!("bargauge");
+        v2["spec"]["elements"]["panel-1"]["spec"]["vizConfig"]["spec"]["options"]["reduceOptions"] =
+            serde_json::json!({"calcs": ["max"]});
+        let imported = parse_grafana_dashboard(&v2.to_string()).unwrap();
+        assert_eq!(
+            imported.queries[0].query_modes,
+            vec![crate::app::QueryMode::Range]
+        );
+        assert_eq!(
+            imported.queries[0].options,
+            crate::app::PanelOptions::Summary(crate::app::SummaryCalc::Max)
+        );
+        assert!(imported.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn empty_calcs_default_to_last_without_changing_explicit_mode() {
+        let dashboard = parse_grafana_dashboard(
+            r#"{"title":"Reduction","panels":[{"type":"stat","title":"CPU","targets":[{"expr":"up","instant":false}],"options":{"reduceOptions":{"calcs":[],"values":false,"fields":" ","limit":100}}}]}"#,
+        )
+        .unwrap();
+        // A nonempty fields expression remains unsupported, including whitespace.
+        assert_eq!(dashboard.queries[0].options, crate::app::PanelOptions::None);
+        assert_eq!(
+            dashboard.queries[0].query_modes,
+            vec![crate::app::QueryMode::Range]
+        );
+
+        let dashboard = parse_grafana_dashboard(
+            r#"{"title":"Reduction","panels":[{"type":"stat","title":"CPU","targets":[{"expr":"up","instant":false}],"options":{"reduceOptions":{"calcs":[],"values":false,"fields":"","limit":100}}}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            dashboard.queries[0].options,
+            crate::app::PanelOptions::Summary(crate::app::SummaryCalc::Last)
+        );
+        assert!(dashboard.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn unsupported_reduce_options_keep_gauge_defaults_and_report_source_path() {
+        for options in [
+            serde_json::json!({"values": true, "calcs": ["mean"]}),
+            serde_json::json!({"fields": "cpu", "calcs": ["mean"]}),
+            serde_json::json!({"calcs": ["mean", "max"]}),
+            serde_json::json!({"calcs": ["median"]}),
+            serde_json::json!({"calcs": "mean"}),
+        ] {
+            let source = serde_json::json!({
+                "title": "Fallback",
+                "panels": [{"type": "gauge", "title": "CPU", "targets": [{"expr": "up"}],
+                    "options": {"reduceOptions": options}}]
+            });
+            let dashboard = parse_grafana_dashboard(&source.to_string()).unwrap();
+            assert_eq!(
+                dashboard.queries[0].query_modes,
+                vec![crate::app::QueryMode::Instant]
+            );
+            assert_eq!(dashboard.queries[0].options, crate::app::PanelOptions::None);
+            assert_eq!(dashboard.diagnostics.len(), 1);
+            assert_eq!(dashboard.diagnostics[0].code, "ignored_field");
+            assert_eq!(
+                dashboard.diagnostics[0].path,
+                "panels[0].options.reduceOptions"
+            );
+        }
     }
 
     #[test]
@@ -1961,7 +2048,7 @@ mod tests {
             r#"{
                 "title": "Classic",
                 "panels": [{
-                    "type": "stat",
+                    "type": "timeseries",
                     "title": "Panel",
                     "targets": [{"expr": "up"}],
                     "fieldConfig": {"defaults": {"mappings": [{"type": "value"}]}},
@@ -2872,7 +2959,7 @@ mod tests {
                     },
                     "options": {
                         "reduceOptions": {
-                            "calcs": ["mean"]
+                            "calcs": ["median"]
                         }
                     }
                 }

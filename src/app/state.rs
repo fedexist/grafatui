@@ -114,6 +114,56 @@ pub(crate) enum PanelOptions {
     #[default]
     None,
     Graph(GraphOptions),
+    Summary(SummaryCalc),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum SummaryCalc {
+    Last,
+    LastNotNull,
+    Min,
+    Max,
+    Mean,
+    Sum,
+}
+
+fn reduce_values(values: &[(f64, String)], calc: SummaryCalc) -> Option<f64> {
+    let finite = |value: &str| {
+        value
+            .parse::<f64>()
+            .ok()
+            .filter(|number| number.is_finite())
+    };
+    match calc {
+        SummaryCalc::Last => values.last().and_then(|(_, value)| finite(value)),
+        SummaryCalc::LastNotNull => values.iter().rev().find_map(|(_, value)| finite(value)),
+        SummaryCalc::Min => values
+            .iter()
+            .filter_map(|(_, value)| finite(value))
+            .reduce(f64::min),
+        SummaryCalc::Max => values
+            .iter()
+            .filter_map(|(_, value)| finite(value))
+            .reduce(f64::max),
+        SummaryCalc::Mean | SummaryCalc::Sum => {
+            let (sum, count) = values
+                .iter()
+                .filter_map(|(_, value)| finite(value))
+                .fold((0.0, 0usize), |(sum, count), value| {
+                    (sum + value, count + 1)
+                });
+            if count == 0 {
+                None
+            } else {
+                let result = if calc == SummaryCalc::Mean {
+                    sum / count as f64
+                } else {
+                    sum
+                };
+                result.is_finite().then_some(result)
+            }
+        }
+    }
 }
 
 /// Graph/timeseries rendering options imported from Grafana.
@@ -230,7 +280,7 @@ impl PanelState {
     pub(crate) fn graph_options(&self) -> GraphOptions {
         match &self.options {
             PanelOptions::Graph(options) => options.clone(),
-            PanelOptions::None => GraphOptions::default(),
+            PanelOptions::None | PanelOptions::Summary(_) => GraphOptions::default(),
         }
     }
 
@@ -1256,7 +1306,10 @@ impl AppState {
                         }
                     }
                     for s in result.series {
-                        let latest_val = s.values.last().and_then(|(_, v)| v.parse::<f64>().ok());
+                        let latest_val = match p.options {
+                            PanelOptions::Summary(calc) => reduce_values(&s.values, calc),
+                            _ => s.values.last().and_then(|(_, v)| v.parse::<f64>().ok()),
+                        };
                         let legend_base = if let Some(fmt) = legend_fmt {
                             format_legend(fmt, &s.metric)
                         } else if s.metric.is_empty() {
@@ -2589,6 +2642,57 @@ mod tests {
 
     fn successful_matrix(_: &str) -> &'static str {
         r#"{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"job":"api"},"values":[[1700000000,"1"],[1700000060,"2"]]}]}}"#
+    }
+
+    fn reduction_matrix(_: &str) -> &'static str {
+        r#"{"status":"success","data":{"resultType":"matrix","result":[{"metric":{},"values":[[1700000000,"2"],[1700000060,"4"],[1700000120,"NaN"]]}]}}"#
+    }
+
+    #[tokio::test]
+    async fn summary_options_reduce_raw_series_values() {
+        let (url, _) = mock_prometheus(reduction_matrix).await;
+        let mut app = create_test_app();
+        app.prometheus = prom::PromClient::new(url);
+        let mut panel = test_panel("Summary", PanelType::Gauge);
+        panel.exprs = vec!["up".to_string()];
+        panel.legends = vec![None];
+        panel.query_modes = vec![QueryMode::Range];
+        panel.options = PanelOptions::Summary(SummaryCalc::Mean);
+        app.panels = vec![panel];
+        app.apply_layout(DashboardLayout::flat(1));
+
+        for (calc, expected) in [
+            (SummaryCalc::Last, None),
+            (SummaryCalc::LastNotNull, Some(4.0)),
+            (SummaryCalc::Min, Some(2.0)),
+            (SummaryCalc::Max, Some(4.0)),
+            (SummaryCalc::Mean, Some(3.0)),
+            (SummaryCalc::Sum, Some(6.0)),
+        ] {
+            app.panels[0].options = PanelOptions::Summary(calc);
+            app.refresh().await.unwrap();
+            assert_eq!(app.panels[0].series[0].value, expected, "{calc:?}");
+            assert_eq!(app.panels[0].series[0].points.len(), 2);
+        }
+    }
+
+    #[test]
+    fn summary_reduction_handles_empty_and_long_raw_series() {
+        let empty = vec![(0.0, "NaN".to_string()), (1.0, "bad".to_string())];
+        for calc in [
+            SummaryCalc::Last,
+            SummaryCalc::LastNotNull,
+            SummaryCalc::Min,
+            SummaryCalc::Max,
+            SummaryCalc::Mean,
+            SummaryCalc::Sum,
+        ] {
+            assert_eq!(reduce_values(&empty, calc), None, "{calc:?}");
+        }
+        let raw: Vec<_> = (0..201)
+            .map(|index| (index as f64, (index + 1).to_string()))
+            .collect();
+        assert_eq!(reduce_values(&raw, SummaryCalc::Mean), Some(101.0));
     }
 
     fn variable_values(target: &str) -> &'static str {

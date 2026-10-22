@@ -364,11 +364,13 @@ fn normalize_classic_panel(
             h: grid.h,
         }),
         field_defaults,
-        reduce_options_path: panel
+        reduce_options: panel
             .options
             .and_then(|options| options.reduce_options)
-            .is_some()
-            .then(|| format!("{source_path}.options.reduceOptions")),
+            .map(|value| model::ReduceOptions {
+                value,
+                path: format!("{source_path}.options.reduceOptions"),
+            }),
         transformations_path: None,
         min_interval: model::MinInterval::new(panel.interval, format!("{source_path}.interval")),
         max_data_points: model::max_data_points(panel.max_data_points.as_ref()),

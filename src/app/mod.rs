@@ -31,5 +31,5 @@ pub(crate) use event_loop::run_app;
 pub(crate) use state::{
     AppMode, AppState, DashboardWorkspace, GraphAxisPlacement, GraphDrawStyle, GraphOptions,
     GraphPointMode, GraphStackingMode, GridUnit, PanelOptions, PanelState, PanelType, QueryMode,
-    QueryResolution, SeriesView, ThresholdMode, ThresholdStep, Thresholds, YAxisMode,
+    QueryResolution, SeriesView, SummaryCalc, ThresholdMode, ThresholdStep, Thresholds, YAxisMode,
 };

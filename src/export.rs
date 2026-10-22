@@ -2857,6 +2857,18 @@ mod tests {
     }
 
     #[test]
+    fn summary_panel_exports_use_reduced_scalar() {
+        for panel_type in [PanelType::Stat, PanelType::Gauge, PanelType::BarGauge] {
+            let mut app = test_app_with_panel_type(panel_type);
+            app.panels[0].series[0].value = Some(4.0);
+            app.panels[0].series[0].points = vec![(0.0, 1.0), (1.0, 3.0), (2.0, 8.0)];
+            let svg = render_svg(&app, Rect::new(0, 0, 100, 40));
+            assert!(svg.contains("4.00"), "{panel_type:?}: {svg}");
+            assert!(!svg.contains(">8.00<"), "{panel_type:?}: {svg}");
+        }
+    }
+
+    #[test]
     fn test_export_uses_panel_display_format_for_stat_and_table_values() {
         let mut stat_app = test_app_with_panel_type(PanelType::Stat);
         stat_app.panels[0].display = ui::DisplayFormat {
