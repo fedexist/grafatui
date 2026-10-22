@@ -1307,6 +1307,48 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn summary_panels_display_reduced_scalar_instead_of_latest_point() {
+        for panel_type in [PanelType::Stat, PanelType::Gauge, PanelType::BarGauge] {
+            let mut app = test_app();
+            let mut panel = graph_panel("Summary CPU");
+            panel.panel_type = panel_type;
+            panel.min = Some(0.0);
+            panel.max = Some(10.0);
+            panel.series = vec![SeriesView {
+                query_index: 0,
+                name: "cpu".to_string(),
+                value: Some(4.0),
+                points: vec![
+                    (1_700_000_000.0, 1.0),
+                    (1_700_000_060.0, 3.0),
+                    (1_700_000_120.0, 8.0),
+                ],
+                visible: true,
+            }];
+            app.panels = vec![panel];
+            app.apply_layout(crate::dashboard::DashboardLayout::flat(1));
+            for (width, height) in [(80, 24), (60, 20)] {
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+                let text = terminal_text(&terminal);
+                assert!(text.contains("Summary CPU"), "{panel_type:?}: {text}");
+                assert!(text.contains("4.00"), "{panel_type:?}: {text}");
+                assert!(!text.contains("8.00"), "{panel_type:?}: {text}");
+                if panel_type == PanelType::Gauge
+                    && let Ok(root) = std::env::var("GRAFATUI_REDUCE_CAPTURE_DIR")
+                {
+                    let directory = std::path::PathBuf::from(root);
+                    std::fs::create_dir_all(&directory).unwrap();
+                    capture_buffer(
+                        &terminal,
+                        &directory.join(format!("gauge-{width}x{height}.json")),
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn gauge_uses_no_value_for_visible_null_samples() {
         let render = |value: Option<f64>,
                       has_visible_series: bool,

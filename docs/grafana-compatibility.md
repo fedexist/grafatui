@@ -382,7 +382,7 @@ tooltips.
 
 | JSON Field | Status | Notes |
 |---|---|---|
-| `options` | ❌ Not Implemented | Panel-specific options object is ignored |
+| `options` | 🔶 Partial | Graph presentation and Stat/Gauge/BarGauge reduction subsets are imported |
 | `options.legend` | ❌ Not Implemented | Grafatui uses its own compact legend |
 | `options.legend.displayMode` | ❌ Not Implemented | Always shows inline legend |
 | `options.legend.placement` | ❌ Not Implemented | Always bottom |
@@ -390,9 +390,9 @@ tooltips.
 | `options.tooltip` | ❌ Not Implemented | Inspect mode serves as tooltip substitute |
 | `options.tooltip.mode` | ❌ Not Implemented | |
 | `options.orientation` | ❌ Not Implemented | |
-| `options.reduceOptions` | ❌ Not Implemented | Stat/Gauge always use last value; import diagnostics warn when reduce options are ignored |
-| `options.reduceOptions.calcs` | ❌ Not Implemented | |
-| `options.reduceOptions.fields` | ❌ Not Implemented | |
+| `options.reduceOptions` | 🔶 Partial | Classic and V2 Stat/Gauge/BarGauge support one calculation per series over raw range samples; an explicit target `instant` setting still wins. Unsupported settings warn and retain default selection. |
+| `options.reduceOptions.calcs` | 🔶 Partial | `last`, `lastNotNull`, `min`, `max`, `mean`, and `sum` (Total); empty list defaults to `last`. Multiple or unknown calculations are unsupported. |
+| `options.reduceOptions.fields` | 🔶 Partial | Only omitted or empty selection; nonempty field filters and `values: true` are unsupported. `limit` has no effect when `values` is false. |
 | `options.textMode` | ❌ Not Implemented | |
 | `options.colorMode` | ❌ Not Implemented | |
 | `options.graphMode` | ❌ Not Implemented | Stat always shows sparkline |
@@ -476,7 +476,7 @@ compatibility with Grafana annotation queries, APIs, `annotations`, or
 Based on user feedback, the following missing features are most commonly expected:
 
 1. **Broader unit formatting** (`fieldConfig.defaults.unit`) — Extend the current common-unit subset to more Grafana unit families
-2. **Reduce options** (`options.reduceOptions`) — Use min/max/mean/total instead of always using the latest value
+2. **Broader reduce options** (`options.reduceOptions`) — Add field filters, all-values mode, and multiple calculations beyond the supported single-calculation subset
 3. **Broader value mappings** (`fieldConfig.defaults.mappings`) — Add range and useful special-value mappings beyond exact numeric labels
 4. **Import diagnostics** — Warn clearly about skipped panel types and ignored high-impact fields
 5. **Additional panel types** — `text`, `piechart`, `histogram`, `logs`
