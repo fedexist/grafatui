@@ -350,7 +350,7 @@ display names and field overrides remain major gaps.
 | `fieldConfig.defaults.decimals` | ✅ Supported | Controls numeric precision in panel values, graph axes, legends, and exports |
 | `fieldConfig.defaults.color` | ❌ Not Implemented | Uses theme palette instead |
 | `fieldConfig.defaults.mappings` | 🔶 Partial | Exact numeric `value` mappings render mapped text in Stat, Gauge, BarGauge, Table, graph legends, and exports; range, regex, special-value, and mapping-color behavior is not implemented, and unsupported mapping kinds produce import diagnostics |
-| `fieldConfig.defaults.noValue` | 🔶 Partial | Used for null Stat/Table values and exports; empty panels still show Grafatui's `No data` state |
+| `fieldConfig.defaults.noValue` | 🔶 Partial | Used for null Stat/Gauge/Table values and exports; empty panels still show Grafatui's `No data` state |
 | `fieldConfig.defaults.displayName` | ❌ Not Implemented | |
 | `fieldConfig.defaults.custom` | 🔶 Partial | Used for graph draw style, fill/points, axis placement, stacking metadata, threshold style, and axis grid visibility |
 | `fieldConfig.defaults.custom.lineWidth` | ❌ Not Implemented | TUI limitation |

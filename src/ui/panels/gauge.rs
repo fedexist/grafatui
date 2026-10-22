@@ -23,13 +23,25 @@ use ratatui::{
 pub(super) fn render_gauge(frame: &mut Frame, area: Rect, p: &PanelState, app: &AppState) {
     let theme = &app.theme;
 
-    // Find the latest value from the first visible series
-    let (value, name) = p
+    // Preserve the first available value across visible series. If every
+    // visible series is null, retain its name and display Grafana's noValue.
+    let available_value = p
         .series
         .iter()
         .filter(|s| s.visible)
-        .find_map(|s| s.value.map(|v| (v, s.name.clone())))
-        .unwrap_or((0.0, "No data".to_string()));
+        .find_map(|s| s.value.map(|value| (value, s.name.clone())));
+    let has_null_visible_value = available_value.is_none() && p.series.iter().any(|s| s.visible);
+    let (value, name, value_label) = match available_value {
+        Some((value, name)) => (value, name, p.display.format_value(Some(value))),
+        None => match p.series.iter().find(|s| s.visible) {
+            Some(series) => (0.0, series.name.clone(), p.display.format_value(None)),
+            None => (
+                0.0,
+                "No data".to_string(),
+                p.display.format_value(Some(0.0)),
+            ),
+        },
+    };
 
     let min = p.min.unwrap_or(0.0);
     let max = p
@@ -38,7 +50,7 @@ pub(super) fn render_gauge(frame: &mut Frame, area: Rect, p: &PanelState, app: &
 
     let color = p.get_color_for_value(value).unwrap_or(theme.palette[0]);
 
-    let ratio = if max > min {
+    let ratio = if !has_null_visible_value && max > min {
         ((value - min) / (max - min)).clamp(0.0, 1.0)
     } else {
         0.0
@@ -48,11 +60,7 @@ pub(super) fn render_gauge(frame: &mut Frame, area: Rect, p: &PanelState, app: &
         .block(Block::default().borders(Borders::NONE))
         .gauge_style(Style::default().fg(color).bg(Color::DarkGray))
         .ratio(ratio)
-        .label(format!(
-            "{} ({})",
-            p.display.format_value(Some(value)),
-            name
-        ));
+        .label(format!("{value_label} ({name})"));
 
     frame.render_widget(gauge, area);
 }
