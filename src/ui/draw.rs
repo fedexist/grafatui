@@ -584,6 +584,7 @@ pub(super) mod tests {
             max: None,
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
+            display_name_template: None,
             options: crate::app::PanelOptions::None,
             resolution: Default::default(),
         }
@@ -595,12 +596,161 @@ pub(super) mod tests {
         panel.series = vec![SeriesView {
             query_index: 0,
             name: "api".to_string(),
+            display_name: None,
             value: Some(2.0),
             points: vec![(1_700_000_000.0, 1.0), (1_700_000_060.0, 2.0)],
             visible: true,
         }];
         panel.last_samples = 2;
         panel
+    }
+
+    #[test]
+    fn imported_table_uses_display_label_in_buffer() {
+        use crate::dashboard::DashboardLayout;
+
+        let mut app = test_app();
+        let mut panel = graph_panel("Table");
+        panel.panel_type = PanelType::Table;
+        panel.series = vec![SeriesView {
+            query_index: 0,
+            name: "old-series-title".into(),
+            display_name: Some("Display label".into()),
+            value: Some(42.0),
+            points: vec![],
+            visible: true,
+        }];
+        assert_eq!(panel.series[0].name, "old-series-title");
+        assert_eq!(panel.series[0].label(), "Display label");
+        app.panels = vec![panel];
+        app.apply_layout(DashboardLayout::flat(1));
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+
+        terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+
+        let text = terminal_text(&terminal);
+        assert!(text.contains("Display label"), "{text}");
+        assert!(!text.contains("old-series-title"), "{text}");
+        if let Ok(directory) = std::env::var("GRAFATUI_DISPLAY_NAME_CAPTURE_DIR") {
+            let path = std::path::PathBuf::from(directory).join("table-80x24");
+            std::fs::create_dir_all(&path).unwrap();
+            capture_buffer(&terminal, &path.join("table-80x24.json"));
+        }
+    }
+
+    #[test]
+    fn imported_stat_shows_label_without_changing_unconfigured_stat() {
+        let mut app = test_app();
+        let mut panel = graph_panel("Stat");
+        panel.panel_type = PanelType::Stat;
+        panel.series = vec![SeriesView {
+            query_index: 0,
+            name: "old-series-title".into(),
+            display_name: Some("CPU usage".into()),
+            value: Some(42.0),
+            points: vec![],
+            visible: true,
+        }];
+        assert_eq!(panel.series[0].name, "old-series-title");
+        assert_eq!(panel.series[0].label(), "CPU usage");
+        assert!(panel.series[0].visible);
+        app.panels = vec![panel];
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let render = |terminal: &mut Terminal<TestBackend>, app: &AppState| {
+            terminal
+                .draw(|frame| {
+                    super::super::panels::render_panel(
+                        frame,
+                        Rect::new(0, 0, 80, 24),
+                        super::super::panels::PanelRenderContext::default(),
+                        &app.panels[0],
+                        app,
+                        false,
+                        None,
+                    );
+                })
+                .unwrap();
+        };
+
+        render(&mut terminal, &app);
+        let text = terminal_text(&terminal);
+        assert!(text.contains("42.00"), "{text}");
+        assert!(text.contains("CPU usage"), "{text}");
+        assert!(!text.contains("old-series-title"), "{text}");
+        if let Ok(directory) = std::env::var("GRAFATUI_DISPLAY_NAME_CAPTURE_DIR") {
+            let path = std::path::PathBuf::from(directory).join("stat-80x24");
+            std::fs::create_dir_all(&path).unwrap();
+            capture_buffer(&terminal, &path.join("stat-80x24.json"));
+        }
+
+        app.panels[0].series[0].display_name = None;
+        render(&mut terminal, &app);
+        let baseline = terminal_text(&terminal);
+        assert!(baseline.contains("42.00"), "{baseline}");
+        assert!(!baseline.contains("old-series-title"), "{baseline}");
+        assert!(!baseline.contains("CPU usage"), "{baseline}");
+    }
+
+    #[test]
+    fn duplicate_graph_display_labels_stay_in_narrow_buffer() {
+        use crate::dashboard::DashboardLayout;
+
+        let mut app = test_app();
+        let mut panel = graph_panel("Graph");
+        panel.series = ["first-internal", "second-internal"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| SeriesView {
+                query_index: index,
+                name: name.into(),
+                display_name: Some("Display label".into()),
+                value: Some(index as f64 + 1.0),
+                points: vec![(1_700_000_000.0, index as f64 + 1.0)],
+                visible: true,
+            })
+            .collect();
+        assert_ne!(panel.series[0].name, panel.series[1].name);
+        assert!(panel.series.iter().all(|series| series.visible));
+        app.panels = vec![panel];
+        app.apply_layout(DashboardLayout::flat(1));
+        app.view_end_ts = 1_700_000_060;
+        let mut terminal = Terminal::new(TestBackend::new(40, 16)).unwrap();
+
+        terminal
+            .draw(|frame| {
+                super::super::panels::render_panel(
+                    frame,
+                    Rect::new(0, 0, 40, 16),
+                    super::super::panels::PanelRenderContext::default(),
+                    &app.panels[0],
+                    &app,
+                    false,
+                    None,
+                );
+            })
+            .unwrap();
+
+        let text = terminal_text(&terminal);
+        assert_eq!(text.matches("Display").count(), 2, "{text}");
+        assert_eq!(text.matches("label").count(), 2, "{text}");
+        assert!(!text.contains("first-internal"), "{text}");
+        assert!(!text.contains("second-internal"), "{text}");
+        assert_eq!(terminal.backend().buffer().area, Rect::new(0, 0, 40, 16));
+        let legend_colors = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .filter(|cell| cell.symbol() == "■")
+            .map(|cell| cell.fg)
+            .collect::<Vec<_>>();
+        assert_eq!(legend_colors.len(), 2);
+        assert_ne!(legend_colors[0], legend_colors[1]);
+        if let Ok(directory) = std::env::var("GRAFATUI_DISPLAY_NAME_CAPTURE_DIR") {
+            let path = std::path::PathBuf::from(directory).join("graph-40x16");
+            std::fs::create_dir_all(&path).unwrap();
+            capture_buffer(&terminal, &path.join("graph-40x16.json"));
+        }
     }
 
     #[test]
@@ -698,6 +848,7 @@ pub(super) mod tests {
         panel.series.push(SeriesView {
             query_index: 1,
             name: "errors".to_string(),
+            display_name: None,
             value: Some(1.0),
             points: vec![(1_700_000_000.0, 1.0), (1_700_000_060.0, 1.0)],
             visible: true,
@@ -1077,6 +1228,7 @@ pub(super) mod tests {
                     PanelType::Graph => vec![SeriesView {
                         query_index: 0,
                         name: "200".to_string(),
+                        display_name: None,
                         value: Some(4.0),
                         points: vec![
                             (1_699_999_940.0, 1.0),
@@ -1088,6 +1240,7 @@ pub(super) mod tests {
                     PanelType::Stat => vec![SeriesView {
                         query_index: 0,
                         name: "Memory".to_string(),
+                        display_name: None,
                         value: Some(128.0),
                         points: vec![
                             (1_699_999_940.0, 120.0),
@@ -1121,6 +1274,7 @@ pub(super) mod tests {
                     max: panel.max,
                     autogrid: panel.autogrid,
                     display: panel.display,
+                    display_name_template: None,
                     options: panel.options,
                     resolution: panel.resolution,
                 }
@@ -1249,6 +1403,7 @@ pub(super) mod tests {
         panel.series = vec![SeriesView {
             query_index: 0,
             name: "up".to_string(),
+            display_name: None,
             value: Some(1.0),
             points: vec![(1_700_000_000.0, 1.0)],
             visible: true,
@@ -1290,6 +1445,7 @@ pub(super) mod tests {
             panel.series = vec![SeriesView {
                 query_index: 0,
                 name: "up".to_string(),
+                display_name: None,
                 value: Some(1.0),
                 points: vec![(1_700_000_000.0, 1.0)],
                 visible: true,
@@ -1317,6 +1473,7 @@ pub(super) mod tests {
             panel.series = vec![SeriesView {
                 query_index: 0,
                 name: "cpu".to_string(),
+                display_name: None,
                 value: Some(4.0),
                 points: vec![
                     (1_700_000_000.0, 1.0),
@@ -1365,6 +1522,7 @@ pub(super) mod tests {
                 panel.series = vec![SeriesView {
                     query_index: 0,
                     name: "cache_hit_ratio".to_string(),
+                    display_name: None,
                     value,
                     points: vec![],
                     visible: true,

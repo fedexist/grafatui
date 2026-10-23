@@ -566,6 +566,7 @@ mod tests {
             max: None,
             autogrid: None,
             display: DisplayFormat::default(),
+            display_name_template: None,
             options: PanelOptions::None,
             resolution: Default::default(),
         }

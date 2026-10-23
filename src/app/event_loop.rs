@@ -239,6 +239,7 @@ mod tests {
                 series: vec![SeriesView {
                     query_index: 0,
                     name: "usage".to_string(),
+                    display_name: None,
                     value: Some(1.0),
                     points: vec![(now - 100.0, 0.0), (now, 1.0)],
                     visible: true,
@@ -255,6 +256,7 @@ mod tests {
                 max: None,
                 autogrid: None,
                 display: crate::ui::DisplayFormat::default(),
+                display_name_template: None,
                 options: PanelOptions::Graph(GraphOptions::default()),
                 resolution: Default::default(),
             }],
@@ -283,6 +285,7 @@ mod tests {
                     .map(|j| SeriesView {
                         query_index: 0,
                         name: format!("row{:02}", j + 1),
+                        display_name: None,
                         value: Some((j + 1) as f64),
                         points: vec![],
                         visible: true,

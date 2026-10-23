@@ -29,12 +29,16 @@ pub(super) fn render_gauge(frame: &mut Frame, area: Rect, p: &PanelState, app: &
         .series
         .iter()
         .filter(|s| s.visible)
-        .find_map(|s| s.value.map(|value| (value, s.name.clone())));
+        .find_map(|s| s.value.map(|value| (value, s.label().to_string())));
     let has_null_visible_value = available_value.is_none() && p.series.iter().any(|s| s.visible);
     let (value, name, value_label) = match available_value {
         Some((value, name)) => (value, name, p.display.format_value(Some(value))),
         None => match p.series.iter().find(|s| s.visible) {
-            Some(series) => (0.0, series.name.clone(), p.display.format_value(None)),
+            Some(series) => (
+                0.0,
+                series.label().to_string(),
+                p.display.format_value(None),
+            ),
             None => (
                 0.0,
                 "No data".to_string(),

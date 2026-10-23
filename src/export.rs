@@ -983,7 +983,7 @@ fn render_stat_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &m
         out,
         rect.left + rect.width / 2.0,
         rect.top + 56.0,
-        &series.name,
+        series.label(),
         &text,
         "middle",
         SMALL_FONT_SIZE,
@@ -1029,7 +1029,7 @@ fn render_gauge_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out: &
         out,
         rect.left + rect.width / 2.0,
         gauge.top - 12.0,
-        &series.name,
+        series.label(),
         &text,
         "middle",
         SMALL_FONT_SIZE,
@@ -1101,7 +1101,7 @@ fn render_bar_gauge_panel(app: &AppState, panel: &PanelState, rect: PlotRect, ou
             out,
             rect.left + 4.0,
             y,
-            &series.name,
+            series.label(),
             &text,
             "start",
             SMALL_FONT_SIZE,
@@ -1282,7 +1282,7 @@ fn render_heatmap_panel(app: &AppState, panel: &PanelState, rect: PlotRect, out:
             out,
             rect.left + 4.0,
             top + row_height.min(16.0),
-            &series.name,
+            series.label(),
             &text,
             "start",
             SMALL_FONT_SIZE,
@@ -1409,8 +1409,8 @@ fn render_legend(
             .or(series.value)
             .map(|value| panel.display.format_value(Some(value)));
         let label = value
-            .map(|value| format!("{} ({value})", series.name))
-            .unwrap_or_else(|| series.name.clone());
+            .map(|value| format!("{} ({value})", series.label()))
+            .unwrap_or_else(|| series.label().to_string());
         let estimated_width = (label.len() as f64 * 7.0) + 24.0;
         if x + estimated_width > left + width && x > left {
             x = left;
@@ -1927,6 +1927,7 @@ mod tests {
             series: vec![SeriesView {
                 query_index: 0,
                 name: "usage & total".to_string(),
+                display_name: None,
                 value: Some(10.0),
                 points: vec![(start, 0.0), (start + 50.0, 50.0), (start + 100.0, 100.0)],
                 visible: true,
@@ -1943,6 +1944,7 @@ mod tests {
             max: None,
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
+            display_name_template: None,
             options: PanelOptions::Graph(GraphOptions::default()),
             resolution: Default::default(),
         }
@@ -2857,6 +2859,30 @@ mod tests {
     }
 
     #[test]
+    fn imported_display_label_is_escaped_in_svg_without_changing_identity() {
+        for panel_type in [
+            PanelType::Graph,
+            PanelType::Stat,
+            PanelType::Gauge,
+            PanelType::BarGauge,
+            PanelType::Table,
+            PanelType::Heatmap,
+        ] {
+            let mut app = test_app_with_panel_type(panel_type);
+            app.panels[0].series[0].display_name = Some("Display & label".into());
+            let original_name = app.panels[0].series[0].name.clone();
+            let svg = render_svg(&app, Rect::new(0, 0, 100, 40));
+            assert!(svg.contains("Display &amp; label"), "{panel_type:?}: {svg}");
+            assert!(!svg.contains(&original_name), "{panel_type:?}: {svg}");
+            assert_eq!(app.panels[0].series[0].name, original_name);
+        }
+
+        let app = test_app_with_panel_type(PanelType::Graph);
+        let svg = render_svg(&app, Rect::new(0, 0, 100, 40));
+        assert!(svg.contains("usage &amp; total"));
+    }
+
+    #[test]
     fn summary_panel_exports_use_reduced_scalar() {
         for panel_type in [PanelType::Stat, PanelType::Gauge, PanelType::BarGauge] {
             let mut app = test_app_with_panel_type(panel_type);
@@ -2898,6 +2924,7 @@ mod tests {
         table_app.panels[0].series.push(SeriesView {
             query_index: 0,
             name: "missing".to_string(),
+            display_name: None,
             value: None,
             points: vec![],
             visible: true,

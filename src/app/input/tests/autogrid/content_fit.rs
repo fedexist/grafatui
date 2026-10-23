@@ -11,6 +11,7 @@ fn content_fit_measurement_matches_table_body() {
             .map(|i| SeriesView {
                 query_index: 0,
                 name: format!("row{i:02}"),
+                display_name: None,
                 value: Some(i as f64),
                 points: vec![],
                 visible: true,
@@ -104,6 +105,7 @@ fn content_fit_measurement_real_buffers_keep_rows_and_errors() {
             .map(|i| SeriesView {
                 query_index: 0,
                 name: format!("row{i:02}"),
+                display_name: None,
                 value: Some(i as f64),
                 points: vec![],
                 visible: true,
@@ -177,6 +179,7 @@ fn content_rows(n: usize) -> Vec<SeriesView> {
         .map(|i| SeriesView {
             query_index: 0,
             name: format!("row{i:02}"),
+            display_name: None,
             value: Some(i as f64),
             points: vec![],
             visible: true,

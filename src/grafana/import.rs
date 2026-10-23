@@ -198,6 +198,7 @@ fn import_panel(
     let mut max = None;
     let mut autogrid = None;
     let mut display = crate::ui::DisplayFormat::default();
+    let mut display_name_template = None;
     let mut graph_options = crate::app::GraphOptions::default();
 
     if let Some(path) = panel.transformations_path {
@@ -219,6 +220,20 @@ fn import_panel(
     }
 
     if let Some(defaults) = panel.field_defaults {
+        if let Some(name) = defaults.display_name.filter(|name| !name.is_empty()) {
+            match crate::app::DisplayNameTemplate::parse(&name) {
+                Ok(template) => display_name_template = Some(template),
+                Err(error) => out.diagnostics.push(ImportDiagnostic::new(
+                    "ignored_field",
+                    defaults.display_name_path.unwrap_or_else(|| {
+                        format!("{}.fieldConfig.defaults.displayName", panel.source_path)
+                    }),
+                    format!(
+                        "unsupported display-name template: {error}; using default series names"
+                    ),
+                )),
+            }
+        }
         let (value_mappings, mappings_supported) = parse_value_mappings(defaults.mappings.as_ref());
         if !mappings_supported && let Some(path) = defaults.mappings_path {
             out.diagnostics.push(ImportDiagnostic::new(
@@ -274,6 +289,7 @@ fn import_panel(
             max,
             autogrid,
             display,
+            display_name_template,
             options,
             resolution,
         });
