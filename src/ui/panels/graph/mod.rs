@@ -284,7 +284,7 @@ pub(super) fn render_graph_panel(
         let data = if s.visible { s.points.as_slice() } else { &[] };
 
         // For legend display
-        let mut name = s.name.clone();
+        let mut name = s.label().to_string();
         if let Some(val) = cursor_values.get(&s.name) {
             name.push_str(&format!(" ({})", p.display.format_value(Some(*val))));
         } else if let Some(val) = s.value {

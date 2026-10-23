@@ -36,7 +36,7 @@ pub(crate) fn prepare_table_rows(panel: &PanelState) -> Vec<TableRowContent<'_>>
         .iter()
         .filter(|s| s.visible)
         .map(|s| TableRowContent {
-            name: &s.name,
+            name: s.label(),
             value: panel.display.format_value(s.value),
             color: s.value.and_then(|value| panel.get_color_for_value(value)),
             has_value: s.value.is_some(),

@@ -50,12 +50,12 @@ pub(super) fn render_bar_gauge(frame: &mut Frame, area: Rect, p: &PanelState, ap
     for s in valid_series {
         let v = s.value.unwrap();
         let text_value = p.display.format_value(Some(v));
-        max_label_len = max_label_len.max(s.name.len()).max(text_value.len());
+        max_label_len = max_label_len.max(s.label().len()).max(text_value.len());
         let color = p.get_color_for_value(v).unwrap_or(theme.palette[0]);
         let bar = Bar::default()
             .value((v * scale) as u64)
             .text_value(text_value)
-            .label(Line::from(s.name.as_str()))
+            .label(Line::from(s.label()))
             .style(Style::default().fg(color))
             .value_style(Style::default().fg(theme.text).bg(color));
         bars.push(bar);

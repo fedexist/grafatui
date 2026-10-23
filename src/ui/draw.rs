@@ -606,6 +606,101 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn imported_table_uses_display_label_in_buffer() {
+        use crate::dashboard::DashboardLayout;
+
+        let mut app = test_app();
+        let mut panel = graph_panel("Table");
+        panel.panel_type = PanelType::Table;
+        panel.series = vec![SeriesView {
+            query_index: 0,
+            name: "old-series-title".into(),
+            display_name: Some("Display label".into()),
+            value: Some(42.0),
+            points: vec![],
+            visible: true,
+        }];
+        assert_eq!(panel.series[0].name, "old-series-title");
+        assert_eq!(panel.series[0].label(), "Display label");
+        app.panels = vec![panel];
+        app.apply_layout(DashboardLayout::flat(1));
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+
+        terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+
+        let text = terminal_text(&terminal);
+        assert!(text.contains("Display label"), "{text}");
+        assert!(!text.contains("old-series-title"), "{text}");
+        if let Ok(directory) = std::env::var("GRAFATUI_DISPLAY_NAME_CAPTURE_DIR") {
+            let path = std::path::PathBuf::from(directory).join("table-80x24");
+            std::fs::create_dir_all(&path).unwrap();
+            capture_buffer(&terminal, &path.join("table-80x24.json"));
+        }
+    }
+
+    #[test]
+    fn duplicate_graph_display_labels_stay_in_narrow_buffer() {
+        use crate::dashboard::DashboardLayout;
+
+        let mut app = test_app();
+        let mut panel = graph_panel("Graph");
+        panel.series = ["first-internal", "second-internal"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| SeriesView {
+                query_index: index,
+                name: name.into(),
+                display_name: Some("Display label".into()),
+                value: Some(index as f64 + 1.0),
+                points: vec![(1_700_000_000.0, index as f64 + 1.0)],
+                visible: true,
+            })
+            .collect();
+        assert_ne!(panel.series[0].name, panel.series[1].name);
+        assert!(panel.series.iter().all(|series| series.visible));
+        app.panels = vec![panel];
+        app.apply_layout(DashboardLayout::flat(1));
+        app.view_end_ts = 1_700_000_060;
+        let mut terminal = Terminal::new(TestBackend::new(40, 16)).unwrap();
+
+        terminal
+            .draw(|frame| {
+                super::super::panels::render_panel(
+                    frame,
+                    Rect::new(0, 0, 40, 16),
+                    super::super::panels::PanelRenderContext::default(),
+                    &app.panels[0],
+                    &app,
+                    false,
+                    None,
+                );
+            })
+            .unwrap();
+
+        let text = terminal_text(&terminal);
+        assert_eq!(text.matches("Display").count(), 2, "{text}");
+        assert_eq!(text.matches("label").count(), 2, "{text}");
+        assert!(!text.contains("first-internal"), "{text}");
+        assert!(!text.contains("second-internal"), "{text}");
+        assert_eq!(terminal.backend().buffer().area, Rect::new(0, 0, 40, 16));
+        let legend_colors = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .filter(|cell| cell.symbol() == "■")
+            .map(|cell| cell.fg)
+            .collect::<Vec<_>>();
+        assert_eq!(legend_colors.len(), 2);
+        assert_ne!(legend_colors[0], legend_colors[1]);
+        if let Ok(directory) = std::env::var("GRAFATUI_DISPLAY_NAME_CAPTURE_DIR") {
+            let path = std::path::PathBuf::from(directory).join("graph-40x16");
+            std::fs::create_dir_all(&path).unwrap();
+            capture_buffer(&terminal, &path.join("graph-40x16.json"));
+        }
+    }
+
+    #[test]
     fn stale_panel_keeps_chart_and_explains_failure() {
         let mut app = test_app();
         let mut panel = graph_panel_with_data("Requests");
