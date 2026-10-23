@@ -639,6 +639,59 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn imported_stat_shows_label_without_changing_unconfigured_stat() {
+        let mut app = test_app();
+        let mut panel = graph_panel("Stat");
+        panel.panel_type = PanelType::Stat;
+        panel.series = vec![SeriesView {
+            query_index: 0,
+            name: "old-series-title".into(),
+            display_name: Some("CPU usage".into()),
+            value: Some(42.0),
+            points: vec![],
+            visible: true,
+        }];
+        assert_eq!(panel.series[0].name, "old-series-title");
+        assert_eq!(panel.series[0].label(), "CPU usage");
+        assert!(panel.series[0].visible);
+        app.panels = vec![panel];
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let render = |terminal: &mut Terminal<TestBackend>, app: &AppState| {
+            terminal
+                .draw(|frame| {
+                    super::super::panels::render_panel(
+                        frame,
+                        Rect::new(0, 0, 80, 24),
+                        super::super::panels::PanelRenderContext::default(),
+                        &app.panels[0],
+                        app,
+                        false,
+                        None,
+                    );
+                })
+                .unwrap();
+        };
+
+        render(&mut terminal, &app);
+        let text = terminal_text(&terminal);
+        assert!(text.contains("42.00"), "{text}");
+        assert!(text.contains("CPU usage"), "{text}");
+        assert!(!text.contains("old-series-title"), "{text}");
+        if let Ok(directory) = std::env::var("GRAFATUI_DISPLAY_NAME_CAPTURE_DIR") {
+            let path = std::path::PathBuf::from(directory).join("stat-80x24");
+            std::fs::create_dir_all(&path).unwrap();
+            capture_buffer(&terminal, &path.join("stat-80x24.json"));
+        }
+
+        app.panels[0].series[0].display_name = None;
+        render(&mut terminal, &app);
+        let baseline = terminal_text(&terminal);
+        assert!(baseline.contains("42.00"), "{baseline}");
+        assert!(!baseline.contains("old-series-title"), "{baseline}");
+        assert!(!baseline.contains("CPU usage"), "{baseline}");
+    }
+
+    #[test]
     fn duplicate_graph_display_labels_stay_in_narrow_buffer() {
         use crate::dashboard::DashboardLayout;
 
