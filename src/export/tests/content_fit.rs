@@ -7,6 +7,7 @@ pub(super) fn rows(count: usize) -> Vec<SeriesView> {
         .map(|i| SeriesView {
             query_index: 0,
             name: format!("row{i:02}"),
+            display_name: None,
             value: Some(i as f64),
             points: vec![],
             visible: true,

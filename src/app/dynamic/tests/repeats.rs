@@ -15,6 +15,7 @@ fn repeat_reorder_preserves_duplicate_identity_focus_data_and_body_offset() {
     app.panels[1].series = vec![SeriesView {
         query_index: 0,
         name: "kept".into(),
+        display_name: None,
         value: Some(9.0),
         points: vec![(1000., 9.)],
         visible: true,
@@ -138,6 +139,7 @@ async fn repeat_buffers_follow_reconciliation_and_resize() {
             .map(|n| SeriesView {
                 query_index: 0,
                 name: format!("{}-row{n:02}", if index == 0 { "a" } else { "b" }),
+                display_name: None,
                 value: Some(n as f64),
                 points: vec![],
                 visible: true,

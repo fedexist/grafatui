@@ -1927,6 +1927,7 @@ mod tests {
             series: vec![SeriesView {
                 query_index: 0,
                 name: "usage & total".to_string(),
+                display_name: None,
                 value: Some(10.0),
                 points: vec![(start, 0.0), (start + 50.0, 50.0), (start + 100.0, 100.0)],
                 visible: true,
@@ -1943,6 +1944,7 @@ mod tests {
             max: None,
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
+            display_name_template: None,
             options: PanelOptions::Graph(GraphOptions::default()),
             resolution: Default::default(),
         }
@@ -2898,6 +2900,7 @@ mod tests {
         table_app.panels[0].series.push(SeriesView {
             query_index: 0,
             name: "missing".to_string(),
+            display_name: None,
             value: None,
             points: vec![],
             visible: true,

@@ -282,6 +282,7 @@ pub(crate) fn default_queries(mut provided: Vec<String>) -> Vec<PanelState> {
             max: None,
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
+            display_name_template: None,
             options: PanelOptions::Graph(GraphOptions::default()),
             resolution: Default::default(),
         })

@@ -584,6 +584,7 @@ pub(super) mod tests {
             max: None,
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
+            display_name_template: None,
             options: crate::app::PanelOptions::None,
             resolution: Default::default(),
         }
@@ -595,6 +596,7 @@ pub(super) mod tests {
         panel.series = vec![SeriesView {
             query_index: 0,
             name: "api".to_string(),
+            display_name: None,
             value: Some(2.0),
             points: vec![(1_700_000_000.0, 1.0), (1_700_000_060.0, 2.0)],
             visible: true,
@@ -698,6 +700,7 @@ pub(super) mod tests {
         panel.series.push(SeriesView {
             query_index: 1,
             name: "errors".to_string(),
+            display_name: None,
             value: Some(1.0),
             points: vec![(1_700_000_000.0, 1.0), (1_700_000_060.0, 1.0)],
             visible: true,
@@ -1077,6 +1080,7 @@ pub(super) mod tests {
                     PanelType::Graph => vec![SeriesView {
                         query_index: 0,
                         name: "200".to_string(),
+                        display_name: None,
                         value: Some(4.0),
                         points: vec![
                             (1_699_999_940.0, 1.0),
@@ -1088,6 +1092,7 @@ pub(super) mod tests {
                     PanelType::Stat => vec![SeriesView {
                         query_index: 0,
                         name: "Memory".to_string(),
+                        display_name: None,
                         value: Some(128.0),
                         points: vec![
                             (1_699_999_940.0, 120.0),
@@ -1121,6 +1126,7 @@ pub(super) mod tests {
                     max: panel.max,
                     autogrid: panel.autogrid,
                     display: panel.display,
+                    display_name_template: None,
                     options: panel.options,
                     resolution: panel.resolution,
                 }
@@ -1249,6 +1255,7 @@ pub(super) mod tests {
         panel.series = vec![SeriesView {
             query_index: 0,
             name: "up".to_string(),
+            display_name: None,
             value: Some(1.0),
             points: vec![(1_700_000_000.0, 1.0)],
             visible: true,
@@ -1290,6 +1297,7 @@ pub(super) mod tests {
             panel.series = vec![SeriesView {
                 query_index: 0,
                 name: "up".to_string(),
+                display_name: None,
                 value: Some(1.0),
                 points: vec![(1_700_000_000.0, 1.0)],
                 visible: true,
@@ -1317,6 +1325,7 @@ pub(super) mod tests {
             panel.series = vec![SeriesView {
                 query_index: 0,
                 name: "cpu".to_string(),
+                display_name: None,
                 value: Some(4.0),
                 points: vec![
                     (1_700_000_000.0, 1.0),
@@ -1365,6 +1374,7 @@ pub(super) mod tests {
                 panel.series = vec![SeriesView {
                     query_index: 0,
                     name: "cache_hit_ratio".to_string(),
+                    display_name: None,
                     value,
                     points: vec![],
                     visible: true,

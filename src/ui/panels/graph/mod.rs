@@ -820,6 +820,7 @@ mod tests {
             series: vec![SeriesView {
                 query_index: 0,
                 name: "filled".to_string(),
+                display_name: None,
                 value: Some(8.0),
                 points: vec![(0.0, 8.0), (50.0, 8.0), (100.0, 8.0)],
                 visible: true,
@@ -836,6 +837,7 @@ mod tests {
             max: Some(10.0),
             autogrid: Some(true),
             display: crate::ui::DisplayFormat::default(),
+            display_name_template: None,
             options: PanelOptions::Graph(GraphOptions {
                 draw_style: GraphDrawStyle::Line,
                 show_points: GraphPointMode::Never,

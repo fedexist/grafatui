@@ -112,6 +112,7 @@ mod tests {
             .map(|index| SeriesView {
                 query_index: 0,
                 name: format!("row{index}"),
+                display_name: None,
                 value: Some(index as f64),
                 points: vec![],
                 visible: true,
