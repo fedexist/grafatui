@@ -152,6 +152,8 @@ pub(super) struct FieldDefaults {
     pub(super) unit: Option<String>,
     pub(super) decimals: Option<usize>,
     pub(super) no_value: Option<String>,
+    pub(super) display_name: Option<String>,
+    pub(super) display_name_path: Option<String>,
     pub(super) min: Option<f64>,
     pub(super) max: Option<f64>,
     pub(super) thresholds: Option<Thresholds>,
