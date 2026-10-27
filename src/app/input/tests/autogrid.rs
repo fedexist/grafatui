@@ -14,6 +14,7 @@ fn auto_grid_test_app() -> AppState {
             panel.series = vec![SeriesView {
                 query_index: 0,
                 name: title.into(),
+                display_name: None,
                 value: Some((index + 1) as f64),
                 points: vec![],
                 visible: true,

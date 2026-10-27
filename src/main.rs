@@ -242,6 +242,7 @@ async fn run() -> Result<()> {
                     max: q.max,
                     autogrid: q.autogrid,
                     display: q.display,
+                    display_name_template: q.display_name_template,
                     options: q.options,
                     resolution: q.resolution,
                 })

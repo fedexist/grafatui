@@ -40,7 +40,11 @@ pub(super) fn render_stat(frame: &mut Frame, area: Rect, p: &PanelState, app: &A
     let val_str = visible_series
         .map(|_| p.display.format_value(value))
         .unwrap_or_else(|| "No data".to_string());
-    let big_value = Paragraph::new(val_str)
+    let text = match visible_series.filter(|series| series.display_name.is_some()) {
+        Some(series) => format!("{val_str}\n{}", series.label()),
+        None => val_str,
+    };
+    let big_value = Paragraph::new(text)
         .style(Style::default().fg(color).add_modifier(Modifier::BOLD))
         .alignment(Alignment::Center)
         .block(Block::default().borders(Borders::NONE));

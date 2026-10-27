@@ -14,6 +14,7 @@ fn rows(n: usize) -> Vec<SeriesView> {
         .map(|n| SeriesView {
             query_index: 0,
             name: format!("row{n:02}"),
+            display_name: None,
             value: Some(n as f64),
             points: vec![],
             visible: true,

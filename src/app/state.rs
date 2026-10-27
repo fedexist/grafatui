@@ -71,6 +71,8 @@ pub(crate) struct PanelState {
     pub(crate) autogrid: Option<bool>,
     /// Display formatting imported from Grafana field configuration.
     pub(crate) display: DisplayFormat,
+    /// Optional imported template for presentation-only series titles.
+    pub(crate) display_name_template: Option<crate::app::DisplayNameTemplate>,
     /// Renderer-specific presentation options.
     pub(crate) options: PanelOptions,
     /// Grafana query options that set the range query step.
@@ -240,12 +242,20 @@ pub(crate) struct SeriesView {
     pub(crate) query_index: usize,
     /// Stable name of the series (used for coloring).
     pub(crate) name: String,
+    /// Optional presentation-only name imported from Grafana.
+    pub(crate) display_name: Option<String>,
     /// Latest value of the series (used for display).
     pub(crate) value: Option<f64>,
     /// Data points (timestamp, value).
     pub(crate) points: Vec<(f64, f64)>,
     /// Whether the series is visible in the chart.
     pub(crate) visible: bool,
+}
+
+impl SeriesView {
+    pub(crate) fn label(&self) -> &str {
+        self.display_name.as_deref().unwrap_or(&self.name)
+    }
 }
 
 /// Grid positioning unit (Grafana style).
@@ -1323,6 +1333,10 @@ impl AppState {
                             labels.sort();
                             format!("{} {{{}}}", expr_expanded, labels.join(", "))
                         };
+                        let display_name = p
+                            .display_name_template
+                            .as_ref()
+                            .map(|template| template.render(&legend_base, "Value", &s.metric));
 
                         let mut pts = Vec::with_capacity(s.values.len());
                         for (ts, val) in s.values {
@@ -1335,6 +1349,7 @@ impl AppState {
                         panel_results.push(SeriesView {
                             query_index: i,
                             name: legend_base,
+                            display_name,
                             value: latest_val,
                             points: downsample(pts, 200),
                             visible: true,
@@ -2000,6 +2015,7 @@ mod tests {
                         panel.series = vec![SeriesView {
                             query_index: 0,
                             name: "api".into(),
+                            display_name: None,
                             value: Some(0.0),
                             points: vec![],
                             visible: true,
@@ -2487,6 +2503,7 @@ mod tests {
             max: None,
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
+            display_name_template: None,
             options: PanelOptions::None,
             resolution: Default::default(),
         }
@@ -2843,6 +2860,75 @@ mod tests {
 
     fn clean_matrix(_: &str) -> &'static str {
         r#"{"status":"success","data":{"resultType":"matrix","result":[{"metric":{},"values":[[1700000060,"2"]]}]}}"#
+    }
+
+    fn two_display_series(_: &str) -> &'static str {
+        r#"{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"instance":"a"},"values":[[1700000000,"1"]]},{"metric":{"instance":"b"},"values":[[1700000000,"2"]]}]}}"#
+    }
+
+    #[tokio::test]
+    async fn fetched_series_keeps_identity_and_renders_display_name() {
+        let (url, _) = mock_prometheus(two_display_series).await;
+        let mut app = create_test_app();
+        app.prometheus = prom::PromClient::new(url);
+        let mut panel = range_panel("Requests", &["up"]);
+        panel.legends = vec![Some("{{instance}}".to_string())];
+        panel.display_name_template = Some(crate::app::DisplayNameTemplate::parse("same").unwrap());
+        app.panels = vec![panel];
+        app.apply_layout(DashboardLayout::flat(1));
+
+        app.refresh().await.unwrap();
+
+        let series = &app.panels[0].series;
+        assert_eq!(series.len(), 2);
+        assert_eq!(series[0].name, "a");
+        assert_eq!(series[1].name, "b");
+        assert_eq!(series[0].label(), "same");
+        assert_eq!(series[1].label(), "same");
+    }
+
+    #[tokio::test]
+    async fn duplicate_display_labels_do_not_merge_visibility() {
+        let (url, _) = mock_prometheus(two_display_series).await;
+        let mut app = create_test_app();
+        app.prometheus = prom::PromClient::new(url);
+        let mut panel = range_panel("Requests", &["up"]);
+        panel.legends = vec![Some("{{instance}}".to_string())];
+        panel.display_name_template = Some(crate::app::DisplayNameTemplate::parse("same").unwrap());
+        app.panels = vec![panel];
+        app.apply_layout(DashboardLayout::flat(1));
+
+        app.refresh().await.unwrap();
+        app.panels[0].series[0].visible = false;
+        app.refresh().await.unwrap();
+
+        let series = &app.panels[0].series;
+        assert_ne!(series[0].name, series[1].name);
+        assert_eq!(series[0].label(), series[1].label());
+        assert!(!series[0].visible);
+        assert!(series[1].visible);
+    }
+
+    #[tokio::test]
+    async fn stale_series_keeps_rendered_label() {
+        let (url, _) = mock_prometheus(two_display_series).await;
+        let mut app = create_test_app();
+        app.prometheus = prom::PromClient::new(url);
+        let mut panel = range_panel("Requests", &["up"]);
+        panel.legends = vec![Some("{{instance}}".to_string())];
+        panel.display_name_template = Some(crate::app::DisplayNameTemplate::parse("same").unwrap());
+        app.panels = vec![panel];
+        app.apply_layout(DashboardLayout::flat(1));
+
+        app.refresh().await.unwrap();
+        let old_label = app.panels[0].series[0].label().to_string();
+        assert_eq!(old_label, "same");
+        let (failure_url, _) = mock_prometheus(rejected_query).await;
+        app.prometheus = prom::PromClient::new(failure_url);
+        app.refresh().await.unwrap();
+
+        assert_eq!(app.panels[0].series[0].label(), old_label);
+        assert_eq!(app.panels[0].notices.stale_queries, 1);
     }
 
     #[tokio::test]
@@ -3383,6 +3469,7 @@ mod tests {
             max: None,
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
+            display_name_template: None,
             options: PanelOptions::None,
             resolution: Default::default(),
         };
@@ -3526,6 +3613,7 @@ mod tests {
             max: None,
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
+            display_name_template: None,
             options: PanelOptions::None,
             resolution: Default::default(),
         };

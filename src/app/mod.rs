@@ -15,6 +15,7 @@
  */
 
 mod data;
+mod display_name;
 mod dynamic;
 mod event_loop;
 mod input;
@@ -26,6 +27,7 @@ pub(crate) use data::{
     DEFAULT_SCRAPE_INTERVAL, default_queries, parse_duration, parse_min_interval,
     resolve_step_policy,
 };
+pub(crate) use display_name::DisplayNameTemplate;
 pub(crate) use event_loop::run_app;
 #[allow(unused_imports)]
 pub(crate) use state::{

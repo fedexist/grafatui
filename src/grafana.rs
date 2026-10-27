@@ -105,6 +105,7 @@ pub(crate) struct QueryPanel {
     pub(crate) max: Option<f64>,
     pub(crate) autogrid: Option<bool>,
     pub(crate) display: crate::ui::DisplayFormat,
+    pub(crate) display_name_template: Option<crate::app::DisplayNameTemplate>,
     pub(crate) options: crate::app::PanelOptions,
     pub(crate) resolution: crate::app::QueryResolution,
 }
@@ -2473,6 +2474,91 @@ mod tests {
         assert_eq!(dashboard.queries[1].display.unit, None);
         assert_eq!(dashboard.queries[1].display.decimals, None);
         assert_eq!(dashboard.queries[1].display.no_value, None);
+    }
+
+    #[test]
+    fn imports_display_name_defaults_classic_and_v2() {
+        let template = concat!("Node ", "$", "{__field.labels.instance}");
+        let classic_json = serde_json::json!({
+            "title": "Classic display",
+            "panels": [{
+                "type": "timeseries",
+                "title": "Nodes",
+                "targets": [{"expr": "up"}],
+                "fieldConfig": {"defaults": {"displayName": template}}
+            }]
+        });
+        let classic = parse_grafana_dashboard(&classic_json.to_string()).unwrap();
+        assert!(classic.queries[0].display_name_template.is_some());
+        assert!(classic.diagnostics.is_empty(), "{:?}", classic.diagnostics);
+
+        let mut v2_json = valid_v2_resource();
+        make_v2_panel_importable(&mut v2_json);
+        v2_json["spec"]["elements"]["panel-1"]["spec"]["vizConfig"]["spec"]["fieldConfig"]["defaults"]
+            ["displayName"] = serde_json::json!(template);
+        let v2 = parse_grafana_dashboard(&v2_json.to_string()).unwrap();
+        assert!(v2.queries[0].display_name_template.is_some());
+        assert!(v2.diagnostics.is_empty(), "{:?}", v2.diagnostics);
+    }
+
+    #[test]
+    fn invalid_display_name_reports_precise_path_and_falls_back() {
+        let unsupported = concat!("$", "{__field.unknown}");
+        let classic_json = serde_json::json!({
+            "title": "Classic display",
+            "panels": [{
+                "type": "timeseries",
+                "title": "Nodes",
+                "targets": [{"expr": "up"}],
+                "fieldConfig": {"defaults": {"displayName": unsupported}}
+            }]
+        });
+        let classic = parse_grafana_dashboard(&classic_json.to_string()).unwrap();
+        assert!(classic.queries[0].display_name_template.is_none());
+        assert_eq!(classic.diagnostics.len(), 1);
+        assert_eq!(classic.diagnostics[0].code, "ignored_field");
+        assert_eq!(
+            classic.diagnostics[0].path,
+            "panels[0].fieldConfig.defaults.displayName"
+        );
+
+        let mut v2_json = valid_v2_resource();
+        make_v2_panel_importable(&mut v2_json);
+        v2_json["spec"]["elements"]["panel-1"]["spec"]["vizConfig"]["spec"]["fieldConfig"]["defaults"]
+            ["displayName"] = serde_json::json!(unsupported);
+        let v2 = parse_grafana_dashboard(&v2_json.to_string()).unwrap();
+        assert!(v2.queries[0].display_name_template.is_none());
+        assert_eq!(v2.diagnostics.len(), 1);
+        assert_eq!(v2.diagnostics[0].code, "ignored_field");
+        assert_eq!(
+            v2.diagnostics[0].path,
+            "spec.elements[\"panel-1\"].spec.vizConfig.spec.fieldConfig.defaults.displayName"
+        );
+    }
+
+    #[test]
+    fn absent_or_null_display_name_is_unchanged() {
+        let classic = parse_grafana_dashboard(
+            r#"{"title":"Classic","panels":[{"type":"timeseries","title":"Nodes","targets":[{"expr":"up"}]}]}"#,
+        )
+        .unwrap();
+        assert!(classic.queries[0].display_name_template.is_none());
+        assert!(classic.diagnostics.is_empty());
+
+        let empty = parse_grafana_dashboard(
+            r#"{"title":"Classic","panels":[{"type":"timeseries","title":"Nodes","targets":[{"expr":"up"}],"fieldConfig":{"defaults":{"displayName":""}}}]}"#,
+        )
+        .unwrap();
+        assert!(empty.queries[0].display_name_template.is_none());
+        assert!(empty.diagnostics.is_empty());
+
+        let mut v2_json = valid_v2_resource();
+        make_v2_panel_importable(&mut v2_json);
+        v2_json["spec"]["elements"]["panel-1"]["spec"]["vizConfig"]["spec"]["fieldConfig"]["defaults"] =
+            serde_json::Value::Null;
+        let v2 = parse_grafana_dashboard(&v2_json.to_string()).unwrap();
+        assert!(v2.queries[0].display_name_template.is_none());
+        assert!(v2.diagnostics.is_empty(), "{:?}", v2.diagnostics);
     }
 
     #[test]

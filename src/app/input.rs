@@ -685,6 +685,7 @@ mod tests {
                 SeriesView {
                     query_index: 0,
                     name: "a".to_string(),
+                    display_name: None,
                     value: Some(1.0),
                     points: vec![],
                     visible: true,
@@ -692,6 +693,7 @@ mod tests {
                 SeriesView {
                     query_index: 0,
                     name: "b".to_string(),
+                    display_name: None,
                     value: Some(2.0),
                     points: vec![],
                     visible: false,
@@ -709,6 +711,7 @@ mod tests {
             max: None,
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
+            display_name_template: None,
             options: PanelOptions::Graph(GraphOptions::default()),
             resolution: Default::default(),
         }

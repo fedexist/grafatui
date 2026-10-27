@@ -143,6 +143,7 @@ mod tests {
             max: None,
             autogrid: None,
             display: crate::ui::DisplayFormat::default(),
+            display_name_template: None,
             options: PanelOptions::Graph(GraphOptions::default()),
             resolution: Default::default(),
         }
@@ -154,6 +155,7 @@ mod tests {
         p.series.push(SeriesView {
             query_index: 0,
             name: "test".to_string(),
+            display_name: None,
             value: None,
             points: vec![(0.0, 10.0), (1.0, 20.0)],
             visible: true,
@@ -170,6 +172,7 @@ mod tests {
         p.series.push(SeriesView {
             query_index: 0,
             name: "test".to_string(),
+            display_name: None,
             value: None,
             points: vec![(0.0, 10.0), (1.0, f64::NAN), (2.0, 20.0)],
             visible: true,
@@ -186,6 +189,7 @@ mod tests {
         p.series.push(SeriesView {
             query_index: 0,
             name: "test".to_string(),
+            display_name: None,
             value: None,
             points: vec![(0.0, 10.0), (1.0, f64::INFINITY), (2.0, 20.0)],
             visible: true,
@@ -203,6 +207,7 @@ mod tests {
         p.series.push(SeriesView {
             query_index: 0,
             name: "test".to_string(),
+            display_name: None,
             value: None,
             points: vec![(0.0, 10.0), (1.0, 20.0)],
             visible: true,
@@ -222,6 +227,7 @@ mod tests {
         p.series.push(SeriesView {
             query_index: 0,
             name: "requests".to_string(),
+            display_name: None,
             value: None,
             points: vec![(0.0, 4.5), (1.0, 11_200.0)],
             visible: true,
@@ -240,6 +246,7 @@ mod tests {
         p.series.push(SeriesView {
             query_index: 0,
             name: "latency".to_string(),
+            display_name: None,
             value: None,
             points: vec![(0.0, 0.5), (1.0, 1.0)],
             visible: true,

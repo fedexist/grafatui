@@ -79,6 +79,8 @@ struct RawFieldConfigDefaults {
     decimals: Option<usize>,
     #[serde(rename = "noValue")]
     no_value: Option<String>,
+    #[serde(rename = "displayName")]
+    display_name: Option<String>,
     min: Option<f64>,
     max: Option<f64>,
     thresholds: Option<RawThresholds>,
@@ -301,6 +303,12 @@ fn normalize_classic_panel(
             unit: defaults.unit,
             decimals: defaults.decimals,
             no_value: defaults.no_value,
+            display_name_path: defaults
+                .display_name
+                .as_ref()
+                .filter(|name| !name.is_empty())
+                .map(|_| format!("{source_path}.fieldConfig.defaults.displayName")),
+            display_name: defaults.display_name,
             min: defaults.min,
             max: defaults.max,
             thresholds: defaults.thresholds.map(|thresholds| model::Thresholds {
