@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.1.19] - 2026-10-27
+
+### ⛰️  Features
+
+- Parse Grafana display-name templates ([22058dc](https://github.com/fedexist/grafatui/commit/22058dcfd6ad044ef41162f41f9fcad22852c479))
+- Import Grafana display-name defaults ([8697b6e](https://github.com/fedexist/grafatui/commit/8697b6e509576231d7d1770eb35afbb67ce050c1))
+- Keep display labels separate from series identity ([b0a671b](https://github.com/fedexist/grafatui/commit/b0a671bb22498bf646e3466d8bbdb364d51fa0c8))
+- Show imported display names in TUI and exports ([aed2761](https://github.com/fedexist/grafatui/commit/aed27612cd1bbf70946f8f6811d222ca1d8845ab))
+
+### 🐛 Bug Fixes
+
+- Show configured display name in stat panels ([30c3c94](https://github.com/fedexist/grafatui/commit/30c3c9477db0d39da29c8fe5594aa025c3313783))
+
+### 📚 Documentation
+
+- Refresh roadmap for released 0.1.18 and proposed 0.1.19 ([acfbd05](https://github.com/fedexist/grafatui/commit/acfbd05503c6e75924530ad7f1134c4fee45aeb4))
+
+
 ## [0.1.18] - 2026-10-22
 
 ### ⛰️  Features
